@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "pi:de661013-28cc-411d-a234-bb557b436c8c:c1060a9a-27d9-41f8-a5c4-0cb31f6b01a7:5c404fde0cd53f412999cacbf49dc323684cb6292abf7e991dd6e9c5e6fe095c",
+      "timestamp": "2026-09-20T07:58:52Z",
+      "runId": "run_81adbf47-fb19-4639-b603-67e8912d68e1",
+      "agentId": "de661013-28cc-411d-a234-bb557b436c8c",
+      "role": "worker",
+      "harness": "pi",
+      "model": "muse-code/muse-spark-1.3-contributor",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0
+    },
+    {
+      "id": "pi:d5f52fe5-7592-47e1-ad0e-3a391538866b:10db90e8-c1d7-410f-8f45-a70f009960ed:66bd379f637b91b1acc632b66104409803b0c5e3228a0e8c7db3d2de923fcf45",
+      "timestamp": "2026-09-20T10:36:12Z",
+      "runId": "run_81adbf47-fb19-4639-b603-67e8912d68e1",
+      "agentId": "d5f52fe5-7592-47e1-ad0e-3a391538866b",
+      "role": "worker",
+      "harness": "pi",
+      "model": "muse-code/muse-spark-1.3-contributor",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0
+    },
+    {
+      "id": "pi:f7d0ea39-9e46-403c-813b-16c15481ae5f:f5a4b3cd-ca6c-4531-a608-30c60bbc6677:ccc4557abc94686b5adac648519343b39f5fe5a19cf9bc953b956388555fecb4",
+      "timestamp": "2026-09-20T11:46:57Z",
+      "runId": "run_81adbf47-fb19-4639-b603-67e8912d68e1",
+      "agentId": "f7d0ea39-9e46-403c-813b-16c15481ae5f",
+      "role": "worker",
+      "harness": "pi",
+      "model": "muse-code/muse-spark-1.3-contributor",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0
+    },
+    {
+      "id": "pi:f8c3fef3-606b-41f0-a06b-4aac5510d2f1:d997256d-4d91-45a6-94f0-cda6478134fa:b9cce3fc458282fbd5de76e32abdfc25ac6c4b07851b7b1eabd5dd7c73233c43",
+      "timestamp": "2026-09-20T12:38:37Z",
+      "runId": "run_81adbf47-fb19-4639-b603-67e8912d68e1",
+      "agentId": "f8c3fef3-606b-41f0-a06b-4aac5510d2f1",
+      "role": "worker",
+      "harness": "pi",
+      "model": "muse-code/muse-spark-1.3-contributor",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0
+    }
+  ]
+}

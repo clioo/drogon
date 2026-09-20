@@ -1428,6 +1428,33 @@ impl Engine {
         Ok(json!({ "worktrees": worktrees }))
     }
 
+    /// Every other registered location, so a removal can refuse to take one
+    /// of them down with this one (see `refuse_nested_registrations`).
+    /// Projects count as well as worktrees: a folder project or a nested
+    /// repository registered in its own right is a card too, and losing its
+    /// files to a sibling's delete is the same harm.
+    fn other_registrations(
+        &self,
+        worktree_id: &str,
+        worktree_path: &str,
+    ) -> Result<Vec<String>, RpcError> {
+        let conn = self.db.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT path FROM worktrees WHERE id != ?1 \
+                 UNION SELECT path FROM projects WHERE path != ?2",
+            )
+            .map_err(error::from_sqlite)?;
+        let paths = stmt
+            .query_map(rusqlite::params![worktree_id, worktree_path], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(error::from_sqlite)?;
+        paths
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(error::from_sqlite)
+    }
+
     pub(super) fn do_worktree_remove(&self, params: &Value) -> Result<Value, RpcError> {
         let id = require_str(params, "id")?.to_string();
         let force = optional_bool(params, "force", false)?;
@@ -1443,41 +1470,78 @@ impl Engine {
             .map_err(error::from_sqlite)?
         };
         let Some((project_path, project_kind, worktree_path, workspace_id)) = row else {
+            // Deliberately before this call takes the workspace admission
+            // gate: `project.remove` takes that same write gate, and a
+            // thread that already holds it would deadlock the daemon.
             return self.remove_implicit_folder_worktree(&id);
         };
 
-        // Every other registered location, so the removal can refuse to take
-        // one of them down with this one (see `refuse_nested_registrations`).
-        // Projects count as well as worktrees: a folder project or a nested
-        // repository registered in its own right is a card too, and losing
-        // its files to a sibling's delete is the same harm.
-        let other_registrations: Vec<String> = {
-            let conn = self.db.lock().unwrap();
-            let mut stmt = conn
-                .prepare(
-                    "SELECT path FROM worktrees WHERE id != ?1 \
-                     UNION SELECT path FROM projects WHERE path != ?2",
-                )
-                .map_err(error::from_sqlite)?;
-            let paths = stmt
-                .query_map(rusqlite::params![id, worktree_path], |r| {
-                    r.get::<_, String>(0)
-                })
-                .map_err(error::from_sqlite)?;
-            paths
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(error::from_sqlite)?
+        // The same admission gate `project.remove` holds: while this call
+        // settles a workspace's terminals and takes its checkout apart, no
+        // session may be admitted into it, or the delete would race a
+        // brand-new PTY into the directory it is about to remove. It is
+        // taken here rather than at the top of the call because the
+        // implicit-folder branch above delegates to `project.remove`, which
+        // takes this same write gate — one thread cannot hold it twice.
+        let _workspace_admission = self.workspace_lifecycle_gate.write().unwrap();
+
+        // Refuse before settling anything. This check is pure, and a delete
+        // that was always going to refuse must not first cost an agent the
+        // terminal it was working in.
+        if project_kind != "folder" {
+            refuse_nested_registrations(
+                Path::new(&worktree_path),
+                &self.other_registrations(&id, &worktree_path)?,
+            )?;
+        }
+
+        // Issue #621: the checkout is about to be pulled out from under
+        // whatever runs in it, and a folder section's registration out from
+        // under its terminals. `git worktree remove` looks at the index, not
+        // at processes, so the sessions are this call's to answer for.
+        //
+        // Scope: a git checkout takes every Workspace registered inside it
+        // with it, so all of their terminals are at stake — including the
+        // ones `refuse_nested_registrations` cannot see, which reads
+        // `worktrees` and `projects` while a plain `workspace.register` (or
+        // a legacy row) has neither. A folder section deletes no files —
+        // only its own registration goes — so it answers for its own row
+        // alone and never reaches into the Project's.
+        let scope = if project_kind == "folder" {
+            crate::workspace_session_settle::DeletionScope::registration_only(&workspace_id)
+        } else {
+            let mut scope = self.deletion_scope_for(Path::new(&worktree_path))?;
+            if !scope.workspace_ids.contains(&workspace_id) {
+                scope.workspace_ids.push(workspace_id.clone());
+            }
+            scope
         };
+        // Force stops what it can first; then one rule judges both paths.
+        // Whatever is still unsettled refuses the delete and says which case
+        // it is, so `removed: true` means every terminal in that directory
+        // was observed to exit — never that this process lost track of one.
+        if force {
+            self.settle_workspace_sessions(&scope)?;
+        }
+        if let Some(refusal) = self.workspace_session_evidence(&scope)?.refusal(force) {
+            return Err(refusal);
+        }
+
         // A folder Workspace section (issue #579) has no git worktree to
         // remove — its path is the folder itself, shared with the project.
         // Removing it only unregisters this Workspace row; the folder and
         // its files are never touched.
         if project_kind != "folder" {
+            // Re-read rather than reuse the list from before the settle:
+            // `project.add`, `worktree.create` and `workspace.register` take
+            // no workspace gate, so a registration made while terminals were
+            // being stopped would otherwise lose its files to this delete
+            // and leave its rows dangling.
             remove_worktree_checkout(
                 Path::new(&project_path),
                 &worktree_path,
                 force,
-                &other_registrations,
+                &self.other_registrations(&id, &worktree_path)?,
             )?;
         }
 
@@ -1845,5 +1909,55 @@ mod tests {
             elsewhere.join("keep.txt").exists(),
             "whatever it pointed at is left alone"
         );
+    }
+
+    /// Issue #621: settling a workspace's terminals is worth nothing if a
+    /// session can be admitted into it a moment later, so the removal takes
+    /// the same exclusive admission gate `project.remove` holds, before it
+    /// touches registration or files. A folder section is the probe: it
+    /// reaches the gate with no git repository in play.
+    #[test]
+    fn removal_waits_for_exclusive_workspace_admission() {
+        use std::sync::{Arc, mpsc};
+        use std::time::Duration;
+
+        let data = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let engine = Arc::new(Engine::open(data.path()).unwrap());
+        let project = engine
+            .do_project_add(&json!({"path": folder.path().to_string_lossy()}))
+            .unwrap();
+        let section = engine
+            .do_worktree_create(&json!({"projectId": project["id"], "name": "section"}))
+            .unwrap();
+        let section_id = section["id"].as_str().unwrap().to_string();
+
+        let admitted = engine.workspace_lifecycle_gate.read().unwrap();
+        let worker = engine.clone();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            done_tx
+                .send(worker.do_worktree_remove(&json!({"id": section_id})))
+                .unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            matches!(
+                done_rx.recv_timeout(Duration::from_millis(100)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ),
+            "removal must not proceed while a session admission holds the gate"
+        );
+        drop(admitted);
+        assert_eq!(
+            done_rx
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+                .unwrap()["removed"],
+            json!(true)
+        );
+        thread.join().unwrap();
     }
 }

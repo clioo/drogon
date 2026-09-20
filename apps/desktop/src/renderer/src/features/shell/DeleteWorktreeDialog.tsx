@@ -25,6 +25,10 @@ import {
 import { getDeleteWorktreeDialogCopy } from "./delete-worktree-dialog-copy";
 import { getDeleteWorktreeDirtyChangeCount } from "./delete-worktree-dirty-change-counts";
 import { showDeleteWorktreeFailureToast } from "./delete-worktree-failure-toast";
+import {
+  canForceDeleteAfterRemovalFailure,
+  classifyWorktreeRemovalFailure,
+} from "./delete-worktree-toast";
 import { persistDeleteWorktreeConfirmSkipPreference } from "./delete-worktree-preference-toast";
 import { useWorktreeGitStatus } from "./use-worktree-git-status";
 import { worktreeDisplayName } from "./project-adapter";
@@ -71,25 +75,46 @@ export function DeleteWorktreeDialog({
     entryCount: status ? status.entries.length : null,
   });
 
-  const submit = async () => {
+  // `forced` is passed explicitly rather than read from the checkbox: the
+  // toast's Force Delete recovery re-submits before React has re-rendered
+  // the box it never touched.
+  const submit = async (forced: boolean = force) => {
     setSending(true);
     setError("");
     try {
       // The preference is a one-shot dialog intent for the primary
       // confirmation only — a force recovery never persists it.
-      if (dontAskAgain && !force)
+      if (dontAskAgain && !forced)
         persistDeleteWorktreeConfirmSkipPreference({
           persist: () => writeSkipDeleteWorktreeConfirm(true),
         });
-      const failure = await onSubmit(force);
+      const failure = await onSubmit(forced);
       if (failure) {
         setError(failure);
+        // Issue #621: the daemon refuses to delete a workspace whose
+        // terminals it has not settled. Both refusals get the
+        // unstopped-pty copy, but only a terminal Drogon still holds can
+        // be cleared by forcing, so only that one gets the button; every
+        // other failure keeps the plain destructive toast.
+        const forceDeleteReason = classifyWorktreeRemovalFailure(
+          failure,
+          forced,
+        );
+        const canForceDelete = canForceDeleteAfterRemovalFailure(
+          failure,
+          forced,
+        );
         showDeleteWorktreeFailureToast({
           error: failure,
-          canForceDelete: false,
-          forceDeleteReason: null,
+          canForceDelete,
+          forceDeleteReason,
           worktreeId: worktree.id,
           worktreeName: name,
+          onForceDelete: canForceDelete
+            ? () => {
+                void submit(true);
+              }
+            : undefined,
         });
       }
     } finally {
@@ -153,7 +178,8 @@ export function DeleteWorktreeDialog({
                 disabled={busy}
                 onChange={(event) => setForce(event.target.checked)}
               />
-              Force: remove even with uncommitted changes
+              Force: remove even with uncommitted changes or running
+              terminals
             </label>
           )}
           {error && (

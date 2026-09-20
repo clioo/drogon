@@ -18,13 +18,25 @@ export function DeleteWorktreeDialogFooter({
   onDelete: () => void;
   confirmButtonRef: Ref<HTMLButtonElement>;
 }) {
+  // Both rows are explicitly `type="button"`. A bare <button> inside the
+  // dialog's <form> defaults to `type="submit"`, so every click ran its own
+  // onClick *and* the form's onSubmit: Delete sent two `worktree.remove`
+  // calls (the second answering `not_found` over the first one's success),
+  // and Cancel submitted the delete it exists to decline. The form keeps its
+  // onSubmit for the keyboard path.
   return (
     <>
-      <Button variant="outline" onClick={onCancel} disabled={isDeleting}>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={onCancel}
+        disabled={isDeleting}
+      >
         Cancel
       </Button>
       <Button
         ref={confirmButtonRef}
+        type="button"
         variant="destructive"
         onClick={onDelete}
         disabled={isDeleting}

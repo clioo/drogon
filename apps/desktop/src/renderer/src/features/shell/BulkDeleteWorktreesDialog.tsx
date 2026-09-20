@@ -130,7 +130,7 @@ export function BulkDeleteWorktreesDialog({
               disabled={busy}
               onChange={(event) => setForce(event.target.checked)}
             />
-            Force: remove even with uncommitted changes
+            Force: remove even with uncommitted changes or running terminals
           </label>
           {failures.length > 0 && (
             <div className="shell-form-error shell-bulk-delete-failures" role="alert">
