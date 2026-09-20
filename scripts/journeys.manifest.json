@@ -1,134 +1,199 @@
-[
-  {
-    "script": "scripts/accept-bot-monitors.mjs",
-    "requires": "pi",
-    "timeoutMs": 1500000,
-    "note": "SKIPPED: a Bot's own monitor and automation act end to end; needs real pi/dgx-spark inference plus two minute-scale scheduler ticks, unavailable under the no-real-inference rule on this host."
-  },
-  {
-    "script": "scripts/accept-bot-graph-sidebar.mjs",
-    "requires": null,
-    "timeoutMs": 600000,
-    "note": "Graph sidebar renders the live main beside workers, contact loss reads unverifiable, recovery preserves collapse; zero harness start/stop side effects."
-  },
-  {
-    "script": "scripts/accept-bot-open-session-focus.mjs",
-    "requires": null,
-    "timeoutMs": 1200000,
-    "note": "With a Bot session already open, Open session focuses it instead of dispatching a duplicate; repeated clicks keep one conversation."
-  },
-  {
-    "script": "scripts/accept-bot-session-honesty.mjs",
-    "requires": null,
-    "timeoutMs": 1500000,
-    "note": "Failed resumes never claim restoration, missing homes are recreated with notice, races open one session, dead links open fresh; the unverifiable Bot row renders not-reporting, never exit."
-  },
-  {
-    "script": "scripts/accept-bot-session-restart.mjs",
-    "requires": null,
-    "timeoutMs": 1500000,
-    "note": "A Bot session boots, accepts a turn, and boots again after an app relaunch; daemon recovery reads unverifiable and Stop really exits the process."
-  },
-  {
-    "script": "scripts/accept-bot-session-resume.mjs",
-    "requires": null,
-    "timeoutMs": 1200000,
-    "note": "First-click focus lands on the live Bot session, a closed session resumes through the harness --continue path, and the Chats row shows the agent avatar and name."
-  },
-  {
-    "script": "scripts/accept-session-resume-by-id.mjs",
-    "requires": null,
-    "timeoutMs": 1500000,
-    "note": "A SIGKILLed daemon's workspace session offers Resume and returns the same provider conversation with --resume <id>; the Bot twin rotates its durable link and reopens the same conversation."
-  },
-  {
-    "script": "scripts/accept-workspace-session-restart.mjs",
-    "requires": null,
-    "timeoutMs": 900000,
-    "note": "A recovered workspace session never renders a blank live-looking pane: the row loses its live affordance, the overlay offers Restart/Close, and Restart yields a usable shell."
-  },
-  {
-    "script": "scripts/accept-sidebar-agent-tree.mjs",
-    "requires": null,
-    "timeoutMs": 1200000,
-    "note": "An agent spawned in a shell nests three levels deep in the sidebar, collapse persists across reload, and the root row reads the agent, not the shell."
-  },
-  {
-    "script": "scripts/accept-subagent-tab-groups.mjs",
-    "requires": null,
-    "timeoutMs": 1200000,
-    "note": "Fan-out subagents group under their leader, one click folds the group, typed input reaches only the leader while folded, and the fold survives reload."
-  },
-  {
-    "script": "scripts/accept-preload-close-guard.mjs",
-    "requires": null,
-    "timeoutMs": 300000,
-    "note": "Main-world window.close guard is installed, non-native, and irreversible over live CDP against the dev build (DROGON_BACKGROUND_WINDOW=1, disposable data dir)."
-  },
-  {
-    "script": "scripts/accept-meetings.mjs",
-    "requires": null,
-    "timeoutMs": 600000,
-    "note": "Meetings section over live CDP against the dev build: missing/empty/populated states, 320-transcript corpus, search, filters, extraction via fixture pi, read-only guarantee, light/dark sweeps."
-  },
-  {
-    "script": "scripts/accept-repro-demo.mjs",
-    "requires": null,
-    "timeoutMs": 3600000,
-    "note": "Settings Demo reproducible executed twice end to end against the dev build with fixture harness (no model inference): bot session, work graph, parallel workers, adversarial rounds, cost reporting."
-  },
-  {
-    "script": "scripts/accept-backup-restore.mjs",
-    "requires": null,
-    "timeoutMs": 1200000,
-    "note": "Pre-migration backup restore against a locally packaged ad-hoc bundle (node scripts/package-desktop.mjs): lock refusal, restore overlay light/dark, confirmation gate, relaunch healthy, CLI restore. All owned processes verified exited."
-  },
-  {
-    "script": "scripts/accept-orchestration-e2e.mjs",
-    "requires": null,
-    "timeoutMs": 600000,
-    "note": "Fixture pi drives the real daemon end to end: default policy dispatch, exact provider/model propagation, durable worker_done with result metadata, retry failover, ask/resume, and outcome-less exit discipline."
-  },
-  {
-    "script": "scripts/accept-orchestrator.mjs",
-    "requires": null,
-    "timeoutMs": 900000,
-    "note": "Orchestrator canvas on the real app over CDP: honest disabled state, live Main agent node, delegate brief write-through, Agent telemetry/Usage ledgers, and a real durable run that stops without fabricating success."
-  },
-  {
-    "script": "scripts/accept-orchestrator-modes.mjs",
-    "requires": "pi",
-    "timeoutMs": 1200000,
-    "note": "SKIPPED: the three execution modes drive the real pi harness on the cheap model; needs real model inference, forbidden from validation on this host."
-  },
-  {
-    "script": "scripts/accept-durable-orchestrator.mjs",
-    "requires": null,
-    "timeoutMs": 900000,
-    "note": "Work Graph roles run as native sessions on fixture harnesses: main-only pass, findings-review-retest loop, fallback exhaustion, and reload without duplicate launches."
-  },
-  {
-    "script": "scripts/accept-mentu-run-delegation.mjs",
-    "requires": null,
-    "timeoutMs": 900000,
-    "note": "Recipe delegation on the surviving path: unapproved content refuses, hash-bound approval mints per run, live row carries step outcome/output, settle to succeeded, desktop confirms Work Graph open. Needs the pinned mentu-recipes runtime provisioned (gitignored)."
-  },
-  {
-    "script": "scripts/accept-live-child-crash.mjs",
-    "requires": null,
-    "timeoutMs": 600000,
-    "note": "A provably live PTY child survives daemon SIGKILL: the restarted daemon labels the prior-live session unverifiable, renews identity, refuses respawn, and replays the historic receipt verbatim."
-  },
-  {
-    "script": "scripts/accept-cli-worktree-lineage.mjs",
-    "requires": null,
-    "timeoutMs": 900000,
-    "note": "A worktree created by drogon-cli inside a session nests under that session's worktree in the sidebar; nesting survives reload and no-parent stays top-level."
-  },
-  {
-    "script": "scripts/accept-worker-settle-releases-pty.mjs",
-    "requires": null,
-    "timeoutMs": 300000,
-    "note": "A worker that reports worker_done but keeps running reads succeeded-but-live; worker-stop refuses attempt_settled without signalling, and worker-release reaps the PTY so none stays live."
-  }
-]
+{
+  "version": 1,
+  "journeys": [
+    {
+      "name": "core-cli",
+      "script": "scripts/accept-core-cli.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 600000,
+      "note": "Daemon plus CLI over the real transport: status, auth, sessions, PTY and crash recovery (18 checks, ~10s)."
+    },
+    {
+      "name": "desktop-files",
+      "script": "scripts/accept-desktop.mjs",
+      "args": [
+        "--files"
+      ],
+      "requires": null,
+      "timeoutMs": 1200000,
+      "note": "Rendered desktop over CDP against the dev Electron build: workspace/files/editor-keyboard/tabs/orchestrator journeys."
+    },
+    {
+      "name": "bot-monitors",
+      "script": "scripts/accept-bot-monitors.mjs",
+      "args": [],
+      "requires": "pi",
+      "timeoutMs": 1500000,
+      "note": "SKIPPED: a Bot's own monitor and automation act end to end; needs real pi/dgx-spark inference plus two minute-scale scheduler ticks, unavailable under the no-real-inference rule on this host."
+    },
+    {
+      "name": "bot-graph-sidebar",
+      "script": "scripts/accept-bot-graph-sidebar.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 600000,
+      "note": "Graph sidebar renders the live main beside workers, contact loss reads unverifiable, recovery preserves collapse; zero harness start/stop side effects."
+    },
+    {
+      "name": "bot-open-session-focus",
+      "script": "scripts/accept-bot-open-session-focus.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 1200000,
+      "note": "With a Bot session already open, Open session focuses it instead of dispatching a duplicate; repeated clicks keep one conversation."
+    },
+    {
+      "name": "bot-session-honesty",
+      "script": "scripts/accept-bot-session-honesty.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 1500000,
+      "note": "Failed resumes never claim restoration, missing homes are recreated with notice, races open one session, dead links open fresh; the unverifiable Bot row renders not-reporting, never exit."
+    },
+    {
+      "name": "bot-session-restart",
+      "script": "scripts/accept-bot-session-restart.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 1500000,
+      "note": "A Bot session boots, accepts a turn, and boots again after an app relaunch; daemon recovery reads unverifiable and Stop really exits the process."
+    },
+    {
+      "name": "bot-session-resume",
+      "script": "scripts/accept-bot-session-resume.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 1200000,
+      "note": "First-click focus lands on the live Bot session, a closed session resumes through the harness --continue path, and the Chats row shows the agent avatar and name."
+    },
+    {
+      "name": "session-resume-by-id",
+      "script": "scripts/accept-session-resume-by-id.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 1500000,
+      "note": "A SIGKILLed daemon's workspace session offers Resume and returns the same provider conversation with --resume <id>; the Bot twin rotates its durable link and reopens the same conversation."
+    },
+    {
+      "name": "workspace-session-restart",
+      "script": "scripts/accept-workspace-session-restart.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 900000,
+      "note": "A recovered workspace session never renders a blank live-looking pane: the row loses its live affordance, the overlay offers Restart/Close, and Restart yields a usable shell."
+    },
+    {
+      "name": "sidebar-agent-tree",
+      "script": "scripts/accept-sidebar-agent-tree.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 1200000,
+      "note": "An agent spawned in a shell nests three levels deep in the sidebar, collapse persists across reload, and the root row reads the agent, not the shell."
+    },
+    {
+      "name": "subagent-tab-groups",
+      "script": "scripts/accept-subagent-tab-groups.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 1200000,
+      "note": "Fan-out subagents group under their leader, one click folds the group, typed input reaches only the leader while folded, and the fold survives reload."
+    },
+    {
+      "name": "preload-close-guard",
+      "script": "scripts/accept-preload-close-guard.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 300000,
+      "note": "Main-world window.close guard is installed, non-native, and irreversible over live CDP against the dev build (DROGON_BACKGROUND_WINDOW=1, disposable data dir)."
+    },
+    {
+      "name": "meetings",
+      "script": "scripts/accept-meetings.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 600000,
+      "note": "Meetings section over live CDP against the dev build: missing/empty/populated states, 320-transcript corpus, search, filters, extraction via fixture pi, read-only guarantee, light/dark sweeps."
+    },
+    {
+      "name": "repro-demo",
+      "script": "scripts/accept-repro-demo.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 3600000,
+      "note": "Settings Demo reproducible executed twice end to end against the dev build with fixture harness (no model inference): bot session, work graph, parallel workers, adversarial rounds, cost reporting."
+    },
+    {
+      "name": "backup-restore",
+      "script": "scripts/accept-backup-restore.mjs",
+      "args": [],
+      "requires": "bundle",
+      "timeoutMs": 1200000,
+      "note": "Pre-migration backup restore against a locally packaged ad-hoc bundle (node scripts/package-desktop.mjs): lock refusal, restore overlay light/dark, confirmation gate, relaunch healthy, CLI restore. All owned processes verified exited."
+    },
+    {
+      "name": "orchestration-e2e",
+      "script": "scripts/accept-orchestration-e2e.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 600000,
+      "note": "Fixture pi drives the real daemon end to end: default policy dispatch, exact provider/model propagation, durable worker_done with result metadata, retry failover, ask/resume, and outcome-less exit discipline."
+    },
+    {
+      "name": "orchestrator",
+      "script": "scripts/accept-orchestrator.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 900000,
+      "note": "Orchestrator canvas on the real app over CDP: honest disabled state, live Main agent node, delegate brief write-through, Agent telemetry/Usage ledgers, and a real durable run that stops without fabricating success."
+    },
+    {
+      "name": "orchestrator-modes",
+      "script": "scripts/accept-orchestrator-modes.mjs",
+      "args": [],
+      "requires": "pi",
+      "timeoutMs": 1200000,
+      "note": "SKIPPED: the three execution modes drive the real pi harness on the cheap model; needs real model inference, forbidden from validation on this host."
+    },
+    {
+      "name": "durable-orchestrator",
+      "script": "scripts/accept-durable-orchestrator.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 900000,
+      "note": "Work Graph roles run as native sessions on fixture harnesses: main-only pass, findings-review-retest loop, fallback exhaustion, and reload without duplicate launches."
+    },
+    {
+      "name": "mentu-run-delegation",
+      "script": "scripts/accept-mentu-run-delegation.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 900000,
+      "note": "Recipe delegation on the surviving path: unapproved content refuses, hash-bound approval mints per run, live row carries step outcome/output, settle to succeeded, desktop confirms Work Graph open. Needs the pinned mentu-recipes runtime provisioned (gitignored)."
+    },
+    {
+      "name": "live-child-crash",
+      "script": "scripts/accept-live-child-crash.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 600000,
+      "note": "A provably live PTY child survives daemon SIGKILL: the restarted daemon labels the prior-live session unverifiable, renews identity, refuses respawn, and replays the historic receipt verbatim."
+    },
+    {
+      "name": "cli-worktree-lineage",
+      "script": "scripts/accept-cli-worktree-lineage.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 900000,
+      "note": "A worktree created by drogon-cli inside a session nests under that session's worktree in the sidebar; nesting survives reload and no-parent stays top-level."
+    },
+    {
+      "name": "worker-settle-releases-pty",
+      "script": "scripts/accept-worker-settle-releases-pty.mjs",
+      "args": [],
+      "requires": null,
+      "timeoutMs": 300000,
+      "note": "A worker that reports worker_done but keeps running reads succeeded-but-live; worker-stop refuses attempt_settled without signalling, and worker-release reaps the PTY so none stays live."
+    }
+  ]
+}
