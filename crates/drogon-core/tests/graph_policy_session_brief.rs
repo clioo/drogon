@@ -214,10 +214,10 @@ fn delegate_toggle_reaches_the_next_sessions_own_brief() {
         "the delegate instruction must name the native orchestration verbs: {with_delegate_on:?}"
     );
     assert!(
-        with_delegate_on.contains("Delegation is available, not mandatory")
-            && with_delegate_on.contains("`gh` commands")
-            && with_delegate_on.contains("may make them yourself"),
-        "Delegate mode must keep simple repository work and user-requested edits direct: {with_delegate_on:?}"
+        with_delegate_on.contains("Lead only")
+            && with_delegate_on.contains("ordinary `gh` commands")
+            && with_delegate_on.contains("Never implement their assigned product work yourself"),
+        "Delegate mode must keep coordination lookups direct while delegating implementation: {with_delegate_on:?}"
     );
     fx.set_delegate(false);
     let with_delegate_off = fx.launch_and_capture();
