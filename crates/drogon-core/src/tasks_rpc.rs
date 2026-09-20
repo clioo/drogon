@@ -355,6 +355,11 @@ fn list_argv(repo: &str, state: TaskIssueState, limit: u64) -> Vec<String> {
     ]
 }
 
+/// The one `--json` field list both `gh pr` calls share. `state` is part of
+/// it: `gh` returns only the fields it is asked for, and a pull whose
+/// lifecycle never arrives is indistinguishable from an open one.
+const PR_JSON_FIELDS: &str = "number,title,url,state,author,assignees,reviewDecision,statusCheckRollup,mergeable,isDraft,headRefName,baseRefName,updatedAt,labels";
+
 /// `gh pr list` argv for pulls mode. The `--state` flag accepts the same
 /// open/closed/all spellings, so the shared state filter reaches `gh`
 /// unchanged; `gh` has no total count, hence the same fetch-one-extra
@@ -370,8 +375,7 @@ fn pr_list_argv(repo: &str, state: TaskIssueState, limit: u64) -> Vec<String> {
         "--limit".to_string(),
         limit.to_string(),
         "--json".to_string(),
-        "number,title,url,author,assignees,reviewDecision,statusCheckRollup,mergeable,isDraft,headRefName,baseRefName,updatedAt,labels"
-            .to_string(),
+        PR_JSON_FIELDS.to_string(),
     ]
 }
 
@@ -383,8 +387,7 @@ fn pr_view_argv(repo: &str, number: u64) -> Vec<String> {
         "--repo".to_string(),
         repo.to_string(),
         "--json".to_string(),
-        "number,title,url,author,assignees,reviewDecision,statusCheckRollup,mergeable,isDraft,headRefName,baseRefName,updatedAt,labels"
-            .to_string(),
+        PR_JSON_FIELDS.to_string(),
     ]
 }
 

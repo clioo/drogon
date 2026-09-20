@@ -174,6 +174,41 @@ fn fake_gh_list_view() -> String {
     )
 }
 
+/// One pull per lifecycle `gh` can report, plus the merged one for the
+/// direct `pr view` lookup. The states a missing `--json state` field used
+/// to erase (everything arrived as OPEN, or DRAFT when `isDraft` was set).
+const PR_LIFECYCLE_JSON: &str = r#"[
+  {"number":12,"title":"Already merged","state":"MERGED","isDraft":false,"labels":[],"assignees":[],"updatedAt":"2026-09-06T14:00:00Z","url":"https://github.com/example/repo/pull/12"},
+  {"number":13,"title":"Closed unmerged","state":"CLOSED","isDraft":false,"labels":[],"assignees":[],"updatedAt":"2026-09-06T13:00:00Z","url":"https://github.com/example/repo/pull/13"},
+  {"number":14,"title":"Still open","state":"OPEN","isDraft":false,"labels":[],"assignees":[],"updatedAt":"2026-09-06T12:00:00Z","url":"https://github.com/example/repo/pull/14"},
+  {"number":15,"title":"Still a draft","state":"OPEN","isDraft":true,"labels":[],"assignees":[],"updatedAt":"2026-09-06T11:00:00Z","url":"https://github.com/example/repo/pull/15"}
+]"#;
+
+const PR_LIFECYCLE_VIEW_12: &str = r#"{"number":12,"title":"Already merged","state":"MERGED","isDraft":false,"labels":[],"assignees":[],"updatedAt":"2026-09-06T14:00:00Z","url":"https://github.com/example/repo/pull/12"}"#;
+
+/// A fake `gh` serving the four-lifecycle pull list and the merged pull for
+/// `pr view 12`, recording its last argv like the other fakes.
+fn fake_gh_pull_lifecycle() -> String {
+    format!(
+        "#!/bin/sh\necho \"$*\" > \"$PWD/.gh-argv-last\"\n\
+         if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then\ncat <<'EOF'\n{PR_LIFECYCLE_JSON}\nEOF\n\
+         elif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ] && [ \"$3\" = \"12\" ]; then\ncat <<'EOF'\n{PR_LIFECYCLE_VIEW_12}\nEOF\n\
+         else\necho 'could not resolve' >&2\nexit 1\nfi\n"
+    )
+}
+
+/// The `--json` field list a recorded argv asked `gh` for.
+fn requested_json_fields(argv: &str) -> Vec<&str> {
+    argv.split("--json ")
+        .nth(1)
+        .unwrap_or_default()
+        .split(' ')
+        .next()
+        .unwrap_or_default()
+        .split(',')
+        .collect()
+}
+
 /// A fake `gh` whose `issue list` honors `--limit N` and emits N synthetic
 /// issues (newest first: numbers 100..1) so paging windows and the
 /// fetch-one-extra `hasNextPage` probe are exercised end to end. `pr list`
@@ -537,6 +572,63 @@ fn pulls_list_qualifiers_filter_on_pr_fields() {
 }
 
 #[test]
+fn pulls_report_the_lifecycle_gh_reports_and_ask_for_it() {
+    let fx = Fixture::new(
+        Some("https://github.com/example/repo.git"),
+        Some(&fake_gh_pull_lifecycle()),
+    );
+    let listed = ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id, "mode": "pulls", "state": "all"}),
+    );
+    let states = listed["pulls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pull| {
+            (
+                pull["number"].as_u64().unwrap(),
+                pull["state"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        states,
+        vec![
+            (12, "merged".to_string()),
+            (13, "closed".to_string()),
+            (14, "open".to_string()),
+            (15, "draft".to_string()),
+        ],
+        "a merged or closed pull must report its real lifecycle, not OPEN"
+    );
+    let list_argv = fx.last_argv();
+    assert!(
+        requested_json_fields(&list_argv).contains(&"state"),
+        "pr list must ask gh for state, got: {list_argv}"
+    );
+
+    // The direct `#12` lookup rides `pr view`, which must ask for the same
+    // field -- the composer's GitHub source rows read its state too.
+    let shown = ok(
+        &fx.engine,
+        "tasks.show",
+        json!({"projectId": fx.project_id, "number": 12, "mode": "pulls"}),
+    );
+    assert_eq!(shown["pull"]["state"], "merged");
+    let view_argv = fx.last_argv();
+    assert!(
+        view_argv.contains("pr view 12"),
+        "the direct lookup must ride pr view, got: {view_argv}"
+    );
+    assert!(
+        requested_json_fields(&view_argv).contains(&"state"),
+        "pr view must ask gh for state, got: {view_argv}"
+    );
+}
+
+#[test]
 fn show_returns_the_issue_body() {
     let fx = Fixture::new(
         Some("git@github.com:example/repo.git"),
@@ -746,6 +838,11 @@ fn pulls_list_returns_prs_with_rollup_draft_and_empty_issues() {
             && argv.contains("--repo example/repo")
             && argv.contains("--state open"),
         "core must derive pr list --repo/--state, got: {argv}"
+    );
+    assert!(
+        requested_json_fields(&argv).contains(&"state"),
+        "gh returns only the fields it is asked for: without state in --json \
+         every pull arrives as OPEN, got: {argv}"
     );
 
     let filtered = ok(

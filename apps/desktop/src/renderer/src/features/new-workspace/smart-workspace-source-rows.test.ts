@@ -3,8 +3,12 @@ import {
   buildSmartWorkspaceSourceRows,
   getVisibleBranchResults,
   getVisibleHeldProviderResults,
+  issueToWorkItem,
+  pullToWorkItem,
   shouldHoldSourceResultsForQuery,
+  toGitHubWorkItem,
 } from "./smart-workspace-source-rows";
+import * as sourceModel from "./smart-workspace-source-model";
 import { parseGitHubIssueOrPRLink, parseGitHubIssueOrPRNumber } from "./smart-workspace-github-links";
 import { slugifyForWorkspaceName } from "./smart-workspace-composer";
 
@@ -134,6 +138,17 @@ describe("smart workspace source rows (the fork's row model)", () => {
         value: "",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("smart workspace source rows: the field's GitHub surface stays here", () => {
+  test("the row module re-exports the work item adapters its consumers import", () => {
+    // The work item and its daemon adapters moved to their own module; the
+    // row module stays the import path the composer, the field and the
+    // search hook already use.
+    expect(toGitHubWorkItem).toBe(sourceModel.toGitHubWorkItem);
+    expect(issueToWorkItem).toBe(sourceModel.issueToWorkItem);
+    expect(pullToWorkItem).toBe(sourceModel.pullToWorkItem);
   });
 });
 
