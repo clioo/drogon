@@ -957,7 +957,7 @@ pub enum WorktreeAction {
         #[arg(long, value_name = "ID")]
         project: String,
     },
-    /// Remove a worktree; refuses a dirty checkout unless --force
+    /// Remove a worktree; refuses a dirty, locked or unregistered checkout unless --force
     #[command(
         args_override_self = true,
         override_usage = "drogon-cli worktree rm <ID> [--force]\nValid flags: --data-dir, --force, --help, --json, --request-id, --retry-request"

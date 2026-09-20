@@ -43,6 +43,16 @@ fn err_code(engine: &Engine, method: &str, request_id: &str, params: Value) -> S
     response.error.unwrap().code
 }
 
+fn err_message(engine: &Engine, method: &str, request_id: &str, params: Value) -> String {
+    let response = engine.dispatch(req(method, request_id, params));
+    assert!(
+        !response.ok,
+        "expected error for {method}, got {:?}",
+        response.result
+    );
+    response.error.unwrap().message
+}
+
 fn wait_for<F: FnMut() -> bool>(mut pred: F, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
@@ -517,10 +527,11 @@ fn worktree_remove_refuses_a_dirty_checkout_unless_forced() {
     )
     .unwrap();
 
-    assert_eq!(
-        err_code(&engine, "worktree.remove", "w2", json!({"id": id})),
-        "io_error",
-        "git worktree remove refuses a dirty checkout without --force"
+    let refusal = err_message(&engine, "worktree.remove", "w2", json!({"id": id}));
+    assert!(
+        refusal.contains("use --force to delete it"),
+        "git worktree remove refuses a dirty checkout without --force, in its \
+         own words -- got: {refusal}"
     );
     ok(
         &engine,
@@ -531,6 +542,694 @@ fn worktree_remove_refuses_a_dirty_checkout_unless_forced() {
     assert!(
         !Path::new(path).exists(),
         "forced remove actually removes the checkout"
+    );
+}
+
+// --- Force delete covers what git alone will not (#604) ---------------------
+
+/// Every state below leaves `worktree.remove` the only way a user can retire
+/// the card, so a successful removal has to leave no row behind either.
+fn assert_worktree_gone(engine: &Engine, project_id: &str, worktree_id: &str, request_id: &str) {
+    let listed = ok(
+        engine,
+        "worktree.list",
+        request_id,
+        json!({"projectId": project_id}),
+    );
+    assert!(
+        !listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["id"] == worktree_id),
+        "the removed workspace must not survive in worktree.list"
+    );
+}
+
+#[test]
+fn worktree_remove_forces_a_git_locked_checkout() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let wt = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "locked"}),
+    );
+    let id = wt["id"].as_str().unwrap().to_string();
+    let path = wt["path"].as_str().unwrap().to_string();
+    git(repo.path(), &["worktree", "lock", &path]);
+
+    assert_eq!(
+        err_code(&engine, "worktree.remove", "w2", json!({"id": id})),
+        "io_error",
+        "git refuses a locked working tree when nothing was forced"
+    );
+    // git demands `remove -f -f` here: before #604 the single --force Drogon
+    // sent made the Force checkbox unable to delete a locked workspace at all.
+    ok(
+        &engine,
+        "worktree.remove",
+        "w3",
+        json!({"id": id, "force": true}),
+    );
+    assert!(
+        !Path::new(&path).exists(),
+        "forced remove deletes a locked checkout"
+    );
+    assert_worktree_gone(&engine, &project_id, &id, "w4");
+}
+
+#[test]
+fn worktree_remove_forces_a_checkout_git_no_longer_registers() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let wt = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "orphan"}),
+    );
+    let id = wt["id"].as_str().unwrap().to_string();
+    let path = wt["path"].as_str().unwrap().to_string();
+
+    // The state #604 was filed from: git's admin entry is gone (pruned while
+    // the directory was elsewhere) but the checkout is still on disk, so
+    // `git worktree remove` dies "is not a working tree" however hard it is
+    // forced and the workspace could never be deleted from Drogon at all.
+    let stashed = format!("{path}.stashed");
+    std::fs::rename(&path, &stashed).unwrap();
+    git(repo.path(), &["worktree", "prune"]);
+    std::fs::rename(&stashed, &path).unwrap();
+    assert!(Path::new(&path).exists());
+
+    let refusal = err_message(&engine, "worktree.remove", "w2", json!({"id": id}));
+    assert!(
+        refusal.contains("git no longer registers a working tree") && refusal.contains("Use Force"),
+        "an unregistered checkout is refused with copy the user can act on, \
+         not git's useless fatal -- got: {refusal}"
+    );
+    assert!(
+        Path::new(&path).exists(),
+        "the refusal leaves the directory untouched"
+    );
+
+    ok(
+        &engine,
+        "worktree.remove",
+        "w3",
+        json!({"id": id, "force": true}),
+    );
+    assert!(
+        !Path::new(&path).exists(),
+        "force deletes the orphaned directory git had forgotten"
+    );
+    assert_worktree_gone(&engine, &project_id, &id, "w4");
+}
+
+#[test]
+fn worktree_remove_forces_a_row_whose_directory_and_registration_are_both_gone() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let wt = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "vanished"}),
+    );
+    let id = wt["id"].as_str().unwrap().to_string();
+    let path = wt["path"].as_str().unwrap().to_string();
+
+    std::fs::remove_dir_all(&path).unwrap();
+    git(repo.path(), &["worktree", "prune"]);
+
+    ok(
+        &engine,
+        "worktree.remove",
+        "w2",
+        json!({"id": id, "force": true}),
+    );
+    assert_worktree_gone(&engine, &project_id, &id, "w3");
+}
+
+fn worktree_paths(dir: &Path) -> String {
+    let output = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn worktree_remove_forces_a_checkout_git_refuses_even_twice_forced() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let wt = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "broken"}),
+    );
+    let id = wt["id"].as_str().unwrap().to_string();
+    let path = wt["path"].as_str().unwrap().to_string();
+
+    // git still registers this worktree, so it is not the orphan case -- but
+    // its .git file no longer resolves, and `remove -f -f` fails validation
+    // rather than deleting anything. Force still has to mean the workspace goes.
+    std::fs::write(Path::new(&path).join(".git"), "not a gitfile\n").unwrap();
+    assert!(
+        worktree_paths(repo.path()).contains(&path),
+        "precondition: git has not forgotten this worktree"
+    );
+
+    ok(
+        &engine,
+        "worktree.remove",
+        "w2",
+        json!({"id": id, "force": true}),
+    );
+    assert!(!Path::new(&path).exists(), "force deletes the checkout");
+    assert!(
+        !worktree_paths(repo.path()).contains(&path),
+        "and prunes the admin entry git was still holding, so the name is free again"
+    );
+    assert_worktree_gone(&engine, &project_id, &id, "w3");
+}
+
+#[test]
+fn worktree_remove_leaves_a_sibling_worktree_whose_directory_is_merely_away() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let doomed = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "doomed"}),
+    );
+    let sibling = ok(
+        &engine,
+        "worktree.create",
+        "w2",
+        json!({"projectId": project_id, "name": "sibling"}),
+    );
+    let doomed_path = doomed["path"].as_str().unwrap().to_string();
+    let sibling_path = sibling["path"].as_str().unwrap().to_string();
+
+    // The sibling lives on a volume that is not mounted right now, so git
+    // counts its entry as prunable. Deleting an unrelated workspace must not
+    // take it away: a repo-wide `git worktree prune` here would deregister
+    // it, and it would come back from the mount no longer a worktree.
+    let stashed = format!("{sibling_path}.unmounted");
+    std::fs::rename(&sibling_path, &stashed).unwrap();
+    // Force the doomed checkout down the recovery path: git still registers
+    // it, but its .git file no longer resolves, so `remove -f -f` refuses.
+    std::fs::write(Path::new(&doomed_path).join(".git"), "not a gitfile\n").unwrap();
+
+    ok(
+        &engine,
+        "worktree.remove",
+        "w3",
+        json!({"id": doomed["id"], "force": true}),
+    );
+    std::fs::rename(&stashed, &sibling_path).unwrap();
+    assert!(
+        worktree_paths(repo.path()).contains(&sibling_path),
+        "the sibling is still a registered worktree once its volume is back"
+    );
+    assert!(
+        !worktree_paths(repo.path()).contains(&doomed_path),
+        "and the deleted workspace's own entry is gone"
+    );
+}
+
+#[test]
+fn worktree_remove_still_reports_a_failure_git_owns() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let wt = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "dirty"}),
+    );
+    let id = wt["id"].as_str().unwrap().to_string();
+    let path = wt["path"].as_str().unwrap().to_string();
+    std::fs::write(Path::new(&path).join("README.md"), "uncommitted\n").unwrap();
+
+    // A worktree git still registers keeps git's own verdict: the recovery
+    // path must never swallow a refusal by deleting the directory itself.
+    let refusal = err_message(&engine, "worktree.remove", "w2", json!({"id": id}));
+    assert!(
+        refusal.contains("use --force to delete it"),
+        "git still registers this one, so git's own verdict is what comes \
+         back -- not the unregistered-workspace copy -- got: {refusal}"
+    );
+    assert!(
+        Path::new(&path).join("README.md").exists(),
+        "a refused removal leaves the checkout in place"
+    );
+    let listed = ok(
+        &engine,
+        "worktree.list",
+        "w3",
+        json!({"projectId": project_id}),
+    );
+    assert!(
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["id"] == id.as_str()),
+        "a refused removal keeps the row"
+    );
+}
+
+#[test]
+fn folder_workspace_remove_drops_the_registration_and_leaves_the_folder() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(folder.path().join("keep.txt"), "the user's files\n").unwrap();
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": folder.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let listed = ok(
+        &engine,
+        "worktree.list",
+        "w1",
+        json!({"projectId": project_id}),
+    );
+    let implicit = listed["worktrees"][0]["id"].as_str().unwrap().to_string();
+
+    // The implicit row's id is the project's own and it has no `worktrees`
+    // row, so before #604 this answered "worktree not found" and the folder
+    // workspace stayed in the sidebar for good -- with no Force to fall back
+    // on, since the dialog offers none for a folder delete.
+    ok(&engine, "worktree.remove", "w2", json!({"id": implicit}));
+    assert!(
+        folder.path().join("keep.txt").exists(),
+        "removing a folder workspace removes the registration, never the files"
+    );
+    let projects = ok(&engine, "project.list", "p2", json!({}));
+    assert!(
+        !projects["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == project_id.as_str()),
+        "the folder project's registration is what the card owned"
+    );
+    let workspaces = ok(&engine, "workspace.list", "s1", json!({}));
+    assert!(
+        !workspaces["workspaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["path"] == folder.path().to_string_lossy().as_ref()),
+        "and its workspace goes with it, or the shell keeps rendering the card"
+    );
+}
+
+#[test]
+fn worktree_remove_still_refuses_an_id_that_names_nothing() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    assert_eq!(
+        err_code(
+            &engine,
+            "worktree.remove",
+            "w1",
+            json!({"id": "no-such-id"})
+        ),
+        "not_found"
+    );
+}
+
+#[test]
+fn worktree_remove_never_unregisters_a_git_project_through_its_project_id() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+
+    // Only a *folder* project exposes an implicit worktree carrying its own
+    // id. A git project's id names no worktree, and must never be mistaken
+    // for one -- removing it would unregister the whole project and every
+    // workspace under it.
+    assert_eq!(
+        err_code(&engine, "worktree.remove", "w1", json!({"id": project_id})),
+        "not_found"
+    );
+    let projects = ok(&engine, "project.list", "p2", json!({}));
+    assert!(
+        projects["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == project_id.as_str()),
+        "the project is still registered"
+    );
+}
+
+#[test]
+fn worktree_remove_refuses_a_recorded_path_that_is_not_normalized() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let wt = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "kept"}),
+    );
+    let id = wt["id"].as_str().unwrap().to_string();
+    let path = wt["path"].as_str().unwrap().to_string();
+
+    // `worktree.create` never writes a `..`, but a row that acquired one
+    // must not make a forced delete report success having removed nothing:
+    // the checkout would stay on disk with the rows gone, so nothing could
+    // reach it again -- the very shape of #604, re-entered through the fix.
+    let detoured = format!("{path}/../no-such-dir-zzz/../kept");
+    {
+        let db = data_dir.path().join("drogon.sqlite3");
+        let conn = rusqlite::Connection::open(db).unwrap();
+        conn.execute(
+            "UPDATE worktrees SET path = ?1 WHERE id = ?2",
+            rusqlite::params![detoured, id],
+        )
+        .unwrap();
+    }
+
+    let refusal = err_message(
+        &engine,
+        "worktree.remove",
+        "w2",
+        json!({"id": id, "force": true}),
+    );
+    assert!(refusal.contains("not normalized"), "got: {refusal}");
+    assert!(
+        Path::new(&path).exists(),
+        "and the checkout it could not resolve is still there"
+    );
+    let listed = ok(
+        &engine,
+        "worktree.list",
+        "w3",
+        json!({"projectId": project_id}),
+    );
+    assert!(
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["id"] == id.as_str()),
+        "a refusal never drops the row -- that is what makes it unreachable"
+    );
+}
+
+#[test]
+fn folder_workspace_remove_carries_project_removes_file_semantics() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+
+    // A Quick Session's scratch is app-owned, lives under the data dir, and
+    // `project.remove` deletes it on an explicit delete -- which is already
+    // what the Chats card does, since ChatsList submits `project.remove`.
+    // Routing the implicit worktree to the same method has to mean the same
+    // thing, or the two surfaces disagree about the same card.
+    let quick = ok(
+        &engine,
+        "project.quickSessionCreate",
+        "q1",
+        json!({"name": "scratch chat"}),
+    );
+    let quick_id = quick["project"]["id"].as_str().unwrap().to_string();
+    let scratch = quick["project"]["path"].as_str().unwrap().to_string();
+    assert!(Path::new(&scratch).exists());
+
+    let listed = ok(
+        &engine,
+        "worktree.list",
+        "w1",
+        json!({"projectId": quick_id}),
+    );
+    let implicit = listed["worktrees"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        implicit, quick_id,
+        "a quick session's implicit worktree is the project"
+    );
+
+    ok(&engine, "worktree.remove", "w2", json!({"id": implicit}));
+    assert!(
+        !Path::new(&scratch).exists(),
+        "the app-owned scratch goes, exactly as project.remove documents"
+    );
+}
+
+#[test]
+fn worktree_remove_refuses_to_take_a_nested_workspace_down_with_it() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let outer = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "outer"}),
+    );
+    // A name may carry a separator, so one workspace's checkout can sit
+    // inside another's without anyone tampering with the database.
+    let inner = ok(
+        &engine,
+        "worktree.create",
+        "w2",
+        json!({"projectId": project_id, "name": "outer/inner", "branch": "inner-branch"}),
+    );
+    let outer_path = outer["path"].as_str().unwrap().to_string();
+    let inner_path = inner["path"].as_str().unwrap().to_string();
+    assert!(
+        Path::new(&inner_path).starts_with(&outer_path),
+        "precondition: the inner checkout really is inside the outer one"
+    );
+    std::fs::write(Path::new(&inner_path).join("work.txt"), "uncommitted\n").unwrap();
+
+    // The outer checkout is perfectly healthy, which is the case that
+    // matters: `git worktree remove --force` on it exits 0 and takes the
+    // nested checkout with it, so a guard that only runs after git has
+    // refused never sees this at all.
+    let refusal = err_message(
+        &engine,
+        "worktree.remove",
+        "w3",
+        json!({"id": outer["id"], "force": true}),
+    );
+    assert!(
+        refusal.contains("is inside it") && refusal.contains(&inner_path),
+        "the refusal names the workspace that would have been destroyed -- got: {refusal}"
+    );
+    assert!(
+        Path::new(&inner_path).join("work.txt").exists(),
+        "the nested workspace's uncommitted work survives"
+    );
+
+    // Deleting the inner one first is the way through, and then the outer
+    // one goes.
+    ok(
+        &engine,
+        "worktree.remove",
+        "w4",
+        json!({"id": inner["id"], "force": true}),
+    );
+    ok(
+        &engine,
+        "worktree.remove",
+        "w5",
+        json!({"id": outer["id"], "force": true}),
+    );
+    assert!(!Path::new(&outer_path).exists());
+}
+
+#[test]
+fn worktree_remove_refuses_a_nested_workspace_on_the_recovery_path_too() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let outer = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "outer"}),
+    );
+    let inner = ok(
+        &engine,
+        "worktree.create",
+        "w2",
+        json!({"projectId": project_id, "name": "outer/inner", "branch": "inner-branch"}),
+    );
+    let outer_path = outer["path"].as_str().unwrap().to_string();
+    let inner_path = inner["path"].as_str().unwrap().to_string();
+
+    // Broken outer .git: git refuses even twice-forced, so the removal takes
+    // the recovery path and deletes the directory itself. The guard has to
+    // hold on that route as well as on the healthy one.
+    std::fs::write(Path::new(&outer_path).join(".git"), "not a gitfile\n").unwrap();
+    let refusal = err_message(
+        &engine,
+        "worktree.remove",
+        "w3",
+        json!({"id": outer["id"], "force": true}),
+    );
+    assert!(refusal.contains("is inside it"), "got: {refusal}");
+    assert!(Path::new(&inner_path).exists());
+}
+
+#[test]
+fn worktree_remove_refuses_a_project_registered_inside_the_checkout() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let wt = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "host"}),
+    );
+    let host_path = wt["path"].as_str().unwrap().to_string();
+
+    // A folder project registered inside the checkout is a card of its own,
+    // and `project.remove` promises its files are never touched. A sibling
+    // workspace's delete must not be the thing that deletes them.
+    let inside = Path::new(&host_path).join("notes");
+    std::fs::create_dir_all(&inside).unwrap();
+    std::fs::write(inside.join("keep.txt"), "the user's notes\n").unwrap();
+    ok(
+        &engine,
+        "project.add",
+        "p2",
+        json!({"path": inside.to_string_lossy()}),
+    );
+
+    let refusal = err_message(
+        &engine,
+        "worktree.remove",
+        "w2",
+        json!({"id": wt["id"], "force": true}),
+    );
+    assert!(refusal.contains("is inside it"), "got: {refusal}");
+    assert!(
+        inside.join("keep.txt").exists(),
+        "the registered project's files survive"
     );
 }
 

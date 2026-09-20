@@ -17,13 +17,16 @@ describe("getDeleteWorktreeToastCopy", () => {
     });
   });
 
-  test("locked failure without a reason names the unlock command", () => {
+  test("locked failure offers Force Delete and names the unlock command", () => {
     const copy = getDeleteWorktreeToastCopy(
       "demo",
       null,
       "cannot remove a locked working tree",
     );
     expect(copy.title).toBe("Failed to delete workspace demo");
+    // #604: Force sends git's `remove -f -f`, so it is a real way out of a
+    // locked workspace and not only the unlock-then-retry detour.
+    expect(copy.description).toContain("Use Force Delete");
     expect(copy.description).toContain("git worktree unlock <worktree-path>");
     expect(copy.isDestructive).toBe(false);
   });

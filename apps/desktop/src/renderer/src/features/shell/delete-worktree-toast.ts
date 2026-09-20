@@ -36,9 +36,11 @@ export function getDeleteWorktreeToastCopy(
   if (isLockedWorktreeRemovalError(error)) {
     return {
       title: `Failed to delete workspace ${worktreeName}`,
+      // Force passes git's `remove -f -f`, so deleting a locked workspace from
+      // here works (#604); unlocking first stays the way to keep the checkout.
       description: lockReason
-        ? `This workspace is locked by Git. Git reported: ${lockReason}. Run git worktree unlock <worktree-path> from its repository, then retry deletion.`
-        : "This workspace is locked by Git. Run git worktree unlock <worktree-path> from its repository, then retry deletion.",
+        ? `This workspace is locked by Git. Git reported: ${lockReason}. Use Force Delete to delete it anyway, or run git worktree unlock <worktree-path> from its repository and retry.`
+        : "This workspace is locked by Git. Use Force Delete to delete it anyway, or run git worktree unlock <worktree-path> from its repository and retry.",
       isDestructive: false,
     };
   }

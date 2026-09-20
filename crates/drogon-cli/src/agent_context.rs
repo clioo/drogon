@@ -208,7 +208,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
         entry(
             "worktree rm",
             &["worktree", "rm"],
-            "Remove a worktree; refuses a dirty checkout unless --force",
+            "Remove a worktree; refuses a dirty, locked or unregistered checkout unless --force",
             "drogon-cli worktree rm <ID> [--force]",
             &["force"],
             &["ID"],
