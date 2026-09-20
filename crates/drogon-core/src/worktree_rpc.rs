@@ -311,6 +311,181 @@ fn canonical_or_raw(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
+/// Whether `project_path`'s git still has an admin entry for a working tree
+/// at `worktree_path`, including a prunable one whose directory has already
+/// vanished. `None` means the probe itself could not answer -- no usable
+/// `git`, an unreadable repository -- and nothing may be concluded from it.
+fn git_registers_worktree(project_path: &Path, worktree_path: &str) -> Option<bool> {
+    let cache = CapabilityCache::new();
+    let entries = match git_process::run_read_only_git(
+        ReadOnlyGitOperation::WorktreeList,
+        project_path,
+        &HostScope::Native,
+        &cache,
+        budget(),
+    ) {
+        Ok(ParsedGitOutput::WorktreeList(entries)) => entries,
+        Ok(ParsedGitOutput::Status(_)) | Err(_) => return None,
+    };
+    let wanted = canonical_or_raw(worktree_path);
+    Some(
+        entries
+            .into_iter()
+            .any(|entry| canonical_or_raw(&entry.path) == wanted),
+    )
+}
+
+/// What the engine may still do after `git worktree remove` has refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoveRecovery {
+    /// Hand git's own verdict back unchanged.
+    ReportGitFailure,
+    /// Refuse, but name the Force path -- git's fatal does not.
+    OfferForce,
+    /// Delete the checkout here and retire whatever git still holds.
+    DeleteCheckoutDirectory,
+}
+
+/// The whole of #604 in one decision.
+///
+/// `still_registered` is `git_registers_worktree`'s answer, and a probe that
+/// could not answer (`None`) is the one case that forbids everything: a run
+/// of `git` that never reached a verdict -- no git on PATH, a timeout, a
+/// killed capture -- proves nothing about the checkout, so deleting a user's
+/// directory on the strength of it would be a guess. A probe that *did*
+/// answer also proves git is present and the repository readable, which is
+/// what makes the accompanying failure a real refusal rather than a broken
+/// environment.
+///
+/// Given a real refusal, `force` is the desktop dialog's Force checkbox and
+/// the CLI's `--force`, and it has to mean every removal the user ticking it
+/// has already accepted. That is strictly more than `git worktree remove
+/// --force` covers: git demands `-f -f` for a locked working tree, and for a
+/// working tree it no longer registers it has no entry to remove at all and
+/// dies "is not a working tree" however many flags follow. Deleting the
+/// checkout is the only thing left that can retire such a row, so force does
+/// it. Unforced, an unregistered row gets copy that names Force, because
+/// git's fatal tells the user nothing they can act on.
+fn recovery_after_failed_git_remove(force: bool, still_registered: Option<bool>) -> RemoveRecovery {
+    match (force, still_registered) {
+        (_, None) => RemoveRecovery::ReportGitFailure,
+        (true, Some(_)) => RemoveRecovery::DeleteCheckoutDirectory,
+        // git's refusal already reads "use --force to delete it"; repeating
+        // it is better than paraphrasing it.
+        (false, Some(true)) => RemoveRecovery::ReportGitFailure,
+        (false, Some(false)) => RemoveRecovery::OfferForce,
+    }
+}
+
+/// Deletes a checkout directory git would not delete itself. Guarded rather
+/// than a bare `remove_dir_all`: this is the only place the engine removes a
+/// user directory git is not mediating, so the target must be an absolute
+/// path that is neither the project checkout nor one of its ancestors -- the
+/// guard that keeps a forced delete off the primary worktree, which git
+/// refuses with "is a main working tree". A path that is already gone is a
+/// success; the caller's next step is dropping the rows either way.
+fn delete_checkout_directory(project_path: &Path, worktree_path: &Path) -> Result<(), RpcError> {
+    if !worktree_path.is_absolute() {
+        return Err(error::invalid_argument(format!(
+            "refusing to delete \"{}\": the recorded workspace path is not absolute",
+            worktree_path.display()
+        )));
+    }
+    // The parent is resolved but the final component deliberately is not: a
+    // symlinked workspace has to be unlinked, never followed, or the guards
+    // below would clear a directory belonging to whatever the link points at.
+    let (Some(parent), Some(name)) = (worktree_path.parent(), worktree_path.file_name()) else {
+        return Err(error::invalid_argument(format!(
+            "refusing to delete \"{}\": it names no directory under a parent",
+            worktree_path.display()
+        )));
+    };
+    let target = std::fs::canonicalize(parent)
+        .unwrap_or_else(|_| parent.to_path_buf())
+        .join(name);
+    let project =
+        std::fs::canonicalize(project_path).unwrap_or_else(|_| project_path.to_path_buf());
+    if project == target || project.starts_with(&target) {
+        return Err(error::invalid_argument(format!(
+            "refusing to delete \"{}\": it is the project checkout or contains it",
+            target.display()
+        )));
+    }
+    let metadata = match std::fs::symlink_metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(error::io_error(format!(
+                "could not inspect \"{}\": {err}",
+                target.display()
+            )));
+        }
+    };
+    let deleted = if metadata.is_dir() {
+        std::fs::remove_dir_all(&target)
+    } else {
+        std::fs::remove_file(&target)
+    };
+    match deleted {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(error::io_error(format!(
+            "could not delete \"{}\": {err}",
+            target.display()
+        ))),
+    }
+}
+
+/// argv for one `git worktree remove`. A forced removal passes `--force`
+/// twice, not once: git refuses a *locked* working tree under a single flag
+/// and answers "use 'remove -f -f' to override or unlock first", so the one
+/// flag Drogon used to send left the Force checkbox unable to delete exactly
+/// the workspaces it exists for (#604).
+fn git_worktree_remove_argv(worktree_path: &str, force: bool) -> Vec<String> {
+    let mut argv = vec!["worktree".to_string(), "remove".to_string()];
+    if force {
+        argv.push("--force".to_string());
+        argv.push("--force".to_string());
+    }
+    argv.push(worktree_path.to_string());
+    argv
+}
+
+/// Removes the checkout behind one workspace row, returning once nothing is
+/// left for the caller to do but drop the rows. See
+/// `recovery_after_failed_git_remove` for what `force` has to mean here.
+fn remove_worktree_checkout(
+    project_path: &Path,
+    worktree_path: &str,
+    force: bool,
+) -> Result<(), RpcError> {
+    let argv = git_worktree_remove_argv(worktree_path, force);
+    // Git itself refuses a dirty worktree without --force; this call
+    // never re-implements that check.
+    let failure = match run_git(project_path, &argv) {
+        Ok(_) => return Ok(()),
+        Err(failure) => failure,
+    };
+
+    match recovery_after_failed_git_remove(
+        force,
+        git_registers_worktree(project_path, worktree_path),
+    ) {
+        RemoveRecovery::ReportGitFailure => Err(failure),
+        RemoveRecovery::OfferForce => Err(error::io_error(format!(
+            "git no longer registers a working tree at \"{worktree_path}\", so it cannot remove it. Use Force to delete the leftover directory and clear this workspace."
+        ))),
+        RemoveRecovery::DeleteCheckoutDirectory => {
+            delete_checkout_directory(project_path, Path::new(worktree_path))?;
+            // The directory is gone but git may still hold the admin entry
+            // that made `remove` refuse; without this the name stays taken
+            // and recreating the same workspace fails.
+            let _ = run_git(project_path, &["worktree".to_string(), "prune".to_string()]);
+            Ok(())
+        }
+    }
+}
+
 /// Bundles every column `worktree_json` renders, named-field construction
 /// at each of its five call sites (create / list-folder / list-git /
 /// rename / update) instead of a positional argument list long enough to
@@ -1191,7 +1366,7 @@ impl Engine {
         let id = require_str(params, "id")?.to_string();
         let force = optional_bool(params, "force", false)?;
 
-        let (project_path, project_kind, worktree_path, workspace_id) = {
+        let row = {
             let conn = self.db.lock().unwrap();
             conn.query_row(
                 "SELECT p.path, p.kind, w.path, w.workspace_id FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE w.id = ?1",
@@ -1200,7 +1375,9 @@ impl Engine {
             )
             .optional()
             .map_err(error::from_sqlite)?
-            .ok_or_else(|| error::not_found("worktree not found"))?
+        };
+        let Some((project_path, project_kind, worktree_path, workspace_id)) = row else {
+            return self.remove_implicit_folder_worktree(&id);
         };
 
         // A folder Workspace section (issue #579) has no git worktree to
@@ -1208,14 +1385,7 @@ impl Engine {
         // Removing it only unregisters this Workspace row; the folder and
         // its files are never touched.
         if project_kind != "folder" {
-            let mut argv = vec!["worktree".to_string(), "remove".to_string()];
-            if force {
-                argv.push("--force".to_string());
-            }
-            argv.push(worktree_path);
-            // Git itself refuses a dirty worktree without --force; this call
-            // never re-implements that check.
-            run_git(Path::new(&project_path), &argv)?;
+            remove_worktree_checkout(Path::new(&project_path), &worktree_path, force)?;
         }
 
         let conn = self.db.lock().unwrap();
@@ -1223,6 +1393,35 @@ impl Engine {
             .map_err(error::from_sqlite)?;
         conn.execute("DELETE FROM workspaces WHERE id = ?1", [&workspace_id])
             .map_err(error::from_sqlite)?;
+        Ok(json!({ "id": id, "removed": true }))
+    }
+
+    /// `worktree.remove` for a folder Project's implicit worktree, whose id
+    /// is the Project's own and which has no `worktrees` row of its own (see
+    /// `folder_implicit_worktree_json`). Without this the lookup above found
+    /// nothing and the sidebar's "Remove Workspace" answered "worktree not
+    /// found" every time, with no Force checkbox to fall back on -- a folder
+    /// workspace could not be deleted at all (#604). What that row owns is a
+    /// registration, so removing it is `project.remove`: the rows go, the
+    /// user's folder stays. Genuinely unknown ids keep the same `not_found`.
+    fn remove_implicit_folder_worktree(&self, id: &str) -> Result<Value, RpcError> {
+        let is_folder_project = {
+            let conn = self.db.lock().unwrap();
+            conn.query_row(
+                "SELECT 1 FROM projects WHERE id = ?1 AND kind = 'folder'",
+                [id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(error::from_sqlite)?
+            .is_some()
+        };
+        if !is_folder_project {
+            return Err(error::not_found("worktree not found"));
+        }
+        // A fresh params value, so nothing `project.remove` also understands
+        // (`deleteFiles`) can reach it through a `worktree.remove` call.
+        self.do_project_remove(&json!({ "id": id }))?;
         Ok(json!({ "id": id, "removed": true }))
     }
 
@@ -1376,5 +1575,141 @@ mod tests {
     fn short_branch_strips_the_refs_heads_prefix_only_when_present() {
         assert_eq!(short_branch("refs/heads/feature"), "feature");
         assert_eq!(short_branch("feature"), "feature");
+    }
+
+    // --- Forced-removal recovery (#604) -------------------------------------
+
+    #[test]
+    fn a_forced_remove_passes_force_twice_as_git_demands_of_a_locked_worktree() {
+        assert_eq!(
+            git_worktree_remove_argv("/w", false),
+            ["worktree", "remove", "/w"]
+        );
+        assert_eq!(
+            git_worktree_remove_argv("/w", true),
+            ["worktree", "remove", "--force", "--force", "/w"],
+            "one --force leaves git refusing a locked working tree outright"
+        );
+    }
+
+    #[test]
+    fn a_probe_that_cannot_answer_never_licenses_deleting_a_directory() {
+        // No git, a timeout, a killed capture: the accompanying failure says
+        // nothing about the checkout, so force must not act on it either.
+        assert_eq!(
+            recovery_after_failed_git_remove(true, None),
+            RemoveRecovery::ReportGitFailure
+        );
+        assert_eq!(
+            recovery_after_failed_git_remove(false, None),
+            RemoveRecovery::ReportGitFailure
+        );
+    }
+
+    #[test]
+    fn force_deletes_the_checkout_whichever_refusal_git_reached() {
+        // Locked, unregistered, or anything else git exits non-zero on: the
+        // user ticked Force, so the workspace goes.
+        assert_eq!(
+            recovery_after_failed_git_remove(true, Some(true)),
+            RemoveRecovery::DeleteCheckoutDirectory
+        );
+        assert_eq!(
+            recovery_after_failed_git_remove(true, Some(false)),
+            RemoveRecovery::DeleteCheckoutDirectory
+        );
+    }
+
+    #[test]
+    fn unforced_keeps_gits_verdict_but_names_force_when_git_has_no_verdict_to_give() {
+        assert_eq!(
+            recovery_after_failed_git_remove(false, Some(true)),
+            RemoveRecovery::ReportGitFailure,
+            "git's own 'use --force to delete it' is the right message"
+        );
+        assert_eq!(
+            recovery_after_failed_git_remove(false, Some(false)),
+            RemoveRecovery::OfferForce,
+            "'is not a working tree' tells the user nothing they can act on"
+        );
+    }
+
+    // --- Checkout-directory deletion guards (#604) --------------------------
+
+    #[test]
+    fn checkout_delete_refuses_a_relative_or_project_owning_path() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+
+        assert_eq!(
+            delete_checkout_directory(&project, Path::new("workspaces/x"))
+                .unwrap_err()
+                .code,
+            "invalid_argument"
+        );
+        assert_eq!(
+            delete_checkout_directory(&project, &project)
+                .unwrap_err()
+                .code,
+            "invalid_argument",
+            "the project checkout is never the orphan"
+        );
+        assert_eq!(
+            delete_checkout_directory(&project, root.path())
+                .unwrap_err()
+                .code,
+            "invalid_argument",
+            "nor is any directory containing it"
+        );
+        assert!(project.exists(), "a refused cleanup deletes nothing");
+    }
+
+    #[test]
+    fn checkout_delete_removes_the_checkout_and_tolerates_one_already_gone() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let orphan = root.path().join("orphan");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::create_dir_all(orphan.join("nested")).unwrap();
+        std::fs::write(orphan.join("nested/file.txt"), "work").unwrap();
+
+        delete_checkout_directory(&project, &orphan).unwrap();
+        assert!(!orphan.exists());
+        delete_checkout_directory(&project, &orphan)
+            .expect("a path that is already gone is a success, not a failure");
+    }
+
+    #[test]
+    fn checkout_delete_handles_a_path_that_is_not_a_directory() {
+        // Whatever sits at the recorded path has to go, or the row it belongs
+        // to becomes undeletable again -- the whole of #604.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let stray = root.path().join("was-a-workspace");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::write(&stray, "left behind").unwrap();
+
+        delete_checkout_directory(&project, &stray).unwrap();
+        assert!(!stray.exists());
+    }
+
+    #[test]
+    fn checkout_delete_unlinks_a_symlinked_checkout_without_following_it() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let elsewhere = root.path().join("elsewhere");
+        let link = root.path().join("linked-workspace");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("keep.txt"), "not this workspace's").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+
+        delete_checkout_directory(&project, &link).unwrap();
+        assert!(!link.exists(), "the link itself is removed");
+        assert!(
+            elsewhere.join("keep.txt").exists(),
+            "whatever it pointed at is left alone"
+        );
     }
 }
