@@ -7,12 +7,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
-import { runAcceptanceProcess as exec, startAcceptanceProcess as start, stopAcceptanceProcess as stop } from "./acceptance-process.mjs";
+import { runAcceptanceProcess as exec, scrubInheritedDispatchBindings, startAcceptanceProcess as start, stopAcceptanceProcess as stop } from "./acceptance-process.mjs";
 import { packagedFixtureDaemon } from "./packaged-fixture-daemon.mjs";
 import { startForegroundObservation, verifyForegroundObservation } from "./acceptance-foreground.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { installPrivateAcceptanceEnvironment } from "./acceptance-private-environment.mjs";
 import { selectSettingsTheme } from "./acceptance-theme.mjs";
+
+// This journey owns a disposable daemon: drop the parent dispatch context so
+// its CLI never presents a foreign credential to its own daemon.
+scrubInheritedDispatchBindings();
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const appDir = path.join(root, "apps/desktop");
@@ -111,12 +115,26 @@ import fs from 'node:fs';
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('opencode fixture 1.0'); process.exit(0); }
 if (args[0] === 'models') { console.log('fixture/main\\nfixture/one\\nfixture/two\\nfixture/fallback'); process.exit(0); }
-if (args[0] !== 'run') process.exit(20);
-const model = args[args.indexOf('--model') + 1];
-const prompt = args.at(-1);
+// Headless daemon runs and interactive work-graph roles (opencode TUI with
+// a --prompt= flag, since roles moved to the harness TUI) both end with the
+// same evidence: a fixture turn performs its work, then exits 0.
+let prompt;
+if (args[0] === 'run') {
+  prompt = args.at(-1);
+} else {
+  const flag = args.find((a) => a.startsWith('--prompt='));
+  if (!flag) process.exit(20);
+  prompt = flag.slice('--prompt='.length);
+}
+const model = args.includes('--model') ? args[args.indexOf('--model') + 1] : 'fixture/main';
 const target = prompt.match(/Write (\\.drogon\\/evaluations\\/[^ ]+\\.json) as JSON/)?.[1];
-const scenario = fs.readFileSync(process.env.DROGON_FIXTURE_SCENARIO, 'utf8').trim();
-fs.appendFileSync(process.env.DROGON_FIXTURE_LOG, JSON.stringify({ model, target: target ?? 'main' }) + '\\n');
+// Role sessions run in the workspace with daemon control-plane env stripped,
+// so resolve the fixture files from the workspace, not the environment.
+const fixtureDir = (...names) => { for (const n of names) { try { fs.accessSync(n); return n; } catch {} } return names[0]; };
+const scenarioFile = process.env.DROGON_FIXTURE_SCENARIO ?? fixtureDir('../scenario', 'scenario');
+const logFile = process.env.DROGON_FIXTURE_LOG ?? fixtureDir('../launches.jsonl', 'launches.jsonl');
+const scenario = fs.readFileSync(scenarioFile, 'utf8').trim();
+fs.appendFileSync(logFile, JSON.stringify({ model, target: target ?? 'main' }) + '\\n');
 await new Promise(resolve => setTimeout(resolve, target ? 1100 : 5000));
 if (scenario === 'fallback' && model !== 'fixture/main' && model !== 'fixture/fallback') process.exit(9);
 if (target) {
@@ -182,17 +200,35 @@ console.log(prompt.match(/DROGON_NODE_[A-Z0-9_]+_DONE/g)?.at(-1) ?? 'fixture com
     return (await cliJson(["graph", "orchestrator-status", "--workspace", workspaceId])).run;
   };
   await page.getByTestId("orchestrator-run-workflow").click();
-  const workflowRow = page.getByRole("button", { name: "Work Graph · Running", exact: true });
-  await workflowRow.waitFor();
-  await workflowRow.click();
-  await page.getByText("Native workspace sessions", { exact: true }).waitFor();
-  await page.getByText("Main agent · running", { exact: true }).waitFor();
-  const runningMain = await status();
+  // Catch the run mid-flight through the daemon (fast poll, not DOM: a
+  // fixture turn settles in seconds and the sidebar row re-renders on every
+  // status change). The main step must carry a native session identity while
+  // its session is provably live.
+  const runningMain = await until(async () => {
+    const r = await status().catch(() => null);
+    return r?.status === "running" &&
+        r.steps.find((step) => step.phase === "main")?.runId?.startsWith("session:")
+      ? r
+      : null;
+  }, "main step live on a native session");
   const nativeRunId = runningMain.steps.find((step) => step.phase === "main")?.runId;
   const nativeIdentity = /^session:([^:]+):(.+)$/.exec(nativeRunId ?? "");
   assert.ok(nativeIdentity, `main step must carry a native session identity: ${nativeRunId}`);
   const listedSessions = (await cliJson(["terminal", "list", "--workspace", workspaceId])).sessions;
   assert.ok(listedSessions.some((session) => session.id === nativeIdentity[1] && session.incarnation === nativeIdentity[2]));
+  report.checks.push("main-step-runs-on-live-native-session");
+  // Settled DOM: expand the finished row and prove the sidebar renders the
+  // native-session evidence beside the completed receipt.
+  const finishedRow = page.getByRole("button", { name: /^Work Graph · /, exact: true });
+  await finishedRow.waitFor();
+  // The row re-renders on every poll/status change, which can swallow a
+  // toggle click; retry until the evidence is actually visible.
+  const nativeSessions = page.getByText("Native workspace sessions", { exact: true });
+  await until(async () => {
+    if (await nativeSessions.isVisible().catch(() => false)) return true;
+    await finishedRow.click().catch(() => {});
+    return false;
+  }, "expanded finished row shows native sessions");
   const sidebarShot = path.join(output, "native-workflow-sidebar.png");
   await page.screenshot({ path: sidebarShot, animations: "disabled" });
   report.screenshots.push(sidebarShot);

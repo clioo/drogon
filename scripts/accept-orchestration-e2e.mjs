@@ -22,6 +22,11 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { scrubInheritedDispatchBindings } from "./acceptance-process.mjs";
+
+// This journey owns a disposable daemon: drop the parent dispatch context so
+// its CLI never presents a foreign credential to its own daemon.
+scrubInheritedDispatchBindings();
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const target = path.join(root, "target", "debug");
@@ -227,9 +232,11 @@ else
   esac
 fi
 result='{"modifiedFiles":["fixture-'"$dispatch"'.txt"],"artifacts":["fixture-'"$dispatch"'.txt"],"summary":"fixture worker report"}'
+# --body is greedy (it joins all remaining shell words, including flag-like
+# text), so --result must come first or the report metadata is silently lost.
 "$DROGON_CLI_COMMAND" --data-dir "$DROGON_DATA_DIR" --json orchestration send \\
   --kind worker_done --subject "fixture $model" --outcome "$outcome" \\
-  --body "fixture worker completion" --result "$result" > "report-$dispatch.json"
+  --result "$result" --body "fixture worker completion" > "report-$dispatch.json"
 printf '%s\\n' "$?" > "report-$dispatch.exit"
 touch "done-$dispatch"
 exit 0

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { EventEmitter, once } from "node:events";
 import { test } from "node:test";
 import {
+  INHERITED_DISPATCH_BINDINGS,
+  scrubInheritedDispatchBindings,
   startAcceptanceProcess,
   waitAcceptanceExit,
   stopAcceptanceProcess,
@@ -148,3 +150,58 @@ test(
     assert.equal(result.forced, true);
   },
 );
+
+test("dispatch scrub list covers the harness's inherited bindings", () => {
+  for (const name of [
+    "DROGON_DISPATCH_CAPABILITY",
+    "DROGON_SESSION_ID",
+    "DROGON_SESSION_INCARNATION",
+    "DROGON_HOOK_INCARNATION",
+    "DROGON_INCARNATION",
+    "DROGON_WORKSPACE_ID",
+    "DROGON_HOST_ID",
+    "DROGON_DISPATCH_ID",
+    "DROGON_TASK_ID",
+    "DROGON_RUN_ID",
+    "DROGON_COORDINATOR_ID",
+    "DROGON_MENTU_RUNTIME",
+  ]) {
+    assert.ok(
+      INHERITED_DISPATCH_BINDINGS.includes(name),
+      `missing inherited binding: ${name}`,
+    );
+  }
+});
+
+test("scrubInheritedDispatchBindings drops only the inherited bindings", () => {
+  const env = {
+    DROGON_DISPATCH_CAPABILITY: "foreign-credential",
+    DROGON_SESSION_ID: "foreign-session",
+    DROGON_RUN_ID: "foreign-run",
+    DROGON_DATA_DIR: "/tmp/owned",
+    DROGON_BACKGROUND_WINDOW: "1",
+    PATH: "/usr/bin:/bin",
+    HOME: "/tmp/home",
+  };
+  const returned = scrubInheritedDispatchBindings(env);
+  assert.equal(returned, env);
+  assert.equal(env.DROGON_DISPATCH_CAPABILITY, undefined);
+  assert.equal(env.DROGON_SESSION_ID, undefined);
+  assert.equal(env.DROGON_RUN_ID, undefined);
+  assert.equal(env.DROGON_DATA_DIR, "/tmp/owned");
+  assert.equal(env.DROGON_BACKGROUND_WINDOW, "1");
+  assert.equal(env.PATH, "/usr/bin:/bin");
+  assert.equal(env.HOME, "/tmp/home");
+});
+
+test("scrubbed env keeps explicit per-journey values assigned after", () => {
+  const env = scrubInheritedDispatchBindings({
+    DROGON_DISPATCH_CAPABILITY: "foreign-credential",
+    PATH: "/usr/bin:/bin",
+  });
+  env.DROGON_DATA_DIR = "/tmp/owned-data";
+  env.DROGON_MENTU_RUNTIME = "/tmp/owned-runtime";
+  assert.equal(env.DROGON_DISPATCH_CAPABILITY, undefined);
+  assert.equal(env.DROGON_DATA_DIR, "/tmp/owned-data");
+  assert.equal(env.DROGON_MENTU_RUNTIME, "/tmp/owned-runtime");
+});

@@ -29,8 +29,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   runAcceptanceProcess,
+  scrubInheritedDispatchBindings,
   startAcceptanceProcess,
 } from "./acceptance-process.mjs";
+
+// This journey owns a disposable daemon: drop the parent dispatch context so
+// its CLI never presents a foreign credential to its own daemon.
+scrubInheritedDispatchBindings();
 import {
   buildFixtureProgram,
   classifyChildState,
