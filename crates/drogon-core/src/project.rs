@@ -762,8 +762,9 @@ pub(crate) fn list(conn: &Connection) -> Result<Value, drogon_protocol::RpcError
 
 /// Removes the Project row (never the files on disk — except a Quick
 /// Session's app-owned scratch folder, which `do_project_remove` deletes
-/// after this row delete, matching the fork's on-explicit-delete scratch
-/// cleanup). Its Worktree rows are removed too (registration bookkeeping
+/// before this row delete, matching the fork's on-explicit-delete scratch
+/// cleanup while keeping a failed cleanup retryable). Its Worktree rows are
+/// removed too (registration bookkeeping
 /// only — their git worktrees and branches are untouched on disk, exactly
 /// like the underlying `worktrees` checkouts becoming unmanaged rather
 /// than deleted), and the worktrees' Workspace rows go with them, exactly
@@ -1034,37 +1035,57 @@ impl Engine {
                 .map_err(error::from_sqlite)?
             };
             let path = path.ok_or_else(|| error::not_found("project not found"))?;
-            let home = std::fs::canonicalize(self.data_dir.join(PROJECTS_HOME))
-                .map_err(|e| error::io_error(format!("cannot resolve the projects home: {e}")))?;
-            let candidate = std::fs::canonicalize(&path)
-                .map_err(|e| error::io_error(format!("cannot resolve the project folder: {e}")))?;
-            if candidate == home || !candidate.starts_with(&home) {
-                return Err(error::invalid_argument(
-                    "Drogon deletes only the folders it created under its own projects home; this project's files stay where they are.",
-                ));
-            }
+            // A folder that is already gone leaves nothing to delete, so the
+            // registration is free to go with it instead of being stranded
+            // behind an unresolvable path.
+            let candidate = match std::fs::canonicalize(&path) {
+                Ok(candidate) => {
+                    let home =
+                        std::fs::canonicalize(self.data_dir.join(PROJECTS_HOME)).map_err(|e| {
+                            error::io_error(format!("cannot resolve the projects home: {e}"))
+                        })?;
+                    if candidate == home || !candidate.starts_with(&home) {
+                        return Err(error::invalid_argument(
+                            "Drogon deletes only the folders it created under its own projects home; this project's files stay where they are.",
+                        ));
+                    }
+                    Some(candidate)
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => {
+                    return Err(error::io_error(format!(
+                        "cannot resolve the project folder: {e}"
+                    )));
+                }
+            };
             self.settle_quick_session_members(&path)?;
-            Some(candidate)
+            candidate
         } else {
             None
         };
-        let conn = self.db.lock().unwrap();
-        let removed = remove(&conn, id)?;
-        drop(conn);
+        // Why the files go before the rows (#623): a delete that fails here
+        // must leave the project registered, so the reported error and the
+        // database agree and the user can retry. Committing the row delete
+        // first turns any cleanup failure into an error over work that
+        // already happened, stranding app-owned files nothing points at.
+        //
         // Quick Session cleanup (the fork's on-explicit-delete scratch
         // removal): the directory is app-owned, but only delete it when it
         // is still the scratch this daemon created — inside the data dir's
         // quick-sessions root with a matching ownership marker.
-        if let Some(path) = scratch {
-            self.cleanup_quick_session_scratch(id, &path)?;
+        if let Some(path) = &scratch {
+            self.cleanup_quick_session_scratch(id, path)?;
         }
-        if let Some(folder) = managed {
-            std::fs::remove_dir_all(&folder).map_err(|e| {
+        if let Some(folder) = &managed {
+            std::fs::remove_dir_all(folder).map_err(|e| {
                 error::io_error(format!(
-                    "project unregistered, but its folder was not deleted: {e}"
+                    "the project folder was not deleted, so the project stays registered: {e}"
                 ))
             })?;
         }
+        let conn = self.db.lock().unwrap();
+        let removed = remove(&conn, id)?;
+        drop(conn);
         Ok(removed)
     }
 
@@ -1073,21 +1094,33 @@ impl Engine {
         project_id: &str,
         path: &str,
     ) -> Result<(), drogon_protocol::RpcError> {
-        let candidate = self.validate_quick_session_scratch(project_id, path)?;
+        let Some(candidate) = self.validate_quick_session_scratch(project_id, path)? else {
+            return Ok(());
+        };
         std::fs::remove_dir_all(&candidate)
             .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}")))
     }
 
     /// Check before any destructive action and again immediately before unlink.
+    /// `Ok(None)` means the scratch is already gone: there is nothing left to
+    /// delete, so the removal proceeds rather than stranding a registration
+    /// whose folder the user (or a temp sweep) removed behind the app's back.
     fn validate_quick_session_scratch(
         &self,
         project_id: &str,
         path: &str,
-    ) -> Result<std::path::PathBuf, drogon_protocol::RpcError> {
+    ) -> Result<Option<std::path::PathBuf>, drogon_protocol::RpcError> {
         let root = self.data_dir.join(QUICK_SESSION_ROOT);
         let canonical_root = std::fs::canonicalize(&root).unwrap_or(root);
-        let candidate = std::fs::canonicalize(path)
-            .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}")))?;
+        let candidate = match std::fs::canonicalize(path) {
+            Ok(candidate) => candidate,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => {
+                return Err(error::io_error(format!(
+                    "quick session scratch cleanup failed: {e}"
+                )));
+            }
+        };
         if !candidate.starts_with(&canonical_root) {
             return Err(error::io_error(format!(
                 "quick session scratch \"{}\" is outside the quick-sessions root; not deleting",
@@ -1107,7 +1140,7 @@ impl Engine {
                 "quick session scratch marker ownership mismatch; not deleting",
             ));
         }
-        Ok(candidate)
+        Ok(Some(candidate))
     }
 
     /// Quick Session (`project.quickSessionCreate`): the fork's composer
