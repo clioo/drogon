@@ -1472,6 +1472,8 @@ mod session_list_workspace_index_tests {
                 "hostId",
                 "id",
                 "incarnation",
+                "observedHarnessAt",
+                "observedHarnessId",
                 "parentSessionId",
                 "rows",
                 "verdict",
