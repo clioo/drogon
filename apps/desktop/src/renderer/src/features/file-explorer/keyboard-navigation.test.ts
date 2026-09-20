@@ -3,7 +3,7 @@
 // src/renderer/src/components/right-sidebar/file-explorer-keyboard-navigation.test.ts
 // (row fixtures, sample tree and navigation expectations), adapted to the
 // local flat-row NavigationProjection interface.
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   applyNavigation,
   isNavigationKey,
@@ -188,6 +188,13 @@ describe("applyNavigation", () => {
       callback();
       return 0;
     });
+  });
+
+  // stubGlobal writes onto the worker's shared global: without this, the
+  // synchronous frame loop leaks into later files in the same worker
+  // (`isolate: false`).
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   const keyEvent = (key: string, extra?: Partial<KeyboardEvent>): KeyboardEvent =>

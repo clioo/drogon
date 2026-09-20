@@ -11,6 +11,9 @@ import { worktreeIssueLinkSchema, type WorktreeIssueLink } from "../../../../sha
 afterEach(() => {
   cleanup();
   clearWorktreeAgentExpansionStateForTests();
+  // The suite shares one jsdom window across files: a bridge left here
+  // becomes another file's environment.
+  delete (window as { drogon?: unknown }).drogon;
 });
 const worktree: Worktree = { id: "wt", projectId: "p", workspaceId: "ws", path: "/tmp/card", branch: "feature", head: "", baseRef: null, createdAt: "2026-09-01T00:00:00Z", note: "A real saved note" };
 const session: Session = { id: "s", workspaceId: "ws", hostId: "h", incarnation: "1", command: "sh", args: [], cols: 80, rows: 24, verdict: "live", exitCode: null, createdAt: "2026-09-01T00:00:00Z", harnessId: null };
