@@ -1,0 +1,215 @@
+/* Issue #606: subagents get their own strip tab beside the leader that
+   spawned them, so a fan-out fills the strip with rows that all look like
+   a place to type. The worktree card already solved the grouping half
+   with `parentSessionId` (worktree-agent-lineage.ts + the chevron in
+   WorktreeAgentRow); this module reuses that exact tree — no second
+   lineage rule — and answers the three questions the strip has that a
+   sidebar list does not: what order keeps a group contiguous, which tabs
+   a collapsed group hides, and which session the prompt belongs to while
+   it is hidden. Pure functions, unit-tested. */
+import {
+  buildSessionLineageTree,
+  type SessionLineageNode,
+} from "../worktree-agent-lineage";
+
+/** A strip session reduced to what the lineage tree reads. */
+export type TabLineageSession = {
+  id: string;
+  parentSessionId?: string | null;
+};
+
+export type TabStripLineage = {
+  /**
+   * The strip order with every group made contiguous: a leader is
+   * immediately followed by its descendants, depth-first, each kept in the
+   * relative position the stored order gave it. Non-session ids (browser,
+   * editor, Mentu) pass through untouched.
+   */
+  order: string[];
+  /** `order` minus the tabs a collapsed group is currently hiding. */
+  visibleOrder: string[];
+  /** Direct children per leader session id; only leaders that have any. */
+  childrenByLeaderId: ReadonlyMap<string, string[]>;
+  /** Every descendant of a leader, depth-first (its whole group). */
+  descendantsByLeaderId: ReadonlyMap<string, string[]>;
+  /** Hidden session id -> the collapsed leader whose group hides it. */
+  hiddenBy: ReadonlyMap<string, string>;
+  /** Nesting depth per session id; 0 for a leader / ungrouped session. */
+  depthById: ReadonlyMap<string, number>;
+};
+
+export type TabStripLineageInput = {
+  /** Reconciled strip order (session, browser, editor and Mentu ids). */
+  order: readonly string[];
+  /** The sessions that own strip tabs, in any order. */
+  sessions: readonly TabLineageSession[];
+  /** Leaders the user has folded shut. */
+  collapsedLeaderIds?: readonly string[] | ReadonlySet<string>;
+};
+
+const EMPTY_LINEAGE: TabStripLineage = {
+  order: [],
+  visibleOrder: [],
+  childrenByLeaderId: new Map(),
+  descendantsByLeaderId: new Map(),
+  hiddenBy: new Map(),
+  depthById: new Map(),
+};
+
+/**
+ * Group the strip's session tabs under the leaders that spawned them.
+ *
+ * Only sessions that hold a tab in `order` take part, so a parent whose
+ * own tab was closed leaves its children as roots — the card's
+ * dangling-parent rule, and the reason a collapsed group can never hide a
+ * tab whose leader is not on screen to unfold it again.
+ */
+export function buildTabStripLineage({
+  order,
+  sessions,
+  collapsedLeaderIds = [],
+}: TabStripLineageInput): TabStripLineage {
+  if (order.length === 0) return EMPTY_LINEAGE;
+  const sessionById = new Map<string, TabLineageSession>();
+  for (const session of sessions) {
+    if (!sessionById.has(session.id)) sessionById.set(session.id, session);
+  }
+  // Dedupe defensively: a duplicated id would otherwise emit two tabs with
+  // the same React key once grouping reorders the strip.
+  const seenOrderIds = new Set<string>();
+  const strip = order.filter((id) => {
+    if (seenOrderIds.has(id)) return false;
+    seenOrderIds.add(id);
+    return true;
+  });
+  const stripSessionIds = strip.filter((id) => sessionById.has(id));
+  if (stripSessionIds.length === 0) {
+    return {
+      ...EMPTY_LINEAGE,
+      order: strip,
+      visibleOrder: strip,
+    };
+  }
+
+  const nodes: SessionLineageNode[] = stripSessionIds.map((id) => ({
+    session: sessionById.get(id) as TabLineageSession,
+  }));
+  const tree = buildSessionLineageTree(nodes);
+  const childrenByLeaderId = new Map<string, string[]>();
+  for (const [parentId, children] of tree.childrenByParentSessionId) {
+    childrenByLeaderId.set(
+      parentId,
+      children.map((child) => child.session.id),
+    );
+  }
+
+  // Grouped order: a leader pulls its whole subtree along, so collapsing
+  // folds a contiguous run rather than scattered tabs. The subtree keeps
+  // the relative order the strip already gave it, which is what a drag or
+  // a pin reorder writes back.
+  const positionInStrip = new Map<string, number>();
+  strip.forEach((id, index) => positionInStrip.set(id, index));
+  const emitted = new Set<string>();
+  const depthById = new Map<string, number>();
+  const groupedOrder: string[] = [];
+  const emitSubtree = (sessionId: string, depth: number): void => {
+    if (emitted.has(sessionId)) return;
+    emitted.add(sessionId);
+    groupedOrder.push(sessionId);
+    depthById.set(sessionId, depth);
+    const children = [...(childrenByLeaderId.get(sessionId) ?? [])].sort(
+      (a, b) =>
+        (positionInStrip.get(a) ?? 0) - (positionInStrip.get(b) ?? 0),
+    );
+    for (const childId of children) emitSubtree(childId, depth + 1);
+  };
+  const rootSessionIds = new Set(
+    tree.rootRows.map((row) => row.session.id),
+  );
+  for (const id of strip) {
+    if (!sessionById.has(id)) {
+      groupedOrder.push(id);
+      continue;
+    }
+    // A child reached before its leader waits for the leader's subtree;
+    // an unreachable one (leader gone) is already a root here.
+    if (!rootSessionIds.has(id)) continue;
+    emitSubtree(id, 0);
+  }
+  // Belt and braces: anything the walk could not reach still gets a tab.
+  for (const id of strip) {
+    if (sessionById.has(id) && !emitted.has(id)) emitSubtree(id, 0);
+  }
+
+  const descendantsByLeaderId = new Map<string, string[]>();
+  const collectDescendants = (sessionId: string): string[] => {
+    const cached = descendantsByLeaderId.get(sessionId);
+    if (cached) return cached;
+    const out: string[] = [];
+    // Guard against a cycle the tree normalizer did not already unwind.
+    descendantsByLeaderId.set(sessionId, out);
+    for (const childId of childrenByLeaderId.get(sessionId) ?? []) {
+      out.push(childId, ...collectDescendants(childId));
+    }
+    return out;
+  };
+  for (const leaderId of childrenByLeaderId.keys()) collectDescendants(leaderId);
+
+  const collapsed = new Set(collapsedLeaderIds);
+  const hiddenBy = new Map<string, string>();
+  for (const id of groupedOrder) {
+    if (!collapsed.has(id) || !childrenByLeaderId.has(id)) continue;
+    // A nested collapsed leader inside an already-hidden group keeps the
+    // outermost one as the owner, so unfolding it reveals the whole path.
+    const owner = hiddenBy.get(id) ?? id;
+    for (const descendantId of descendantsByLeaderId.get(id) ?? []) {
+      if (!hiddenBy.has(descendantId)) hiddenBy.set(descendantId, owner);
+    }
+  }
+
+  return {
+    order: groupedOrder,
+    visibleOrder: groupedOrder.filter((id) => !hiddenBy.has(id)),
+    childrenByLeaderId,
+    descendantsByLeaderId,
+    hiddenBy,
+    depthById,
+  };
+}
+
+/**
+ * Where the prompt goes: a hidden subagent never owns the input, so while
+ * its group is collapsed the leader answers for it. Any other tab — a
+ * visible subagent, a browser tab, nothing selected — is returned
+ * unchanged, so this can sit on every selection path without inventing a
+ * target of its own.
+ */
+export function resolveTabPromptTarget(
+  activeSessionId: string,
+  lineage: Pick<TabStripLineage, "hiddenBy">,
+): string {
+  return lineage.hiddenBy.get(activeSessionId) ?? activeSessionId;
+}
+
+/**
+ * Toggle one leader's fold.
+ *
+ * Ids for sessions that no longer exist are dropped so the persisted set
+ * cannot grow with every finished fan-out; a leader whose children have
+ * merely exited keeps its fold, because the group is the same group when
+ * it spawns the next worker. `knownSessionIds` empty means "not known
+ * yet" (a workspace whose sessions have not loaded) and prunes nothing.
+ */
+export function toggleCollapsedLeader(
+  collapsedLeaderIds: readonly string[],
+  leaderId: string,
+  knownSessionIds: ReadonlySet<string>,
+): string[] {
+  const next = new Set(collapsedLeaderIds);
+  if (next.has(leaderId)) next.delete(leaderId);
+  else next.add(leaderId);
+  if (knownSessionIds.size === 0) return [...next];
+  return [...next].filter(
+    (id) => id === leaderId || knownSessionIds.has(id),
+  );
+}

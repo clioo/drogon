@@ -12,16 +12,28 @@
    functions, unit-tested. */
 import type { WorktreeAgentRow } from "./worktree-agent-rows";
 
-export type WorktreeAgentRowTree = {
-  rootRows: WorktreeAgentRow[];
-  childrenByParentSessionId: Map<string, WorktreeAgentRow[]>;
+/**
+ * All these functions actually read is a row wrapping a session that
+ * records the parent which spawned it. Worktree card rows satisfy it, and
+ * so does a bare `{ session }` projection from the tab strip — issue #606
+ * groups subagent TABS with this same tree instead of a second one.
+ */
+export type SessionLineageNode = {
+  session: { id: string; parentSessionId?: string | null };
+};
+
+export type SessionLineageTree<Node extends SessionLineageNode> = {
+  rootRows: Node[];
+  childrenByParentSessionId: Map<string, Node[]>;
   childSessionIds: Set<string>;
 };
 
+export type WorktreeAgentRowTree = SessionLineageTree<WorktreeAgentRow>;
+
 /** The recorded parent when it names another row in the same card. */
-export function resolveRowParentSessionId(
-  row: WorktreeAgentRow,
-  rowsBySessionId: ReadonlyMap<string, WorktreeAgentRow>,
+export function resolveRowParentSessionId<Node extends SessionLineageNode>(
+  row: Node,
+  rowsBySessionId: ReadonlyMap<string, Node>,
 ): string | undefined {
   const parentSessionId = row.session.parentSessionId ?? null;
   if (
@@ -42,16 +54,16 @@ export function resolveRowParentSessionId(
  * and rows unreachable from any root are normalized back to roots (their
  * children re-attach to the root list) — both fork-verbatim.
  */
-export function buildWorktreeAgentRowTree(
-  rows: readonly WorktreeAgentRow[],
-): WorktreeAgentRowTree {
-  const rowsBySessionId = new Map<string, WorktreeAgentRow>();
+export function buildWorktreeAgentRowTree<Node extends SessionLineageNode>(
+  rows: readonly Node[],
+): SessionLineageTree<Node> {
+  const rowsBySessionId = new Map<string, Node>();
   for (const row of rows) {
     if (!rowsBySessionId.has(row.session.id)) {
       rowsBySessionId.set(row.session.id, row);
     }
   }
-  const childrenByParentSessionId = new Map<string, WorktreeAgentRow[]>();
+  const childrenByParentSessionId = new Map<string, Node[]>();
   const childSessionIds = new Set<string>();
 
   for (const row of rows) {
@@ -81,7 +93,7 @@ export function buildWorktreeAgentRowTree(
 
   const reachableSessionIds = new Set<string>();
   const markReachable = (
-    row: WorktreeAgentRow,
+    row: Node,
     ancestorSessionIds: ReadonlySet<string> = new Set(),
   ): void => {
     if (
@@ -137,3 +149,10 @@ export function buildWorktreeAgentRowTree(
     childSessionIds: normalizedChildSessionIds,
   };
 }
+
+/**
+ * The lineage tree under its shape-first name, for callers that are not
+ * worktree card rows (issue #606's tab strip). Same function, same rules —
+ * exported twice so neither call site has to pretend to be the other.
+ */
+export const buildSessionLineageTree = buildWorktreeAgentRowTree;

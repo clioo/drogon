@@ -14,9 +14,10 @@ import { TabBar } from "./TabBar";
 beforeEach(installRadixJsdomStubs);
 afterEach(cleanup);
 
-function session(id: string): Session {
+function session(id: string, parentSessionId: string | null = null): Session {
   return {
     id,
+    parentSessionId,
     workspaceId: "ws",
     hostId: "host",
     incarnation: "1",
@@ -49,6 +50,10 @@ function renderStrip(overrides: {
   mentuActive?: boolean;
   onSelectMentu?: () => void;
   onCloseMentu?: () => void;
+  collapsedLineageIds?: string[];
+  onToggleLineage?: (sessionId: string) => void;
+  onSelectSession?: (id: string) => void;
+  activeSessionId?: string;
 }) {
   const onOrderChange = overrides.onOrderChange ?? (() => {});
   const onCommitTitle = overrides.onCommitTitle ?? (() => {});
@@ -57,7 +62,7 @@ function renderStrip(overrides: {
     <Tooltip.Provider>
     <TabBar
       sessions={overrides.sessions ?? [session("a"), session("b"), session("c")]}
-      activeSessionId="a"
+      activeSessionId={overrides.activeSessionId ?? "a"}
       browserTabs={[]}
       activeBrowserTabId={null}
       editorTabs={overrides.editorTabs ?? []}
@@ -77,6 +82,8 @@ function renderStrip(overrides: {
       stripOrder={overrides.stripOrder ?? []}
       pinnedIds={overrides.pinnedIds ?? []}
       customTitles={overrides.customTitles ?? {}}
+      collapsedLineageIds={overrides.collapsedLineageIds ?? []}
+      onToggleLineage={overrides.onToggleLineage}
       onOrderChange={onOrderChange}
       onTogglePin={overrides.onTogglePin ?? (() => {})}
       onCloseOthers={() => {}}
@@ -84,7 +91,7 @@ function renderStrip(overrides: {
       onCloseToLeft={() => {}}
       onCommitTitle={onCommitTitle}
       onCopyText={overrides.onCopyText ?? (() => {})}
-      onSelectSession={() => {}}
+      onSelectSession={overrides.onSelectSession ?? (() => {})}
       onSelectBrowserTab={() => {}}
       onSelectEditorTab={overrides.onSelectEditorTab ?? (() => {})}
       onRenameEditorFile={overrides.onRenameEditorFile}
@@ -589,5 +596,134 @@ describe("Mentu as a strip tab (reported bug)", () => {
     expect(
       screen.getByRole("tab", { name: "Work Graph" }).getAttribute("aria-selected"),
     ).toBe("false");
+  });
+});
+
+describe("TabBar subagent groups (#606)", () => {
+  const fanOut = [
+    session("lead"),
+    session("solo"),
+    session("kid-1", "lead"),
+    session("kid-2", "lead"),
+  ];
+
+  it("pulls a leader's subagents beside it and marks them as children", () => {
+    renderStrip({
+      sessions: fanOut,
+      // The fan-out arrived after an unrelated session, so the tabs start
+      // scattered — exactly the cluttered strip the issue reports.
+      stripOrder: ["lead", "solo", "kid-1", "kid-2"],
+      onToggleLineage: () => {},
+    });
+    expect(tabIds()).toEqual(["lead", "kid-1", "kid-2", "solo"]);
+    const [leadTab, firstChild, , soloTab] = screen.getAllByRole("tab");
+    expect(leadTab.getAttribute("data-lineage-parent")).toBe("true");
+    expect(firstChild.getAttribute("data-lineage-child")).toBe("true");
+    expect(firstChild.className).toContain("tab-lineage-child");
+    expect(soloTab.getAttribute("data-lineage-child")).toBeNull();
+    expect(soloTab.getAttribute("data-lineage-parent")).toBeNull();
+  });
+
+  it("offers one chevron per leader, counting the whole group", () => {
+    renderStrip({
+      sessions: fanOut,
+      stripOrder: ["lead", "solo", "kid-1", "kid-2"],
+      onToggleLineage: () => {},
+    });
+    const toggles = screen.getAllByRole("button", {
+      name: /child agents?$/,
+    });
+    expect(toggles).toHaveLength(1);
+    expect(toggles[0].getAttribute("aria-label")).toBe("Hide 2 child agents");
+    expect(toggles[0].getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("one click on the chevron folds the whole group away", () => {
+    const toggled: string[] = [];
+    renderStrip({
+      sessions: fanOut,
+      stripOrder: ["lead", "solo", "kid-1", "kid-2"],
+      onToggleLineage: (id) => toggled.push(id),
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Hide 2 child agents" }),
+    );
+    // One click, one leader: the strip reports the fold and App persists it.
+    expect(toggled).toEqual(["lead"]);
+
+    cleanup();
+    renderStrip({
+      sessions: fanOut,
+      stripOrder: ["lead", "solo", "kid-1", "kid-2"],
+      collapsedLineageIds: ["lead"],
+      onToggleLineage: () => {},
+    });
+    expect(tabIds()).toEqual(["lead", "solo"]);
+    const toggle = screen.getByRole("button", { name: "Show 2 child agents" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      screen
+        .getAllByRole("tab")[0]
+        .querySelector('[data-lineage-child-count="true"]')?.textContent,
+    ).toBe("+2");
+  });
+
+  it("does not select the leader when the chevron is clicked", () => {
+    const selected: string[] = [];
+    renderStrip({
+      sessions: fanOut,
+      stripOrder: ["lead", "solo", "kid-1", "kid-2"],
+      onToggleLineage: () => {},
+      onSelectSession: (id) => selected.push(id),
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Hide 2 child agents" }),
+    );
+    expect(selected).toEqual([]);
+  });
+
+  it("keeps arrow navigation on the tabs that are still on screen", () => {
+    const selected: string[] = [];
+    renderStrip({
+      sessions: fanOut,
+      // A subagent sits between the leader and `solo` in the stored order,
+      // so stepping right proves the fold is skipped, not just reordered.
+      stripOrder: ["lead", "kid-1", "solo", "kid-2"],
+      collapsedLineageIds: ["lead"],
+      onToggleLineage: () => {},
+      onSelectSession: (id) => selected.push(id),
+    });
+    expect(tabIds()).toEqual(["lead", "solo"]);
+    fireEvent.keyDown(screen.getAllByRole("tab")[0], { key: "ArrowRight" });
+    // "solo", not the folded "kid-1": a hidden subagent cannot take focus.
+    expect(selected).toEqual(["solo"]);
+  });
+
+  it("numbers tabs over the whole strip, so folding renumbers nothing", () => {
+    renderStrip({
+      sessions: fanOut,
+      stripOrder: ["lead", "solo", "kid-1", "kid-2"],
+      collapsedLineageIds: ["lead"],
+      onToggleLineage: () => {},
+    });
+    const labels = screen
+      .getAllByRole("tab")
+      .map((tab) => tab.getAttribute("aria-label"));
+    expect(labels[0]).toContain("Terminal 1");
+    // `solo` is the fourth session in grouped order and keeps that number
+    // whether or not the group above it is folded.
+    expect(labels[1]).toContain("Terminal 4");
+  });
+
+  it("shows no chevron at all without a grouping handler", () => {
+    renderStrip({
+      sessions: fanOut,
+      stripOrder: ["lead", "solo", "kid-1", "kid-2"],
+      collapsedLineageIds: ["lead"],
+    });
+    expect(
+      screen.queryByRole("button", { name: /child agents?$/ }),
+    ).toBeNull();
+    expect(tabIds()).toEqual(["lead", "kid-1", "kid-2", "solo"]);
   });
 });

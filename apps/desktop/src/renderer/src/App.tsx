@@ -60,6 +60,11 @@ import {
   togglePinnedOrder,
   type TabStripState,
 } from "./features/shell/tab-order";
+import {
+  buildTabStripLineage,
+  resolveTabPromptTarget,
+  toggleCollapsedLeader,
+} from "./features/shell/tab-strip/tab-lineage";
 import { NewWorkspaceComposerModal } from "./features/new-workspace/NewWorkspaceComposerModal";
 import {
   composerAgentLaunchInput,
@@ -3885,6 +3890,39 @@ export function App() {
   }, [selected, statusHostId, statusEpoch]);
   const changeTabOrder = (order: string[]) =>
     updateTabStrip({ ...tabStrip, order });
+  // Issue #606: the strip's subagent groups, from the same
+  // `parentSessionId` lineage the worktree card folds with. Computed here
+  // (not only inside TabBar) because folding a group has to answer a
+  // question the strip cannot: which session the prompt belongs to once
+  // the active tab is hidden.
+  const stripLineage = buildTabStripLineage({
+    order: liveStripOrder(),
+    sessions: stripSessions,
+    collapsedLeaderIds: tabStrip.collapsedLineage ?? [],
+  });
+  // A folded subagent has no tab, so it must not hold the input either:
+  // its leader answers for the whole group while it stays folded. Only
+  // the active session moves — the route and the browser/editor selection
+  // are left exactly as the user left them.
+  const promptTargetSessionId = resolveTabPromptTarget(
+    activeRootId,
+    stripLineage,
+  );
+  useEffect(() => {
+    if (!promptTargetSessionId || promptTargetSessionId === activeRootId)
+      return;
+    setActive(promptTargetSessionId);
+  }, [promptTargetSessionId, activeRootId]);
+  const toggleTabLineage = (leaderId: string) => {
+    updateTabStrip({
+      ...tabStrip,
+      collapsedLineage: toggleCollapsedLeader(
+        tabStrip.collapsedLineage ?? [],
+        leaderId,
+        new Set(stripSessions.map((item) => item.id)),
+      ),
+    });
+  };
   const toggleTabPin = (id: string) => {
     const order = reconcileTabOrder(
       tabStrip.order,
@@ -5389,6 +5427,8 @@ export function App() {
                 stripOrder={tabStrip.order}
                 pinnedIds={tabStrip.pinned}
                 customTitles={tabStrip.titles}
+                collapsedLineageIds={tabStrip.collapsedLineage ?? []}
+                onToggleLineage={toggleTabLineage}
                 onOrderChange={changeTabOrder}
                 onTogglePin={toggleTabPin}
                 onCloseOthers={(id) => closeStripTabs(id, "others")}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  EMPTY_TAB_STRIP_STATE,
   MENTU_TAB_ID,
   bulkCloseTargets,
   loadTabStripState,
@@ -149,6 +150,7 @@ describe("tab-strip persistence", () => {
       editors: [],
       browsers: [],
       mentu: false,
+      collapsedLineage: [],
     });
     expect(loadTabStripState(storage, "ws-1")).toEqual({
       order: ["a", "b"],
@@ -158,6 +160,7 @@ describe("tab-strip persistence", () => {
       editors: [],
       browsers: [],
       mentu: false,
+      collapsedLineage: [],
     });
     expect(loadTabStripState(storage, "ws-2")).toEqual({
       order: [],
@@ -167,6 +170,7 @@ describe("tab-strip persistence", () => {
       editors: [],
       browsers: [],
       mentu: false,
+      collapsedLineage: [],
     });
   });
 
@@ -183,6 +187,7 @@ describe("tab-strip persistence", () => {
       editors: [],
       browsers: [],
       mentu: false,
+      collapsedLineage: [],
     });
     expect(
       parseTabStripState(
@@ -196,6 +201,7 @@ describe("tab-strip persistence", () => {
       editors: [],
       browsers: [],
       mentu: false,
+      collapsedLineage: [],
     });
   });
 
@@ -211,6 +217,7 @@ describe("tab-strip persistence", () => {
       editors: [],
       browsers: [],
       mentu: false,
+      collapsedLineage: [],
     });
     expect(loadTabStripState(storage, "ws-1").splits).toEqual({
       a: { panes: ["a", "b"], active: "b", sizes: [0.6, 0.4] },
@@ -232,6 +239,41 @@ describe("tab-strip persistence", () => {
   });
 });
 
+describe("folded subagent groups (#606)", () => {
+  it("round-trips folded leaders per workspace, additively", () => {
+    const storage = memStorage();
+    saveTabStripState(storage, "ws-1", {
+      ...EMPTY_TAB_STRIP_STATE,
+      order: ["lead", "kid"],
+      collapsedLineage: ["lead"],
+    });
+    // The fold has to survive the reload that a plain re-render never sees.
+    expect(loadTabStripState(storage, "ws-1").collapsedLineage).toEqual([
+      "lead",
+    ]);
+    // A different workspace keeps its own folds.
+    expect(loadTabStripState(storage, "ws-2").collapsedLineage).toEqual([]);
+  });
+
+  it("hydrates pre-#606 envelopes to nothing folded", () => {
+    expect(
+      parseTabStripState(
+        JSON.stringify({ state: { order: ["a"], pinned: [], titles: {} } }),
+      ).collapsedLineage,
+    ).toEqual([]);
+  });
+
+  it("drops junk instead of folding on a tampered envelope", () => {
+    expect(
+      parseTabStripState(
+        JSON.stringify({
+          state: { order: ["a"], collapsedLineage: [1, "", "a", "a"] },
+        }),
+      ).collapsedLineage,
+    ).toEqual(["a"]);
+  });
+});
+
 describe("tab-strip membership (R16-AJ, fixes #215)", () => {
   it("round-trips editor paths and browser id+url records", () => {
     const storage = memStorage();
@@ -243,6 +285,7 @@ describe("tab-strip membership (R16-AJ, fixes #215)", () => {
       editors: ["notes.txt", "src/a.ts"],
       browsers: [{ tabId: "browser-tab-1", url: "https://example.com/" }],
       mentu: false,
+      collapsedLineage: [],
     });
     expect(loadTabStripState(storage, "ws-1")).toEqual({
       order: ["ws-1::notes.txt", "browser-tab-1"],
@@ -252,6 +295,7 @@ describe("tab-strip membership (R16-AJ, fixes #215)", () => {
       editors: ["notes.txt", "src/a.ts"],
       browsers: [{ tabId: "browser-tab-1", url: "https://example.com/" }],
       mentu: false,
+      collapsedLineage: [],
     });
   });
 
@@ -268,6 +312,7 @@ describe("tab-strip membership (R16-AJ, fixes #215)", () => {
       editors: [],
       browsers: [],
       mentu: false,
+      collapsedLineage: [],
     });
   });
 
@@ -375,6 +420,7 @@ describe("Mentu tab membership", () => {
       editors: [],
       browsers: [],
       mentu: true,
+      collapsedLineage: [],
     };
     saveTabStripState(storage, "ws-1", open);
     expect(loadTabStripState(storage, "ws-1").mentu).toBe(true);
