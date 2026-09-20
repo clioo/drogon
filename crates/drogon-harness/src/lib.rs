@@ -41,7 +41,8 @@ pub use mentu_contract::{
     parse_adapters_json, translate_selection,
 };
 pub use resume_store::{
-    claude_conversation_exists, claude_project_dir_name, resumable_conversation_exists,
+    ResumeStoreRoots, claude_conversation_exists, claude_project_dir_name, pi_conversation_exists,
+    pi_project_dir_name, resumable_conversation_exists,
 };
 pub use selection::{
     HarnessSelection, SelectionRecord, SelectionVerdict, allowed_efforts, validate_selection,

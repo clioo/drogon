@@ -1910,6 +1910,9 @@ export function TerminalPane({
           processExit={{
             exitCode: null,
             reason: sleeping ? "session-sleeping" : "connection-unrecoverable",
+            // The copy must not promise the same conversation when the
+            // harness reported no identity to name it with.
+            resumeKind: sleeping?.resumeKind,
           }}
           onRestart={restartExits}
           onClose={() => {

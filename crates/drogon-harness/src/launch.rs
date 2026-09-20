@@ -296,8 +296,9 @@ pub fn plan_launch_with_args(
 /// - Codex: the `resume <session_id>` SUBCOMMAND.
 /// - OpenCode: `opencode --session <session_id>`.
 /// - Antigravity (`agy`): `agy --conversation <conversation_id>`.
-/// - Pi: `pi --session <transcript>` — Pi resumes by the session FILE it
-///   reported, so an id without a transcript path cannot name one.
+/// - Pi: `pi --session <transcript-or-id>` — `--session` takes the session
+///   FILE it wrote or a (partial) session UUID, so the reported transcript is
+///   preferred and the id is the honest fallback.
 ///
 /// Without a locator the CLI's own most-recent-in-cwd entrypoint is the best
 /// available answer (`--continue`; Codex's `resume --last`) and is kept
@@ -353,8 +354,17 @@ pub fn explicit_resume_argv(
         HarnessId::Codex => Some(vec!["resume".into(), id.to_string()]),
         HarnessId::Opencode => Some(vec!["--session".into(), id.to_string()]),
         HarnessId::Antigravity => Some(vec!["--conversation".into(), id.to_string()]),
-        // Pi's `--session` takes the session FILE it wrote, not the id.
-        HarnessId::Pi => transcript.map(|path| vec!["--session".into(), path.to_string()]),
+        // Pi's `--session` takes "a specific session file or partial UUID"
+        // (its own `--help`, and the exit hint it prints is
+        // `pi --session <sessionId>`), so the transcript file is preferred
+        // and the id names the same conversation when only the id was
+        // reported. An id-only locator is exact here, not a guess: Pi
+        // resolves it against its own store and refuses loudly when it is
+        // gone, exactly like the other harnesses.
+        HarnessId::Pi => Some(vec![
+            "--session".into(),
+            transcript.unwrap_or(id).to_string(),
+        ]),
     }
 }
 
@@ -366,7 +376,11 @@ pub fn explicit_resume_argv(
 pub fn harness_resume_is_explicit(harness_id: HarnessId) -> bool {
     matches!(
         harness_id,
-        HarnessId::Claude | HarnessId::Codex | HarnessId::Opencode | HarnessId::Antigravity
+        HarnessId::Claude
+            | HarnessId::Codex
+            | HarnessId::Opencode
+            | HarnessId::Antigravity
+            | HarnessId::Pi
     )
 }
 
@@ -902,22 +916,32 @@ mod tests {
         }
     }
 
-    /// Pi resumes by the session FILE it wrote, so an id alone cannot name
-    /// one: the launch degrades to the CLI's own most-recent entrypoint
-    /// rather than passing an id Pi would read as a path.
+    /// Pi's `--session` accepts a session FILE or a (partial) session UUID
+    /// (its own `--help`, and the hint it prints on exit is
+    /// `pi --session <sessionId>`), so a reported id alone names one exact
+    /// conversation; the transcript file is preferred when both are known.
     #[test]
-    fn pi_resumes_by_transcript_file_and_degrades_without_one() {
+    fn pi_resumes_by_transcript_file_or_by_session_id() {
         let mut by_id = interactive(HarnessId::Pi);
         by_id.resume = true;
         by_id.agent_session_id = Some("11111111-2222-3333-4444-555555555555".to_string());
-        assert_eq!(plan(&by_id), ["--continue"]);
-        assert!(!harness_resume_is_explicit(HarnessId::Pi));
+        assert_eq!(
+            plan(&by_id),
+            ["--session", "11111111-2222-3333-4444-555555555555"]
+        );
+        assert!(harness_resume_is_explicit(HarnessId::Pi));
 
         let mut by_file = interactive(HarnessId::Pi);
         by_file.resume = true;
         by_file.agent_session_id = Some("11111111-2222-3333-4444-555555555555".to_string());
         by_file.agent_session_transcript_path = Some("/tmp/pi-sessions/1111.jsonl".to_string());
         assert_eq!(plan(&by_file), ["--session", "/tmp/pi-sessions/1111.jsonl"]);
+
+        // No locator at all: the CLI's own most-recent entrypoint is still
+        // the best available answer, and it never claims a named resume.
+        let mut without = interactive(HarnessId::Pi);
+        without.resume = true;
+        assert_eq!(plan(&without), ["--continue"]);
     }
 
     /// A locator crosses a trust boundary into a child's argv: anything that
@@ -937,10 +961,11 @@ mod tests {
         base.agent_session_id = Some("--dangerously-skip-permissions".to_string());
         assert_eq!(plan(&base), ["--continue"]);
         assert_eq!(explicit_resume_argv(HarnessId::Claude, None, None), None);
-        // An unusable transcript path for Pi is dropped, not passed through.
+        // An unusable transcript path for Pi is dropped, not passed through;
+        // the (already validated) id still names the same conversation.
         assert_eq!(
             explicit_resume_argv(HarnessId::Pi, Some("id"), Some("bad\npath")),
-            None
+            Some(vec!["--session".to_string(), "id".to_string()])
         );
     }
 

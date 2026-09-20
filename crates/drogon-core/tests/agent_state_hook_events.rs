@@ -494,3 +494,74 @@ fn claude_harness_start_writes_hooks_file_and_exit_removes_it() {
     );
     assert_eq!(pi_stopped["verdict"], "exited");
 }
+
+/// Pi's `session_start` is both the session boundary and the one place an
+/// extension can read Pi's own `sessionManager`, so it is where the
+/// conversation locator arrives. It must be accepted for pi, land the row on
+/// the idle boundary (a just-launched TUI is never "working"), and persist
+/// the identity a later Resume names -- `pi --session <id|file>` -- instead
+/// of degrading to the directory's most recent conversation.
+#[test]
+fn pi_session_start_records_the_conversation_and_lands_idle() {
+    let dir = tempfile::tempdir().unwrap();
+    write_fixture_settings(&dir, "exec sleep 30", true);
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine);
+    let launched = ok(
+        &engine,
+        "harness.start",
+        json!({ "workspaceId": workspace_id, "harnessId": "pi", "permissionMode": "inherit" }),
+    );
+    let session_id = launched["id"].as_str().unwrap().to_string();
+    let incarnation = launched["incarnation"].as_str().unwrap().to_string();
+
+    let transcript = dir.path().join("pi-session.jsonl");
+    std::fs::write(&transcript, "{}\n").unwrap();
+    let transcript_str = transcript.to_string_lossy().into_owned();
+    let provider_id = "01a0c0f6-5b60-72e7-8dc5-a9ed89ce5409";
+
+    let boundary = ok(
+        &engine,
+        "session.hook_event",
+        json!({
+            "sessionId": session_id,
+            "incarnation": incarnation,
+            "event": "SessionStart",
+            "agentSessionId": provider_id,
+            "agentSessionTranscriptPath": transcript_str,
+        }),
+    );
+    assert_eq!(
+        boundary["agentState"], "idle",
+        "the session boundary is a done row, never a phantom spinner: {boundary:?}"
+    );
+    assert_eq!(boundary["agentSessionId"], provider_id);
+    assert_eq!(boundary["agentSessionTranscriptPath"], transcript_str);
+
+    // The lifecycle still works from there: a resumption hook opens the turn.
+    let working = hook_event(&engine, &session_id, &incarnation, "AgentStart");
+    assert_eq!(working["agentState"], "working");
+    let idle_again = hook_event(&engine, &session_id, &incarnation, "AgentEnd");
+    assert_eq!(idle_again["agentState"], "idle");
+
+    // A foreign harness's name is still refused for pi, boundary included.
+    assert_eq!(
+        err_code(
+            &engine,
+            "session.hook_event",
+            json!({
+                "sessionId": session_id,
+                "incarnation": incarnation,
+                "event": "UserPromptSubmit",
+            }),
+        ),
+        "invalid_argument"
+    );
+
+    let stopped = ok(
+        &engine,
+        "session.stop",
+        json!({ "sessionId": session_id, "incarnation": incarnation }),
+    );
+    assert_eq!(stopped["verdict"], "exited");
+}
