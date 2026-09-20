@@ -28,6 +28,11 @@ const session = z.object({
   args: z.array(z.string()),
   cols: z.number().int().min(1).max(1000),
   rows: z.number().int().min(1).max(1000),
+  // Additive (#605): the ring offset `cols`x`rows` took effect at, so a
+  // terminal can switch grids at the exact byte the pty did. Optional so an
+  // older service without it still validates; absent reads as 0, i.e. "this
+  // grid has been in force for every byte retained".
+  gridCursor: z.number().int().nonnegative().optional(),
   verdict: z.enum(["live", "unverifiable", "exited"]),
   exitCode: z.number().int().nullable(),
   createdAt: z.string(),
@@ -78,6 +83,19 @@ const sessionOutputPage = z
     startCursor: cursor,
     nextCursor: cursor,
     truncated: z.boolean(),
+    // Additive (#605): every grid this page spans. Bounded by the daemon's
+    // own retention (GRID_HISTORY_LIMIT), so a bounded array here is not a
+    // new constraint on the service, just an honest one.
+    gridChanges: z
+      .array(
+        z.object({
+          cursor: cursor,
+          cols: z.number().int().min(1).max(1000),
+          rows: z.number().int().min(1).max(1000),
+        }),
+      )
+      .max(128)
+      .optional(),
   })
   .refine((value) => value.nextCursor >= value.startCursor);
 const harness = z

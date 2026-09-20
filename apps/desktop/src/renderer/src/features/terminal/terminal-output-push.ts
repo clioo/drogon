@@ -144,13 +144,31 @@ export type TerminalWriteFn = (bytes: Uint8Array) => Promise<void>;
  * chain — the caller still sees its own rejection — so one bad chunk
  * cannot stall the pane behind it.
  */
+/**
+ * An ordered writer, plus `run` for work that must land *between* two
+ * writes. The terminal's own grid change is the case that needs it (#605):
+ * it has to take effect after every byte the pty produced at the old grid
+ * and before the first byte it produced at the new one, and the pane arms
+ * its next read before the previous write settles, so anything done outside
+ * this chain can slip past a page that is still queued.
+ */
+export type OrderedTerminalWriter = TerminalWriteFn & {
+  run: <T>(action: () => T | Promise<T>) => Promise<T>;
+};
+
 export function createOrderedTerminalWriter(
   write: TerminalWriteFn,
-): TerminalWriteFn {
+): OrderedTerminalWriter {
   let tail: Promise<void> = Promise.resolve();
-  return (bytes) => {
-    const step = tail.then(() => write(bytes));
-    tail = step.catch(() => {});
-    return step;
+  const enqueue = <T>(step: () => T | Promise<T>): Promise<T> => {
+    const queued = tail.then(step);
+    tail = queued.then(
+      () => {},
+      () => {},
+    );
+    return queued;
   };
+  const writer = ((bytes) => enqueue(() => write(bytes))) as OrderedTerminalWriter;
+  writer.run = (action) => enqueue(action);
+  return writer;
 }

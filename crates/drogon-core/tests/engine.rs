@@ -1228,3 +1228,248 @@ fn a_large_write_to_a_stalled_child_does_not_stall_resize() {
         .recv_timeout(Duration::from_secs(5))
         .expect("the blocked write must return once the child is stopped");
 }
+
+/// #605: the grid a pty reports is only half the story — a terminal emulator
+/// fed from the ring has to know *which byte* that grid started at, or it
+/// re-wraps the frame an agent is in the middle of drawing and strands it on
+/// screen. `gridCursor` is that byte.
+#[test]
+fn resize_reports_the_ring_offset_its_new_grid_took_effect_at() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine, dir.path(), "ws-grid");
+
+    let session = ok(
+        &engine,
+        "session.start",
+        "start-grid",
+        json!({
+            "workspaceId": workspace_id,
+            "command": "/bin/sh",
+            "args": ["-c", "printf before; read line; printf after; read done"],
+            "cols": 80, "rows": 24
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+    // A session that has never been resized has always had its opening grid,
+    // so every retained byte belongs to it.
+    assert_eq!(session["gridCursor"], 0);
+
+    let read_at = |cursor: u64, tag: &str| {
+        ok(
+            &engine,
+            "session.read",
+            tag,
+            json!({ "sessionId": session_id, "incarnation": incarnation, "cursor": cursor }),
+        )
+    };
+
+    // Let the child produce output at the opening grid.
+    assert!(
+        wait_for(
+            || !base64_decode(read_at(0, "read-before").unwrap_str("dataBase64")).is_empty(),
+            Duration::from_secs(5),
+        ),
+        "child must emit before the resize"
+    );
+    let before = read_at(0, "read-pre-resize");
+    let produced_at_old_grid = before["nextCursor"].as_u64().unwrap();
+    assert!(produced_at_old_grid > 0);
+
+    let resized = ok(
+        &engine,
+        "session.resize",
+        "resize-grid",
+        json!({ "sessionId": session_id, "incarnation": incarnation, "cols": 120, "rows": 40 }),
+    );
+    assert_eq!(resized["cols"], 120);
+    let cut = resized["gridCursor"].as_u64().unwrap();
+    // Everything already retained was composed before the SIGWINCH, so the
+    // cut cannot fall inside it.
+    assert!(
+        cut >= produced_at_old_grid,
+        "cut {cut} must not precede the {produced_at_old_grid} bytes written at the old grid"
+    );
+
+    // The cut is a property of the session, not of the resize answer: every
+    // later read carries it, which is how a pane that never issued the resize
+    // (a second surface, a bot, `drogon-cli terminal resize`) still learns
+    // where the grid changed.
+    let after = read_at(cut, "read-post-resize");
+    assert_eq!(after["session"]["cols"], 120);
+    assert_eq!(after["session"]["rows"], 40);
+    assert_eq!(after["session"]["gridCursor"].as_u64().unwrap(), cut);
+
+    // A second resize moves the cut forward, never back.
+    ok(
+        &engine,
+        "session.write",
+        "write-grid",
+        json!({
+            "sessionId": session_id,
+            "incarnation": incarnation,
+            "dataBase64": base64_of("x\n"),
+        }),
+    );
+    assert!(
+        wait_for(
+            || read_at(cut, "read-more")["nextCursor"].as_u64().unwrap() > cut,
+            Duration::from_secs(5),
+        ),
+        "child must emit after the resize"
+    );
+    let again = ok(
+        &engine,
+        "session.resize",
+        "resize-grid-2",
+        json!({ "sessionId": session_id, "incarnation": incarnation, "cols": 90, "rows": 30 }),
+    );
+    let second_cut = again["gridCursor"].as_u64().unwrap();
+    assert!(
+        second_cut > cut,
+        "second cut {second_cut} must be past the first at {cut}"
+    );
+
+    ok(
+        &engine,
+        "session.stop",
+        "stop-grid",
+        json!({ "sessionId": session_id, "incarnation": incarnation }),
+    );
+}
+
+trait ReadField {
+    fn unwrap_str(&self, key: &str) -> &str;
+}
+impl ReadField for Value {
+    fn unwrap_str(&self, key: &str) -> &str {
+        self[key].as_str().unwrap()
+    }
+}
+
+/// #605 (adversarial finding F1): one cut per read is not enough. Two resizes
+/// can land inside a single page, and a reader told only the newest grid
+/// parses the bytes composed at the middle one at the wrong width — which is
+/// the original bug, reached by a narrower route.
+#[test]
+fn a_read_page_carries_every_grid_it_spans() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine, dir.path(), "ws-spans");
+
+    let session = ok(
+        &engine,
+        "session.start",
+        "start-spans",
+        json!({
+            "workspaceId": workspace_id,
+            "command": "/bin/sh",
+            "args": ["-c", "printf one; read a; printf two; read b; printf three; read c"],
+            "cols": 80, "rows": 24
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    let read_from = |cursor: u64, tag: &str| {
+        ok(
+            &engine,
+            "session.read",
+            tag,
+            json!({ "sessionId": session_id, "incarnation": incarnation, "cursor": cursor }),
+        )
+    };
+    let resize_to = |cols: u64, rows: u64, tag: &str| {
+        ok(
+            &engine,
+            "session.resize",
+            tag,
+            json!({ "sessionId": session_id, "incarnation": incarnation, "cols": cols, "rows": rows }),
+        )
+    };
+    let poke = |tag: &str| {
+        ok(
+            &engine,
+            "session.write",
+            tag,
+            json!({
+                "sessionId": session_id,
+                "incarnation": incarnation,
+                "dataBase64": base64_of("x\n"),
+            }),
+        );
+    };
+    let wait_past = |cursor: u64, tag: &str| {
+        assert!(
+            wait_for(
+                || read_from(cursor, tag)["nextCursor"].as_u64().unwrap() > cursor,
+                Duration::from_secs(5),
+            ),
+            "child must emit past {cursor}"
+        );
+    };
+
+    // A page that spans nothing still says what grid to parse its first byte
+    // at, so a reader always has one.
+    wait_past(0, "spans-read-0");
+    let first = read_from(0, "spans-read-first");
+    let opening = first["gridChanges"].as_array().unwrap();
+    assert_eq!(opening.len(), 1, "no resize yet: just the grid in force");
+    assert_eq!(opening[0]["cols"], 80);
+    assert_eq!(opening[0]["cursor"], 0);
+
+    // Two resizes with output either side of each, all before the next read.
+    let cut_a = resize_to(120, 40, "spans-resize-a")["gridCursor"].as_u64().unwrap();
+    poke("spans-poke-a");
+    wait_past(cut_a, "spans-read-a");
+    let cut_b = resize_to(90, 30, "spans-resize-b")["gridCursor"].as_u64().unwrap();
+    poke("spans-poke-b");
+    wait_past(cut_b, "spans-read-b");
+
+    // One page from the top now reports all three grids, in cursor order.
+    let page = read_from(0, "spans-read-all");
+    let changes = page["gridChanges"].as_array().unwrap();
+    let seen: Vec<(u64, u64, u64)> = changes
+        .iter()
+        .map(|c| {
+            (
+                c["cursor"].as_u64().unwrap(),
+                c["cols"].as_u64().unwrap(),
+                c["rows"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(seen, vec![(0, 80, 24), (cut_a, 120, 40), (cut_b, 90, 30)]);
+    // The session still reports only its newest grid, so an older reader is
+    // unaffected by any of this.
+    assert_eq!(page["session"]["cols"], 90);
+    assert_eq!(page["session"]["gridCursor"].as_u64().unwrap(), cut_b);
+
+    // A page that starts past both cuts reports one entry, stamped at its own
+    // first byte: a reader carried forward by truncation still knows its grid.
+    let tail = read_from(cut_b, "spans-read-tail");
+    let tail_changes = tail["gridChanges"].as_array().unwrap();
+    assert_eq!(tail_changes.len(), 1);
+    assert_eq!(tail_changes[0]["cols"], 90);
+    assert_eq!(tail_changes[0]["cursor"].as_u64().unwrap(), cut_b);
+
+    // Resizing to the size it already has is not a cut.
+    let before = read_from(0, "spans-read-before-noop")["gridChanges"]
+        .as_array()
+        .unwrap()
+        .len();
+    resize_to(90, 30, "spans-resize-noop");
+    let after = read_from(0, "spans-read-after-noop")["gridChanges"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(before, after, "a resize to the current size must add no cut");
+
+    ok(
+        &engine,
+        "session.stop",
+        "stop-spans",
+        json!({ "sessionId": session_id, "incarnation": incarnation }),
+    );
+}
