@@ -4,20 +4,13 @@
 // actually accepts or rejects a daemon payload — agree about the fields the
 // renderer depends on. A field declared in one and missing from the other is
 // how a payload silently stops reaching the code that needs it.
-// Compile-time pin for the additive observed-harness fields of
-// `session-contract.ts` (issue #622): esbuild erases types, so no runtime
-// test can pin `Session["observedHarnessId"]` / `Session["observedHarnessAt"]`.
-// This test spawns the repo's own TypeScript (the same binary
-// `pnpm typecheck:renderer-contracts` uses) over a small fixture that reads
-// both fields off the real contract and assigns them to their declared
-// nullable types. tsc exits 0 today and fails with a property error when
-// either field is removed.
-import { spawnSync } from "node:child_process";
-import fs, { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
-import { describe, expect, it, test } from "vitest";
+// Additive observed-harness fields of `session-contract.ts` (issue #622)
+// are pinned the same way: the declaration is read as source text and
+// matched with a regex — esbuild erases types, so no runtime test can reach
+// `Session["observedHarnessId"]` / `Session["observedHarnessAt"]` directly —
+// and the runtime twin must accept a payload carrying both fields.
+import fs from "node:fs";
+import { describe, expect, it } from "vitest";
 import { resultSchemas } from "./result-validation";
 
 const contractSource = fs.readFileSync(
@@ -87,75 +80,44 @@ describe("ReadResult gridChanges (#605)", () => {
   });
 });
 
-const testDir = dirname(fileURLToPath(import.meta.url));
-const contractPath = join(testDir, "session-contract.ts");
-const repoRoot = join(testDir, "..", "..", "..", "..");
-const tscBin = join(
-  repoRoot,
-  "apps",
-  "desktop",
-  "node_modules",
-  "typescript",
-  "bin",
-  "tsc",
-);
-
-function fixtureSource(contractSpecifier: string): string {
-  return `import type { HarnessId, Session } from ${JSON.stringify(contractSpecifier)};
-const observedId: Session["observedHarnessId"] = undefined;
-const checkId: HarnessId | null | undefined = observedId;
-const observedAt: Session["observedHarnessAt"] = undefined;
-const checkAt: string | null | undefined = observedAt;
-export { checkAt, checkId };
-`;
-}
-
-/// Typechecks one fixture file with the repo's own tsc; returns the
-/// completed spawn result. The fixture's temp dir is the working directory
-/// so tsc never picks up the repo's own tsconfig — the flags above are the
-/// whole configuration.
-function typecheck(fixtureDir: string, fixturePath: string) {
-  return spawnSync(
-    process.execPath,
-    [
-      tscBin,
-      "--noEmit",
-      "--strict",
-      "--skipLibCheck",
-      "--target",
-      "es2022",
-      "--module",
-      "esnext",
-      "--moduleResolution",
-      "bundler",
-      fixturePath,
-    ],
-    { cwd: fixtureDir, encoding: "utf8", timeout: 100_000 },
-  );
-}
-
-describe(
-  "session-contract observed-harness fields (issue #622, F8)",
-  () => {
-    test(
-      "the contract still carries both observed fields with their nullable types",
-      { timeout: 120_000 },
-      () => {
-        const dir = mkdtempSync(join(tmpdir(), "session-contract-pin-"));
-        try {
-          const specifier = relative(dir, contractPath).replace(/\\/g, "/").replace(/\.ts$/, "");
-          const fixturePath = join(dir, "pin.ts");
-          writeFileSync(fixturePath, fixtureSource(`./${specifier}`));
-          const result = typecheck(dir, fixturePath);
-          expect(
-            `${result.stdout ?? ""}${result.stderr ?? ""}`,
-            "repo tsc must accept the observed-harness pin fixture",
-          ).toBe("");
-          expect(result.status).toBe(0);
-        } finally {
-          rmSync(dir, { recursive: true, force: true });
-        }
-      },
+describe("Session observed-harness fields (#622)", () => {
+  it("are declared on the contract", () => {
+    // The overlay reads the daemon's foreground-process observation off
+    // these fields; without the declarations the row cannot name what it
+    // is actually running.
+    expect(contractSource).toMatch(
+      /^\s*observedHarnessId\?: HarnessId \| null;$/m,
     );
-  },
-);
+    expect(contractSource).toMatch(
+      /^\s*observedHarnessAt\?: string \| null;$/m,
+    );
+  });
+
+  it("are optional, because a daemon predating them still answers", () => {
+    expect(contractSource).toMatch(/observedHarnessId\?/);
+    expect(contractSource).toMatch(/observedHarnessAt\?/);
+    expect(
+      resultSchemas["session.start"].safeParse(validSession).success,
+    ).toBe(true);
+  });
+
+  it("are accepted by the runtime schema the contract describes", () => {
+    const observedHarnessAt = new Date(0).toISOString();
+    const parsed = resultSchemas["session.start"].safeParse({
+      ...validSession,
+      observedHarnessId: "claude",
+      observedHarnessAt,
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(
+        (parsed.data as { observedHarnessId?: string | null })
+          .observedHarnessId,
+      ).toBe("claude");
+      expect(
+        (parsed.data as { observedHarnessAt?: string | null })
+          .observedHarnessAt,
+      ).toBe(observedHarnessAt);
+    }
+  });
+});
