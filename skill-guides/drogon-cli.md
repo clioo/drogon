@@ -130,13 +130,20 @@ endings to LF before sending a multi-line message, or each CR will submit
 early.
 
 That Return goes out as its own keypress: the body is written and flushed
-first, and only then the Return — and when the far end has asked for
-bracketed paste (a full-screen TUI like Claude Code does), a
-message-sized body is wrapped in paste markers so the Return lands
-*after* the marker that closes the paste. Without that, a long message
-and its Return arrive in one read on a session that is mid-turn, the
-TUI's paste heuristic takes the whole burst as pasted text, and the
-message sits in the composer unsubmitted.
+first, and only then the Return — and when the far end reads a paste as
+text, the body is wrapped in paste markers so the Return lands *after*
+the marker that closes the paste. Without that, a long message and its
+Return arrive in one read on a session that is mid-turn, the TUI's paste
+heuristic takes the whole burst as pasted text, and the message sits in
+the composer unsubmitted.
+
+"Reads a paste as text" means the far end turned bracketed paste on and
+is on the normal screen, which is where the agent composers live. A
+full-screen application on the alternate screen (vim, `less`, `htop`) is
+never framed for, because a paste there is text in a buffer rather than
+the keystrokes you meant — `:wq` would be typed, not run. Those far ends
+still get the paced Return; `bracketedPaste` in the result tells you
+which happened.
 
 Two things follow. A send costs about 40 ms more than it used to, so a
 relay nudging many sessions pays that per session. And because the body

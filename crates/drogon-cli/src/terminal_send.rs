@@ -39,14 +39,22 @@
 //! so concurrent sends fused into one line; and bytes queue in the PTY's
 //! input buffer, so a far end that is not already blocked in `read()`
 //! gets both writes in one read anyway. The first reason is why the split
-//! belongs in the daemon. The second is why the daemon ALSO wraps a
-//! message-sized body in bracketed-paste markers when the far end has
-//! asked for them (DECSET 2004, observed in that session's own output):
-//! the end marker closes the paste, so the Return after it is a keypress
-//! even when both writes land in one read. That coalescing case is not
-//! hypothetical — it is precisely a mid-turn Claude Code session, which
-//! is what #625 reported: the message typed into the composer, never
-//! submitted, and `ok: true` returned.
+//! belongs in the daemon. The second is why the daemon ALSO wraps the
+//! body in bracketed-paste markers when the far end reads a paste as
+//! text: the end marker closes the paste, so the Return after it is a
+//! keypress even when both writes land in one read. That coalescing case
+//! is not hypothetical — it is precisely a mid-turn Claude Code session,
+//! which is what #625 reported: the message typed into the composer,
+//! never submitted, and `ok: true` returned.
+//!
+//! "Reads a paste as text" is narrower than "announced DECSET 2004", and
+//! deliberately so. vim announces it too, and `:wq` pasted into vim is
+//! text typed into a buffer rather than the command the caller meant. A
+//! full-screen keystroke application says what it is by switching to the
+//! alternate screen, so the daemon frames only for a far end that has
+//! bracketed paste on AND is on the normal screen — which is where every
+//! agent composer this command exists for lives. Anything else gets the
+//! paced Return alone: a weaker delivery, never corrupted keystrokes.
 //!
 //! So the reply distinguishes two things a caller used to have to guess
 //! between. `submittedEnter` says a Return reached the PTY.

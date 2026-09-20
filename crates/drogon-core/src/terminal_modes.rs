@@ -39,6 +39,12 @@ const ESC: u8 = 0x1b;
 /// The DEC private mode number for bracketed paste.
 const BRACKETED_PASTE_MODE: u32 = 2004;
 
+/// The DEC private modes that switch to and from the alternate screen:
+/// 47 (the original), 1047 (clear on exit) and 1049 (save cursor and
+/// clear). A far end on the alternate screen is a full-screen keystroke
+/// application, not a composer — see [`TerminalModes::paste_is_text`].
+const ALTERNATE_SCREEN_MODES: [u32; 3] = [47, 1047, 1049];
+
 /// Longest partial sequence carried across chunk boundaries. A real
 /// private-mode set is far shorter than this even when a TUI sets
 /// everything at once; anything longer is not a mode sequence and is
@@ -59,24 +65,66 @@ pub(crate) const BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
 /// Closing marker. Everything before it is paste; what follows is typing.
 pub(crate) const BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
 
-/// Incremental observer of DEC private mode 2004 over a session's output.
+/// Incremental observer of the DEC private modes over a session's output.
 ///
-/// Fed every output chunk in order, it reports whether the far end
-/// currently has bracketed paste on. Sequences split across chunk
-/// boundaries are carried, because an 8 KiB read can end mid-escape.
+/// Fed every output chunk in order, it reports what the far end has asked
+/// for. Sequences split across chunk boundaries are carried, because an
+/// 8 KiB read can end mid-escape.
 #[derive(Debug, Default)]
 pub(crate) struct BracketedPasteScanner {
     /// Bytes from the tail of an earlier chunk that may still be the start
     /// of a mode sequence.
     pending: Vec<u8>,
-    enabled: bool,
+    modes: TerminalModes,
+}
+
+/// What the far end's announcements add up to.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TerminalModes {
+    /// DECSET 2004: the far end can tell a paste from typing.
+    pub(crate) bracketed_paste: bool,
+    /// DECSET 47/1047/1049: the far end is a full-screen application.
+    pub(crate) alternate_screen: bool,
+}
+
+impl TerminalModes {
+    /// Whether a framed body would be read as TEXT by this far end.
+    ///
+    /// Bracketed paste alone is not enough, and an adversarial pass is
+    /// why. vim announces 2004 like any modern application, but `:wq`
+    /// pasted into vim is text typed into a buffer, not an Ex command —
+    /// the send reported success while vim sat in INSERT mode with
+    /// `:wqhello` on screen. What separates the two is not the length of
+    /// the body (that was tried, and it only moved the failure) but what
+    /// kind of program is on the far end, and a full-screen keystroke
+    /// application says so itself by switching to the alternate screen.
+    /// vim, `less`, `htop` and a full-height `fzf` all do; the agent
+    /// composers this command exists for — Claude Code, Codex, Pi,
+    /// OpenCode — stay in the normal screen, where their transcript
+    /// scrolls.
+    ///
+    /// A composer that does use the alternate screen loses framing and
+    /// keeps the paced Return, which is the safe direction: a weaker
+    /// delivery, never corrupted keystrokes.
+    pub(crate) fn paste_is_text(self) -> bool {
+        self.bracketed_paste && !self.alternate_screen
+    }
+}
+
+/// A private-mode change this module cares about.
+#[derive(Debug, Clone, Copy)]
+struct ModeChange {
+    /// `h` (set) rather than `l` (reset).
+    on: bool,
+    bracketed_paste: bool,
+    alternate_screen: bool,
 }
 
 /// What [`scan_one`] found at an `ESC`.
 enum Scan {
-    /// A complete `ESC [ ? … h|l`; `set` is `Some` only when 2004 was one
-    /// of its parameters.
-    Mode { len: usize, set: Option<bool> },
+    /// A complete `ESC [ ? … h|l`; `set` is `Some` only when one of the
+    /// modes this module tracks was among its parameters.
+    Mode { len: usize, set: Option<ModeChange> },
     /// A complete sequence that is not a private mode change, or a byte
     /// that cannot start one: skip `len` bytes and keep looking.
     Other { len: usize },
@@ -134,12 +182,22 @@ fn scan_one(bytes: &[u8]) -> Scan {
             0x20..=0x2f => index += 1,
             // Final byte: the sequence ends here.
             0x40..=0x7e => {
-                let set = match byte {
-                    b'h' => Some(true),
-                    b'l' => Some(false),
-                    _ => None,
+                let on = match byte {
+                    b'h' => true,
+                    b'l' => false,
+                    _ => {
+                        return Scan::Mode {
+                            len: index + 1,
+                            set: None,
+                        };
+                    }
                 };
-                let set = set.filter(|_| mentions_bracketed_paste(&bytes[params_start..index]));
+                let set =
+                    tracked_modes(&bytes[params_start..index]).map(|(paste, alt)| ModeChange {
+                        on,
+                        bracketed_paste: paste,
+                        alternate_screen: alt,
+                    });
                 return Scan::Mode {
                     len: index + 1,
                     set,
@@ -151,28 +209,36 @@ fn scan_one(bytes: &[u8]) -> Scan {
     }
 }
 
-/// True when `2004` is one of the `;`-separated parameters.
+/// Which tracked modes the `;`-separated parameters name, as
+/// `(bracketed paste, alternate screen)`, or `None` when they name
+/// neither or the sequence is not one xterm would keep.
 ///
 /// A parameter's colon sub-parameters are not part of its value, so
 /// `2004:1` is mode 2004 — what xterm does with it. Beyond [`MAX_PARAMS`]
 /// the sequence is not a mode change at all, which is also what xterm
 /// does, so a far end whose announcement xterm drops is not framed for.
-fn mentions_bracketed_paste(params: &[u8]) -> bool {
-    let mut found = false;
+fn tracked_modes(params: &[u8]) -> Option<(bool, bool)> {
+    let mut paste = false;
+    let mut alternate = false;
     for (index, param) in params.split(|byte| *byte == b';').enumerate() {
         if index >= MAX_PARAMS {
-            return false;
+            return None;
         }
         let value = param.split(|byte| *byte == b':').next().unwrap_or_default();
-        if std::str::from_utf8(value)
+        let Some(mode) = std::str::from_utf8(value)
             .ok()
             .and_then(|value| value.parse::<u32>().ok())
-            == Some(BRACKETED_PASTE_MODE)
-        {
-            found = true;
+        else {
+            continue;
+        };
+        if mode == BRACKETED_PASTE_MODE {
+            paste = true;
+        }
+        if ALTERNATE_SCREEN_MODES.contains(&mode) {
+            alternate = true;
         }
     }
-    found
+    (paste || alternate).then_some((paste, alternate))
 }
 
 impl BracketedPasteScanner {
@@ -198,8 +264,13 @@ impl BracketedPasteScanner {
             let start = cursor + offset;
             match scan_one(&buf[start..]) {
                 Scan::Mode { len, set } => {
-                    if let Some(enabled) = set {
-                        self.enabled = enabled;
+                    if let Some(change) = set {
+                        if change.bracketed_paste {
+                            self.modes.bracketed_paste = change.on;
+                        }
+                        if change.alternate_screen {
+                            self.modes.alternate_screen = change.on;
+                        }
                     }
                     cursor = start + len;
                 }
@@ -215,9 +286,9 @@ impl BracketedPasteScanner {
         }
     }
 
-    /// Whether the far end last asked for bracketed paste.
-    pub(crate) fn enabled(&self) -> bool {
-        self.enabled
+    /// What the far end has asked for, as of the last chunk.
+    pub(crate) fn modes(&self) -> TerminalModes {
+        self.modes
     }
 }
 
@@ -225,12 +296,19 @@ impl BracketedPasteScanner {
 mod tests {
     use super::*;
 
-    fn enabled_after(chunks: &[&[u8]]) -> bool {
+    fn modes_after(chunks: &[&[u8]]) -> TerminalModes {
         let mut scanner = BracketedPasteScanner::default();
         for chunk in chunks {
             scanner.feed(chunk);
         }
-        scanner.enabled()
+        scanner.modes()
+    }
+
+    /// Whether the far end announced bracketed paste, ignoring what kind
+    /// of screen it is on. Most cases here are about the announcement
+    /// itself; `paste_is_text` has its own tests.
+    fn enabled_after(chunks: &[&[u8]]) -> bool {
+        modes_after(chunks).bracketed_paste
     }
 
     #[test]
@@ -294,10 +372,10 @@ mod tests {
             scanner.feed(b"\x1b[?1;2;3;4;5;6;7;8;9;10;11;12;13;14;15;16;17;18;19;20");
         }
         assert!(scanner.pending.len() <= MAX_PENDING);
-        assert!(!scanner.enabled());
+        assert!(!scanner.modes().bracketed_paste);
         // And the scanner still works afterwards.
         scanner.feed(b"\x1b[?2004h");
-        assert!(scanner.enabled());
+        assert!(scanner.modes().bracketed_paste);
     }
 
     /// The paste markers a session emits in its own output (a TUI echoing
@@ -308,6 +386,61 @@ mod tests {
             BRACKETED_PASTE_START,
             BRACKETED_PASTE_END
         ]));
+    }
+
+    /// The discriminator an adversarial pass forced: vim announces
+    /// bracketed paste exactly like a composer does, and pasting `:wq`
+    /// into it types text instead of quitting. A full-screen keystroke
+    /// application says what it is by switching to the alternate screen.
+    #[test]
+    fn a_full_screen_application_does_not_read_a_paste_as_text() {
+        // A composer: paste on, normal screen.
+        let composer = modes_after(&[b"\x1b[?2004h"]);
+        assert!(composer.bracketed_paste);
+        assert!(!composer.alternate_screen);
+        assert!(composer.paste_is_text());
+
+        // vim's shape: alternate screen and paste, in either order and
+        // in either one or two sequences.
+        for announcement in [
+            &[&b"\x1b[?1049h"[..], &b"\x1b[?2004h"[..]][..],
+            &[&b"\x1b[?2004h"[..], &b"\x1b[?1049h"[..]][..],
+            &[&b"\x1b[?1049;2004h"[..]][..],
+        ] {
+            let modes = modes_after(announcement);
+            assert!(modes.bracketed_paste, "{announcement:?}");
+            assert!(modes.alternate_screen, "{announcement:?}");
+            assert!(!modes.paste_is_text(), "{announcement:?}");
+        }
+
+        // The older spellings count too.
+        for mode in [b"47".as_slice(), b"1047", b"1049"] {
+            let mut on = b"\x1b[?".to_vec();
+            on.extend_from_slice(mode);
+            on.extend_from_slice(b"h");
+            assert!(
+                !modes_after(&[b"\x1b[?2004h", &on]).paste_is_text(),
+                "mode {}",
+                String::from_utf8_lossy(mode)
+            );
+        }
+
+        // Leaving the alternate screen gives the paste its meaning back,
+        // which is what happens when a pager exits back to the composer.
+        assert!(modes_after(&[b"\x1b[?2004h\x1b[?1049h", b"\x1b[?1049l"]).paste_is_text());
+        // And an alternate screen with no paste announcement is still
+        // not something to frame for.
+        assert!(!modes_after(&[b"\x1b[?1049h"]).paste_is_text());
+    }
+
+    /// xterm ignores a NUL inside a CSI and keeps parsing; this aborts
+    /// the sequence. The divergence can only withhold framing, never add
+    /// it, so it stays — but it is pinned rather than accidental.
+    #[test]
+    fn a_nul_inside_a_sequence_aborts_it_here_though_xterm_ignores_it() {
+        assert!(!enabled_after(&[b"\x1b[?20\x0004h"]));
+        // It cannot turn a real announcement off either.
+        assert!(enabled_after(&[b"\x1b[?2004h", b"\x1b[?20\x0004l"]));
     }
 
     /// `0x9b` is a UTF-8 continuation byte here, never a one-byte CSI:
@@ -385,7 +518,7 @@ mod tests {
         for byte in &sequence {
             byte_at_a_time.feed(&[*byte]);
         }
-        assert!(byte_at_a_time.enabled());
+        assert!(byte_at_a_time.modes().bracketed_paste);
     }
 
     /// A mode change written inside a string sequence still counts,

@@ -21,7 +21,9 @@ use serde_json::{Value, json};
 use crate::agent_state::{self, Activity, AgentState};
 use crate::error;
 use crate::ring::RingBuffer;
-use crate::terminal_modes::{BRACKETED_PASTE_END, BRACKETED_PASTE_START, BracketedPasteScanner};
+use crate::terminal_modes::{
+    BRACKETED_PASTE_END, BRACKETED_PASTE_START, BracketedPasteScanner, TerminalModes,
+};
 
 #[path = "session_admission.rs"]
 pub(crate) mod session_admission;
@@ -185,12 +187,13 @@ pub(crate) struct SessionHandle {
     /// so hook wait signals are ignored for it (see `hooks.rs`) and its
     /// exit advances the linked run rows (see `run_completion.rs`).
     headless: AtomicBool,
-    /// Issue #625: whether the program on the far end has DECSET 2004
-    /// (bracketed paste) on right now, as observed in its OWN output by
-    /// the reader thread. A paste-aware TUI is the only far end a framed
-    /// write is safe for, so this gate decides whether `write_parts`
-    /// frames a body before the Return that submits it.
-    bracketed_paste: AtomicBool,
+    /// Issue #625: whether a framed body would be read as TEXT by the
+    /// program on the far end — it has DECSET 2004 on and is not on the
+    /// alternate screen — as observed in its OWN output by the reader
+    /// thread. That is the only far end a framed write is safe for, so
+    /// this gate decides whether `write_parts` frames a body before the
+    /// Return that submits it.
+    paste_is_text: AtomicBool,
     /// The incremental scanner behind `bracketed_paste`. Held separately
     /// because it carries a partial sequence across chunk boundaries;
     /// only the reader thread touches it, and readers of the flag use the
@@ -250,7 +253,7 @@ impl SessionHandle {
             explicit_wait_clear: AtomicBool::new(false),
             turn_fact: AtomicU8::new(TURN_INACTIVE),
             headless: AtomicBool::new(false),
-            bracketed_paste: AtomicBool::new(false),
+            paste_is_text: AtomicBool::new(false),
             paste_mode_scanner: Mutex::new(BracketedPasteScanner::default()),
             db,
         })
@@ -261,17 +264,19 @@ impl SessionHandle {
     pub(crate) fn observe_output_modes(&self, chunk: &[u8]) {
         let mut scanner = self.paste_mode_scanner.lock().unwrap();
         scanner.feed(chunk);
-        let enabled = scanner.enabled();
+        let modes: TerminalModes = scanner.modes();
         drop(scanner);
+        let paste_is_text = modes.paste_is_text();
         // Only a change touches the atomic: steady output stays quiet.
-        if self.bracketed_paste.load(Ordering::Acquire) != enabled {
-            self.bracketed_paste.store(enabled, Ordering::Release);
+        if self.paste_is_text.load(Ordering::Acquire) != paste_is_text {
+            self.paste_is_text.store(paste_is_text, Ordering::Release);
         }
     }
 
-    /// Whether the far end currently has bracketed paste on (issue #625).
-    pub(crate) fn bracketed_paste_enabled(&self) -> bool {
-        self.bracketed_paste.load(Ordering::Acquire)
+    /// Whether a framed body would be read as text by the far end
+    /// (issue #625). See `TerminalModes::paste_is_text`.
+    pub(crate) fn paste_is_text(&self) -> bool {
+        self.paste_is_text.load(Ordering::Acquire)
     }
 
     pub(crate) fn set_status_hooks_enabled(&self, enabled: bool) -> Result<(), RpcError> {
@@ -1285,7 +1290,9 @@ pub(crate) struct WriteOutcome {
 
 /// Whether wrapping `body` in paste markers is both safe and useful.
 ///
-/// Safe: the far end asked for bracketed paste, and the body carries no C0
+/// Safe: the far end reads a paste as text (`TerminalModes::paste_is_text`
+/// — bracketed paste on, and not a full-screen application on the
+/// alternate screen), and the body carries no C0
 /// control byte that a paste frame would either swallow (a real keystroke
 /// like `ETX`) or be broken by (`ESC`). Sanitizing those bytes instead
 /// would corrupt what the caller asked to deliver, so a body containing
@@ -1297,8 +1304,8 @@ pub(crate) struct WriteOutcome {
 /// and keystrokes are what `--literal` and a second send are for.
 ///
 /// Useful: only a body big enough to read as a paste needs the frame.
-fn should_frame(body: &[u8], bracketed_mode: bool) -> bool {
-    if !bracketed_mode || body.is_empty() {
+fn should_frame(body: &[u8], paste_is_text: bool) -> bool {
+    if !paste_is_text || body.is_empty() {
         return false;
     }
     if body.len() < PASTE_FRAME_MIN_BYTES && !body.contains(&b'\n') {
@@ -1380,7 +1387,7 @@ pub(crate) fn write_parts(
     } else {
         data
     };
-    let frame = submit_enter && should_frame(body, handle.bracketed_paste_enabled());
+    let frame = submit_enter && should_frame(body, handle.paste_is_text());
     // Writer lock only: a long/blocking write must not serialize master
     // operations (`resize`) or native release behind it.
     let mut writer = handle.writer.lock().unwrap();

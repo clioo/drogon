@@ -894,31 +894,97 @@ fn the_tui_model_does_not_submit_the_fused_delivery_that_was_reported() {
 /// stay lined up, or the suite would bless a gap: a body too big for the
 /// model to call typing but too small for the daemon to frame is exactly
 /// the shape that goes out unframed and is then swallowed. An adversarial
-/// pass found that gap when the two were 16 and 8.
+/// pass found that gap when the two were 16 and 8 — and then found that
+/// the first version of this test only illustrated the invariant with two
+/// hand-picked strings, so moving the daemon's threshold did not fail it.
+///
+/// So it asks the daemon. It walks body lengths upward against a real
+/// session until the service reports the first framed one, which IS the
+/// threshold wherever it is set, and then checks the largest unframed
+/// body against the model.
 #[test]
 fn every_body_the_daemon_declines_to_frame_is_keystroke_sized() {
-    // Longest body the daemon leaves unframed: PASTE_FRAME_MIN_BYTES is
-    // 3, so two bytes is the last one — and unframed it reaches the far
-    // end as a three-byte burst, body and Return together.
-    let unframed_max = "ab";
-    let mut tui = PasteAwareTui::default();
-    tui.read_burst(format!("{unframed_max}\r").as_bytes());
-    assert_eq!(
-        tui.submitted,
-        vec![unframed_max.to_string()],
-        "a body the daemon will not frame must still submit when it and \
-         its Return arrive in one read"
-    );
+    let fixture = Fixture::start("dg-inv-");
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // Well past any plausible threshold; a body of this length that
+        // is still unframed would be a finding of its own.
+        const PROBE_MAX: usize = 64;
+        let mut first_framed = None;
+        for length in 1..=PROBE_MAX {
+            let body = "a".repeat(length);
+            // Byte-exact reading is what the framing table is for; here
+            // only the service's own answer matters. The reader is asked
+            // for far more bytes than any framed body can be, so it
+            // stays blocked and cannot exit between the body and the
+            // Return — that window is real, and the framing table's
+            // exact counts are where it is accounted for.
+            let (session, incarnation) =
+                fixture.raw_session_with_modes(PROBE_MAX * 4, r"\033[?2004h");
+            let sent = ok(
+                &fixture.data_dir,
+                &[
+                    "terminal",
+                    "send",
+                    "--session",
+                    session.as_str(),
+                    "--incarnation",
+                    incarnation.as_str(),
+                    "--text",
+                    &format!("{body}\n"),
+                ],
+            );
+            let framed = sent["result"]["bracketedPaste"]
+                .as_bool()
+                .unwrap_or_else(|| panic!("bracketedPaste missing: {sent:#}"));
+            fixture.close(&session, &incarnation);
+            if framed {
+                first_framed = Some(length);
+                break;
+            }
+        }
+        let first_framed = first_framed.unwrap_or_else(|| {
+            panic!("no body up to {PROBE_MAX} bytes was framed on a session with paste on")
+        });
+        assert!(
+            first_framed >= 2,
+            "a one-byte body is a keystroke and must never be framed"
+        );
 
-    // One byte more and the daemon frames it, which is what makes the
-    // same read submit. Unframed, the model shows why it must.
-    let mut swallowed = PasteAwareTui::default();
-    swallowed.read_burst(b"abc\r");
-    assert!(
-        swallowed.submitted.is_empty(),
-        "an unframed body at the threshold is already swallowable: {:?}",
-        swallowed.submitted
-    );
+        // The largest body the daemon declines to frame reaches the far
+        // end together with its Return, as one burst of that many bytes
+        // plus one. That burst has to be small enough for the model to
+        // still call it typing, or it is swallowed.
+        let largest_unframed = first_framed - 1;
+        let burst = largest_unframed + 1;
+        assert!(
+            burst <= KEYSTROKE_BURST_MAX,
+            "the daemon leaves a {largest_unframed}-byte body unframed, which \
+             reaches the far end as a {burst}-byte burst with its Return — \
+             bigger than the {KEYSTROKE_BURST_MAX} bytes this suite's model \
+             still reads as typing, so it would be swallowed"
+        );
+
+        // And the two claims the invariant rests on, against the model.
+        let mut typed = PasteAwareTui::default();
+        typed.read_burst(format!("{}\r", "a".repeat(largest_unframed)).as_bytes());
+        assert_eq!(
+            typed.submitted,
+            vec!["a".repeat(largest_unframed)],
+            "the largest unframed body must still submit from one read"
+        );
+        let mut swallowed = PasteAwareTui::default();
+        swallowed.read_burst(format!("{}\r", "a".repeat(first_framed)).as_bytes());
+        assert!(
+            swallowed.submitted.is_empty(),
+            "the first framed length must be one the model would swallow \
+             unframed, or the threshold is lower than it needs to be: {:?}",
+            swallowed.submitted
+        );
+    }));
+    fixture.shut_down();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
 }
 
 /// The headline regression. A long, single-line message sent to a
@@ -1157,6 +1223,8 @@ struct FrameCase {
 fn bracketed_framing_is_applied_only_where_it_is_safe_and_needed() {
     const ON: &str = r"\033[?2004h";
     const OFF_AGAIN: &str = r"\033[?2004h\033[?2004l";
+    const ALT_SCREEN: &str = r"\033[?1049h\033[?2004h";
+    const BACK_FROM_ALT: &str = r"\033[?1049h\033[?2004h\033[?1049l";
     const CASES: &[FrameCase] = &[
         FrameCase {
             what: "a message-sized body to a TUI that asked for paste",
@@ -1302,6 +1370,36 @@ fn bracketed_framing_is_applied_only_where_it_is_safe_and_needed() {
             literal: false,
             framed: false,
             hex: "726562617365206f6e746f20763220706c656173650d",
+        },
+        // vim's shape. It announces bracketed paste like any composer,
+        // but a paste is text there, not the Ex command the caller
+        // typed — an adversarial pass watched `:wq` put vim into INSERT
+        // while the send reported success.
+        FrameCase {
+            what: "a full-screen application on the alternate screen is not framed",
+            modes: ALT_SCREEN,
+            text: ":wq\n",
+            literal: false,
+            framed: false,
+            hex: "3a77710d",
+        },
+        FrameCase {
+            what: "...not even for a long message",
+            modes: ALT_SCREEN,
+            text: "rebase onto v2 please\n",
+            literal: false,
+            framed: false,
+            hex: "726562617365206f6e746f20763220706c656173650d",
+        },
+        // Leaving the alternate screen gives the paste its meaning back.
+        FrameCase {
+            what: "back on the normal screen, framing resumes",
+            modes: BACK_FROM_ALT,
+            text: "rebase onto v2 please\n",
+            literal: false,
+            framed: true,
+            hex: "1b5b3230307e726562617365206f6e746f20763220706c65617365\
+                  1b5b3230317e0d",
         },
         FrameCase {
             what: "a TUI that turned paste back off is not framed either",
