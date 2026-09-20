@@ -1824,6 +1824,10 @@ mod tests {
         assert!(!stray.exists());
     }
 
+    // Unix-only: Windows CI compiles this lib test target (it runs
+    // `cargo test -p drogon-core --lib mentu::execution::timeout_tests`), and
+    // `std::os::unix::fs::symlink` does not exist there.
+    #[cfg(unix)]
     #[test]
     fn checkout_delete_unlinks_a_symlinked_checkout_without_following_it() {
         let root = tempfile::tempdir().unwrap();
