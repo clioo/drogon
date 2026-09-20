@@ -71,6 +71,15 @@ export type Session = {
   args: string[];
   cols: number;
   rows: number;
+  /**
+   * Additive (#605): the ring cursor at which `cols`x`rows` took effect.
+   * A terminal emulator fed from the ring must change its own grid at this
+   * exact byte — anywhere else and it re-wraps the frame the agent is in the
+   * middle of drawing, the agent's cursor-relative erase lands on the wrong
+   * rows, and the superseded frame is stranded on screen. Absent on a daemon
+   * predating the field; absent reads as 0 ("always been this grid").
+   */
+  gridCursor?: number;
   verdict: Verdict;
   exitCode: number | null;
   createdAt: string;
@@ -147,6 +156,20 @@ export type Session = {
    * on older daemon payloads reads as idle.
    */
   hasForegroundChild?: boolean;
+  /**
+   * Additive (issue #622): the harness id the daemon observed in the
+   * session PTY's foreground process group, with its RFC 3339 stamp. An
+   * observation, never an inference, never persisted, and never authority
+   * for hooks, restart, or `agentState`. Null/absent unless a harness-less
+   * live session currently foregrounds a catalog harness.
+   */
+  observedHarnessId?: HarnessId | null;
+  /**
+   * Additive (issue #622): RFC 3339 stamp of the `observedHarnessId`
+   * observation. An observation, never an inference, never persisted, and
+   * never authority. Null/absent when no harness is observed.
+   */
+  observedHarnessAt?: string | null;
 };
 /**
  * Install-resilience P4/P5 (additive, both optional so an older daemon's
@@ -274,6 +297,15 @@ export type ReadResult = {
   startCursor: number;
   nextCursor: number;
   truncated: boolean;
+  /**
+   * Additive (#605): the grid in force at this page's first byte, then every
+   * change inside the page, in order. A terminal emulator fed from the ring
+   * switches grid at each one — two resizes can land in the same page, and
+   * collapsing them to the newest parses the bytes composed at the middle
+   * grid at the wrong width. Absent on a daemon predating the field, which
+   * the reader degrades to the session's single `gridCursor`.
+   */
+  gridChanges?: { cursor: number; cols: number; rows: number }[];
 };
 export type Result<T> =
   | { ok: true; result: T }

@@ -1808,6 +1808,34 @@ footer[data-testid="status-bar"] {
   border-left-color: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
+/* Issue #606: the same lineage, one row wide. The sidebar boxes children
+   under their parent; the strip is a single horizontal run, so a subagent
+   tab reads as a member through a leading rule in the group's own tokens
+   (.worktree-agent-lineage-children) plus an indent, and the leader
+   carries the chevron that folds the whole run into itself. */
+.tab-lineage-child {
+  padding-inline-start: 0.75rem;
+  box-shadow: inset 1px 0 0 0
+    color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.dark .tab-lineage-child {
+  box-shadow: inset 1px 0 0 0
+    color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* Issue #622: nested groups compound their indentation (margin + padding per
+   level), so every group and its direct tree nodes must be allowed to
+   shrink — without min-width the depth-3 rows overflow the default sidebar
+   width instead of truncating. Rows already carry min-w-0 + truncate. */
+.worktree-agent-lineage-children {
+  min-width: 0;
+}
+
+.worktree-agent-lineage-children > [data-lineage-depth] {
+  min-width: 0;
+}
+
 /* The fork's compact-agent-summary-panel + expansion grid (reference
    main.css verbatim): the collapsed summary keeps pill spacing while the
    expanded tree reads quiet inside the card; the reveal animates the grid

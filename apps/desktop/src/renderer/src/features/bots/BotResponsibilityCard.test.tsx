@@ -184,6 +184,66 @@ function render(
   );
 }
 
+describe("BotResponsibilityCard: an unread monitor list is never an absence", () => {
+  // #608. `monitors === null` used to mean two different things — the read
+  // failed, or this view has no monitor source — and the card presented
+  // both as "no monitors". Only the first carries a reason, and only the
+  // first makes the count UNKNOWN.
+  const failed = { monitorReadError: "The monitor read failed." };
+
+  it("names the daemon's own reason instead of blaming the bridge", () => {
+    const html = render({ monitors: null, ...failed });
+    expect(html).toContain("Could not read this Bot");
+    expect(html).toContain("The monitor read failed.");
+    expect(html).not.toContain("bridge does not expose");
+  });
+
+  it("says there is no data source when no read was attempted", () => {
+    const html = render({ monitors: null });
+    expect(html).toContain("no monitor data source");
+    expect(html).not.toContain("Could not read this Bot");
+  });
+
+  it("shows an unknown count, never '0 watching', when the read failed", () => {
+    expect(render({ monitors: null, ...failed })).toContain("unknown");
+    expect(render({ monitors: null, ...failed })).not.toContain("0 watching");
+    // A read that really returned nothing still states the real zero.
+    expect(render({ monitors: [] })).toContain("0 watching");
+  });
+
+  it("keeps a failed-read bot out of the collapsed 'nothing configured' row", () => {
+    const bare = bot({ responsibilities: [], currentSession: null });
+    // No read error: the design's collapsed row, unchanged.
+    const quiet = render({ bot: bare, monitors: null, expanded: false });
+    expect(quiet).toContain("No automations or monitors yet");
+    // Read failed: the count is unknown, so the row must not assert that
+    // there are none, and the pill must not call the bot Idle.
+    const unread = render({
+      bot: bare,
+      monitors: null,
+      expanded: false,
+      ...failed,
+    });
+    // It is no longer "nothing configured", so it renders the counted
+    // summary — with the monitor count stated as unavailable, not zero.
+    expect(unread).toContain("monitors unavailable");
+    expect(unread).not.toContain("No automations or monitors yet");
+    expect(render({ bot: bare, monitors: null, ...failed })).not.toContain(
+      ">Idle<",
+    );
+  });
+
+  it("states no monitor count in a configured bot's collapsed summary", () => {
+    const configured = bot({ responsibilities: [responsibility()] });
+    expect(
+      render({ bot: configured, monitors: null, expanded: false, ...failed }),
+    ).toContain("monitors unavailable");
+    expect(
+      render({ bot: configured, monitors: [], expanded: false }),
+    ).toContain("0 monitors");
+  });
+});
+
 describe("BotResponsibilityCard", () => {
   it("renders the collapsed row for a bot with nothing configured", () => {
     const markup = render({ expanded: false });

@@ -27,6 +27,7 @@ import { HarnessMenuIcon } from "./TabCreateMenuIcons";
 import { agentStateLabel } from "./agent-state";
 import {
   formatRowHarnessLabel,
+  resolveRowHarnessId,
   type WorktreeAgentRow as WorktreeAgentRowData,
 } from "./worktree-agent-rows";
 
@@ -83,6 +84,8 @@ export function areWorktreeAgentRowPropsEqual(
     previous.row.focused === next.row.focused &&
     previous.row.session.id === next.row.session.id &&
     previous.row.session.harnessId === next.row.session.harnessId &&
+    previous.row.session.observedHarnessId ===
+      next.row.session.observedHarnessId &&
     previous.row.session.verdict === next.row.session.verdict &&
     previous.row.session.agentState === next.row.session.agentState &&
     previous.row.session.agentStateAt === next.row.session.agentStateAt &&
@@ -153,6 +156,10 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
     <span className="size-4 shrink-0" aria-hidden="true" />
   ) : null;
 
+  // The resolved harness (launch or observed, issue #622): the harness
+  // icon for a session running an agent, the Terminal glyph only when
+  // nothing is resolved.
+  const resolvedHarnessId = resolveRowHarnessId(row.session);
   const identity = (
     <>
       {/* The source's inline rows pass stateDotSize="sm" (a 10px box) so
@@ -162,12 +169,12 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
       <AgentStateIcon state={row.state} size={10} variant="row" />
       <span
         className="inline-flex shrink-0"
-        title={formatRowHarnessLabel(row.session.harnessId ?? null)}
+        title={formatRowHarnessLabel(resolvedHarnessId)}
       >
-        {row.session.harnessId ? (
+        {resolvedHarnessId ? (
           <HarnessMenuIcon
-            harnessId={row.session.harnessId}
-            displayName={formatRowHarnessLabel(row.session.harnessId)}
+            harnessId={resolvedHarnessId}
+            displayName={formatRowHarnessLabel(resolvedHarnessId)}
             size={13}
           />
         ) : (

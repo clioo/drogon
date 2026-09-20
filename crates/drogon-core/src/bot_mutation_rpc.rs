@@ -7,7 +7,7 @@
 //! `c97906287bb7a390b25e2025b600d9fb3c25d9c3`; the daemon keeps the
 //! same receipts/ownership invariants natively over SQLite.
 
-use rusqlite::{Connection, Transaction};
+use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde_json::{Value, json};
 
 use crate::automations::records::{
@@ -55,6 +55,14 @@ fn foreign_workspace_host(message: impl Into<String>) -> RpcError {
 
 fn storage_error(message: impl Into<String>) -> RpcError {
     RpcError::new("storage_error", message.into())
+}
+
+/// Distinct from `unknown_workspace` (the caller named an id this host has
+/// never heard of): the Bot and its rows are all present, but the folder
+/// they live in has left the workspace registry. Callers that must name a
+/// live workspace get this instead of a raw sqlite `storage_error`.
+fn deregistered_workspace(message: impl Into<String>) -> RpcError {
+    RpcError::new("workspace_deregistered", message.into())
 }
 
 fn required_string(object: &Value, key: &str) -> Result<String, RpcError> {
@@ -282,26 +290,75 @@ pub(crate) fn resolve_bot_owning_workspace(
     asserted_host_id: &str,
     bot_id: &str,
 ) -> Result<(String, String), RpcError> {
+    let (folder, resolved) = resolve_bot_owning_folder_and_workspace(
+        conn,
+        derived_host_id,
+        workspace_id,
+        asserted_host_id,
+        bot_id,
+    )?;
+    let resolved_workspace_id =
+        resolved.ok_or_else(|| deregistered_workspace(folder_notice(bot_id, &folder)))?;
+    Ok((folder, resolved_workspace_id))
+}
+
+/// The same authoritative-owner routing as [`resolve_bot_owning_workspace`],
+/// but reporting a missing `workspaces` row as `None` instead of an error.
+///
+/// The bots table is keyed by (host, folder PATH), so a Bot outlives the
+/// registry entry for the folder it was created in: remove that project or
+/// worktree (`project.rs` / `worktree_rpc.rs` both delete the `workspaces`
+/// row) and the Bot, its automations, monitors, home and audit trail all
+/// stay exactly where they were while the reverse path lookup below finds
+/// nothing. That is a real, recoverable state, not a storage failure --
+/// issue #609, where `bot list` answered
+/// `storage_error: workspace lookup failed: Query returned no rows` for the
+/// same workspace `bot whoami` had just reported (whoami reads the STORED
+/// `bot_homes` profile, which is never re-validated against `workspaces`).
+/// Reads that do not need a workspace id take this variant and keep
+/// answering; writes, whose target must be a live workspace, take the
+/// strict one above and get a named refusal.
+pub(crate) fn resolve_bot_owning_folder_and_workspace(
+    conn: &Connection,
+    derived_host_id: &str,
+    workspace_id: &str,
+    asserted_host_id: &str,
+    bot_id: &str,
+) -> Result<(String, Option<String>), RpcError> {
     if let Ok(folder) = owned_folder_for(conn, derived_host_id, workspace_id, asserted_host_id)
         && bots_storage::current_rev(conn, derived_host_id, &folder, bot_id)
             .map_err(responsibility_storage_error)?
             .is_some()
     {
-        return Ok((folder, workspace_id.to_string()));
+        return Ok((folder, Some(workspace_id.to_string())));
     }
     let folder = bots_storage::folder_for_bot_id(conn, derived_host_id, bot_id)
         .map_err(responsibility_storage_error)?
         .ok_or_else(|| not_found(format!("bot {bot_id} not found")))?;
     // A folder path can back several Workspaces now (issue #579); a Bot
     // always resolves to the folder's primary (earliest-created) Workspace.
-    let resolved_workspace_id: String = conn
+    // `.optional()`: NO row at all is the recoverable state documented
+    // above. Only a genuine sqlite failure is still a `storage_error`.
+    let resolved_workspace_id: Option<String> = conn
         .query_row(
             "SELECT id FROM workspaces WHERE path = ?1 AND host_id = ?2 ORDER BY created_at LIMIT 1",
             rusqlite::params![folder, derived_host_id],
             |r| r.get(0),
         )
+        .optional()
         .map_err(|e| storage_error(format!("workspace lookup failed: {e}")))?;
     Ok((folder, resolved_workspace_id))
+}
+
+/// One sentence, used both by the strict resolver's refusal and by the
+/// notice `bot.self_list` puts on an otherwise successful read, so the
+/// operator sees the same diagnosis either way.
+pub(crate) fn folder_notice(bot_id: &str, folder: &str) -> String {
+    format!(
+        "bot {bot_id} is intact, but its folder {folder} is no longer a registered workspace on \
+         this host, so it has no workspace id to act in. Re-register that folder \
+         (`drogon-cli workspace add {folder}`, or re-add the project) to restore it."
+    )
 }
 
 /// A scheduled responsibility is an automation owned by the Bot: the same

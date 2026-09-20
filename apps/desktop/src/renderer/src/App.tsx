@@ -60,6 +60,13 @@ import {
   togglePinnedOrder,
   type TabStripState,
 } from "./features/shell/tab-order";
+import {
+  buildTabStripLineage,
+  foldAwareBulkCloseTargets,
+  resolveTabPromptTarget,
+  toggleCollapsedLeader,
+  type TabStripLineage,
+} from "./features/shell/tab-strip/tab-lineage";
 import { NewWorkspaceComposerModal } from "./features/new-workspace/NewWorkspaceComposerModal";
 import {
   composerAgentLaunchInput,
@@ -806,6 +813,56 @@ export function BotSessionInspectorLive({
       nowMs={nowMs}
     />
   );
+}
+
+/**
+ * Issue #606: what a bulk close ("others" / "to the right" / "to the left")
+ * actually destroys, and which tab should hold the selection afterwards.
+ *
+ * Both answers come from the strip's VISIBLE order. Over the flat order,
+ * "close to the right" of a leader reaches tabs grouping moved elsewhere and
+ * "close others" stops the PTYs of folded subagents nobody can see; and a
+ * survivor picked from the flat order can be a tab that is being destroyed in
+ * the same breath. A folded group still goes with the leader it is folded
+ * into, because that tab is what stands for it on screen.
+ *
+ * `nextSelection` is null when the current tab survives — the caller must not
+ * move the selection then.
+ */
+export function planStripBulkClose({
+  lineage,
+  pinnedIds,
+  anchorId,
+  mode,
+  currentId,
+}: {
+  lineage: TabStripLineage;
+  pinnedIds: ReadonlySet<string> | readonly string[];
+  anchorId: string;
+  mode: "others" | "to-right" | "to-left";
+  currentId: string;
+}): { targets: string[]; nextSelection: string | null } {
+  const targets = foldAwareBulkCloseTargets({
+    lineage,
+    pinnedIds,
+    anchorId,
+    mode,
+  });
+  if (targets.length === 0) return { targets, nextSelection: null };
+  const doomed = new Set(targets);
+  if (!doomed.has(currentId)) return { targets, nextSelection: null };
+  const order = lineage.visibleOrder;
+  const at = order.indexOf(anchorId);
+  // The anchor is the last resort, not a candidate to skip: a bulk close
+  // never targets it, so when every neighbour is doomed it is the only tab
+  // left to hold the selection. Leaving it out stranded the selection on a
+  // tab that was being closed — reachable with "Close others".
+  const neighbor = [
+    ...order.slice(at + 1),
+    ...order.slice(0, at).reverse(),
+    anchorId,
+  ].find((id) => !doomed.has(id));
+  return { targets, nextSelection: neighbor ?? null };
 }
 
 export function App() {
@@ -3885,6 +3942,40 @@ export function App() {
   }, [selected, statusHostId, statusEpoch]);
   const changeTabOrder = (order: string[]) =>
     updateTabStrip({ ...tabStrip, order });
+  // Issue #606: the strip's subagent groups, from the same
+  // `parentSessionId` lineage the worktree card folds with. Computed here
+  // (not only inside TabBar) because folding a group has to answer a
+  // question the strip cannot: which session the prompt belongs to once
+  // the active tab is hidden.
+  const stripLineage = buildTabStripLineage({
+    order: liveStripOrder(),
+    sessions: stripSessions,
+    collapsedLeaderIds: tabStrip.collapsedLineage ?? [],
+    pinnedIds: tabStrip.pinned,
+  });
+  // A folded subagent has no tab, so it must not hold the input either:
+  // its leader answers for the whole group while it stays folded. Only
+  // the active session moves — the route and the browser/editor selection
+  // are left exactly as the user left them.
+  const promptTargetSessionId = resolveTabPromptTarget(
+    activeRootId,
+    stripLineage,
+  );
+  useEffect(() => {
+    if (!promptTargetSessionId || promptTargetSessionId === activeRootId)
+      return;
+    setActive(promptTargetSessionId);
+  }, [promptTargetSessionId, activeRootId]);
+  const toggleTabLineage = (leaderId: string) => {
+    updateTabStrip({
+      ...tabStrip,
+      collapsedLineage: toggleCollapsedLeader(
+        tabStrip.collapsedLineage ?? [],
+        leaderId,
+        new Set(stripSessions.map((item) => item.id)),
+      ),
+    });
+  };
   const toggleTabPin = (id: string) => {
     const order = reconcileTabOrder(
       tabStrip.order,
@@ -3912,31 +4003,27 @@ export function App() {
     anchorId: string,
     mode: "others" | "to-right" | "to-left",
   ) => {
-    const order = liveStripOrder();
-    const targets = bulkCloseTargets(order, tabStrip.pinned, anchorId, mode);
-    if (targets.length === 0) return;
-    const doomed = new Set(targets);
-    // Move selection off a doomed tab first so each close keeps a survivor.
-    const currentId =
-      activeMentuTab
+    const plan = planStripBulkClose({
+      lineage: stripLineage,
+      pinnedIds: tabStrip.pinned,
+      anchorId,
+      mode,
+      currentId: activeMentuTab
         ? MENTU_TAB_ID
-        : (activeEditorTabId ?? activeBrowserTabId ?? active);
-    if (doomed.has(currentId)) {
-      const at = order.indexOf(anchorId);
-      const neighbor = [
-        ...order.slice(at + 1),
-        ...order.slice(0, at).reverse(),
-      ].find((id) => !doomed.has(id));
-      if (neighbor) {
-        if (neighbor === MENTU_TAB_ID) openMentuTab();
-        else if (visibleEditorTabs.some((tab) => tab.tabId === neighbor))
-          selectEditorTab(neighbor);
-        else if (browserTabs.some((tab) => tab.tabId === neighbor))
-          selectBrowserTab(neighbor);
-        else selectSessionTab(neighbor);
-      }
+        : (activeEditorTabId ?? activeBrowserTabId ?? active),
+    });
+    if (plan.targets.length === 0) return;
+    // Move selection off a doomed tab first so each close keeps a survivor.
+    if (plan.nextSelection !== null) {
+      const neighbor = plan.nextSelection;
+      if (neighbor === MENTU_TAB_ID) openMentuTab();
+      else if (visibleEditorTabs.some((tab) => tab.tabId === neighbor))
+        selectEditorTab(neighbor);
+      else if (browserTabs.some((tab) => tab.tabId === neighbor))
+        selectBrowserTab(neighbor);
+      else selectSessionTab(neighbor);
     }
-    for (const target of targets) {
+    for (const target of plan.targets) {
       const session = sessions.find((item) => item.id === target);
       // Split-aware: closing a split tab stops both panes, never orphans.
       if (session) void closeTabSession(session);
@@ -5389,6 +5476,8 @@ export function App() {
                 stripOrder={tabStrip.order}
                 pinnedIds={tabStrip.pinned}
                 customTitles={tabStrip.titles}
+                collapsedLineageIds={tabStrip.collapsedLineage ?? []}
+                onToggleLineage={toggleTabLineage}
                 onOrderChange={changeTabOrder}
                 onTogglePin={toggleTabPin}
                 onCloseOthers={(id) => closeStripTabs(id, "others")}

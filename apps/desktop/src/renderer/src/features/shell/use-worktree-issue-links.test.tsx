@@ -17,7 +17,13 @@ function bridge(list = vi.fn().mockResolvedValue(reply(link))) {
   window.drogon = { status, project: { worktreeIssueLinks: list, onProjectsChanged: (listener: () => void) => { changed = listener; return unsubscribe; } } } as unknown as typeof window.drogon;
   return { list, status, unsubscribe, changed: () => changed() };
 }
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => {
+  cleanup();
+  // The suite shares one jsdom window across files: a bridge left here
+  // becomes another file's environment.
+  delete (window as { drogon?: unknown }).drogon;
+  vi.useRealTimers();
+});
 test("loads associations without visiting Tasks and rejects foreign worktree rows", async () => {
   const { list } = bridge(vi.fn().mockResolvedValue(reply(link, { ...link, worktreeId: "foreign" })));
   const view = renderHook(() => useWorktreeIssueLinks([group], true));

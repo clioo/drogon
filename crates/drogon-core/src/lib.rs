@@ -67,6 +67,7 @@ mod ports;
 mod ring;
 mod session;
 mod session_env;
+mod session_foreground;
 mod terminal_modes;
 mod worker_brief;
 mod workspace;
@@ -1284,6 +1285,11 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             // entrypoint (never a pretend continuation).
             "agentSessionId": r.get::<_, Option<String>>(17)?,
             "agentSessionTranscriptPath": r.get::<_, Option<String>>(18)?,
+            // Additive (issue #622): foreground-agent observation is
+            // in-memory only, never persisted. Rows read straight from
+            // SQLite carry nulls; live handles overlay their snapshot.
+            "observedHarnessId": null,
+            "observedHarnessAt": null,
         }),
     ))
 }
@@ -1494,6 +1500,8 @@ mod session_list_workspace_index_tests {
                 "hostId",
                 "id",
                 "incarnation",
+                "observedHarnessAt",
+                "observedHarnessId",
                 "parentSessionId",
                 "rows",
                 "verdict",

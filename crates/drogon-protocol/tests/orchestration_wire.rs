@@ -307,6 +307,7 @@ fn worker_methods_round_trip_with_placement_execution_and_resources() {
         comment: Some("Supervised".into()),
         timeout_ms: Some(90_000),
         retry_of: Some("dispatch-0".into()),
+        parent_session_id: None,
     };
     start.validate_shape("host-a").unwrap();
     let start_json = serde_json::to_value(&start).unwrap();
@@ -557,6 +558,7 @@ fn prompt_stall_failure_and_late_first_report_serialize_without_resume_claims() 
         comment: None,
         timeout_ms: None,
         retry_of: Some("dispatch-9".into()),
+        parent_session_id: None,
     };
     retry.validate_shape("host-a").unwrap();
     assert_eq!(
@@ -1468,6 +1470,7 @@ fn no_params_or_results_serde_shape_carries_a_credential() {
             comment: None,
             timeout_ms: None,
             retry_of: None,
+            parent_session_id: None,
         })
         .unwrap(),
         serde_json::to_value(WorkerStartResult {

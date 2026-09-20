@@ -130,11 +130,11 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
             | BotAction::ListGrants { .. } => {
                 bot_secret_grants(&client, &request_id, json, action).await
             }
-            // The pull-request watch is a USER-lane monitor (the case names
-            // the project workspace the Bot lives in), so it does not go
+            // The GitHub watches are USER-lane monitors (the case names
+            // the project workspace the Bot lives in), so they do not go
             // through the `bot.self_*` home-scoped surface.
-            BotAction::WatchPullRequest { .. } => {
-                bot_watch_pull_request(&client, &request_id, json, action).await
+            BotAction::WatchPullRequest { .. } | BotAction::WatchIssue { .. } => {
+                bot_watch_github(&client, &request_id, json, action).await
             }
             other => bot(&client, &request_id, json, other).await,
         },
@@ -2491,8 +2491,10 @@ async fn bot(
     };
     match action {
         // Routed to its own user-lane flow before this function is reached.
-        BotAction::Whoami | BotAction::WatchPullRequest { .. } => {
-            unreachable!("identity discovery and watch-pr have their own routes")
+        BotAction::Whoami
+        | BotAction::WatchPullRequest { .. }
+        | BotAction::WatchIssue { .. } => {
+            unreachable!("identity discovery and the GitHub watches have their own routes")
         }
         BotAction::Provision { bot, workspace } => {
             let call = client
@@ -2515,6 +2517,14 @@ async fn bot(
                 )
                 .await?;
             let result = call.result.clone();
+            // The read answers in full even when the Bot's folder has left
+            // the workspace registry (#609); the service says so in
+            // `notice`, and that belongs on stderr in both output modes
+            // rather than only inside the JSON a human may not read.
+            let notice = result
+                .get("notice")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             emit(
                 call,
                 json,
@@ -2538,7 +2548,7 @@ async fn bot(
                     )
                 },
                 0,
-                None,
+                notice,
             )
         }
         BotAction::CreateAutomation {
@@ -2973,19 +2983,30 @@ async fn bot(
 /// call preflights the `bot.secrets.v1` capability. Grant and revoke are
 /// audited server-side with the granting user named; revocation takes
 /// effect on the Bot's NEXT monitor tick.
-/// `bot watch-pr`: stage a `github_pr.v1` watch on the USER lane
-/// (`bot.monitor_create`), where the rule's project is the project
-/// workspace the Bot lives in — so the session this watch releases opens a
-/// worktree of that project, not of the Bot's home. `--approve` arms the
-/// exact rule hash in the same command; without it the watch stays parked.
-async fn bot_watch_pull_request(
+/// `bot watch-pr` / `bot watch-issue`: stage a `github_pr.v1` or
+/// `github_issue.v1` watch on the USER lane (`bot.monitor_create`), where
+/// the rule's project is the project workspace the Bot lives in — so the
+/// session the watch releases opens a worktree of that project, not of the
+/// Bot's home. `--approve` arms the exact rule hash in the same command;
+/// without it the watch stays parked.
+///
+/// The two verbs share this one body deliberately: the seeding and dedupe
+/// guarantees a watch carries must not depend on which verb spelled it.
+async fn bot_watch_github(
     client: &Client,
     request_id: &str,
     json: bool,
     action: &BotAction,
 ) -> Result<RunOutcome, CliError> {
     let status = capability_preflight(client, request_id, "bot.self.v1", "bot").await?;
-    let BotAction::WatchPullRequest {
+    // Same wire tags as `drogon_core::bots::monitors::rule::RULE_KIND_*`
+    // (the CLI has no drogon-core dependency; the daemon re-validates the
+    // kind and refuses an unknown tag).
+    let (kind, case_word) = match action {
+        BotAction::WatchIssue { .. } => ("github_issue.v1", "issue"),
+        _ => ("github_pr.v1", "pull-request"),
+    };
+    let (BotAction::WatchPullRequest {
         bot,
         workspace,
         repo,
@@ -3002,18 +3023,33 @@ async fn bot_watch_pull_request(
         responsibility_id,
         responsibility_name,
         instructions,
-    } = action
+    }
+    | BotAction::WatchIssue {
+        bot,
+        workspace,
+        repo,
+        filter,
+        login,
+        harness,
+        skills,
+        secret_ref,
+        api_base,
+        cron,
+        manual,
+        disabled,
+        approve,
+        responsibility_id,
+        responsibility_name,
+        instructions,
+    }) = action
     else {
-        unreachable!("bot_watch_pull_request is only called for WatchPullRequest")
+        unreachable!("bot_watch_github is only called for the GitHub watch verbs")
     };
     let mut params = json!({
         "botId": bot,
         "workspaceId": workspace,
         "hostId": status.host_id,
-        // Same wire tag as `drogon_core::bots::monitors::rule::RULE_KIND_GITHUB_PR`
-        // (the CLI has no drogon-core dependency; the daemon re-validates the
-        // kind and refuses an unknown tag).
-        "kind": "github_pr.v1",
+        "kind": kind,
         "repo": repo,
         "filter": filter.as_deref().unwrap_or("opened"),
     });
@@ -3076,7 +3112,7 @@ async fn bot_watch_pull_request(
             json,
             || {
                 format!(
-                    "staged pull-request watch {monitor_id} (parked at needs-approval); \
+                    "staged {case_word} watch {monitor_id} (parked at needs-approval); \
                      approve it from the Bots page in the app (the parked card's Approve \
                      control arms this exact rule text) or with `drogon-cli rpc \
                      bot.monitor_approve --params \
@@ -3110,7 +3146,7 @@ async fn bot_watch_pull_request(
     emit(
         approval,
         json,
-        || format!("pull-request watch {monitor_id} armed (approval {approval_hash})"),
+        || format!("{case_word} watch {monitor_id} armed (approval {approval_hash})"),
         0,
         None,
     )

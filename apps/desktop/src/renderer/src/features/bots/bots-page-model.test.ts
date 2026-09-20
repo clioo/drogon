@@ -20,6 +20,8 @@ import {
   monitorSourceLabel,
   monitorTitle,
   monitorTriggerLabel,
+  isBotUnconfigured,
+  monitorLastFiring,
 } from "./bots-page-model";
 
 describe("bots-page-model", () => {
@@ -365,7 +367,7 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
     ).toBe("github_pr.v1");
   });
 
-  it("renders the SOURCE cell per kind: repo + case, path, script, sealed URL", () => {
+  it("renders the SOURCE cell per kind: repo + collection + case, path, script, sealed URL", () => {
     expect(
       monitorSourceLabel({
         ruleKind: "github_pr.v1",
@@ -373,14 +375,52 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
         filter: "assigned",
         login: "clioo",
       } as never),
-    ).toBe("clioo/drogon · case: assigned (clioo)");
+    ).toBe("clioo/drogon · pull requests, case: assigned (clioo)");
     expect(
       monitorSourceLabel({
         ruleKind: "github_pr.v1",
         repo: "clioo/drogon",
         filter: "opened",
       } as never),
-    ).toBe("clioo/drogon · case: opened");
+    ).toBe("clioo/drogon · pull requests, case: opened");
+    // The collection is part of the source: an ISSUE watch and a PULL
+    // REQUEST watch on the same repository with the same filter must never
+    // render the same line.
+    expect(
+      monitorSourceLabel({
+        ruleKind: "github_issue.v1",
+        repo: "clioo/drogon",
+        filter: "opened",
+      } as never),
+    ).toBe("clioo/drogon · issues, case: opened");
+    expect(
+      monitorSourceLabel({
+        ruleKind: "github_issue.v1",
+        repo: "clioo/drogon",
+        filter: "assigned",
+        login: "clioo",
+      } as never),
+    ).toBe("clioo/drogon · issues, case: assigned (clioo)");
+    expect(
+      monitorSourceLabel({
+        ruleKind: "github_issue.v1",
+        repo: "clioo/drogon",
+        filter: "opened",
+      } as never),
+    ).not.toBe(
+      monitorSourceLabel({
+        ruleKind: "github_pr.v1",
+        repo: "clioo/drogon",
+        filter: "opened",
+      } as never),
+    );
+    // An issue watch is titled by its repository too, never the bare kind.
+    expect(
+      monitorTitle({
+        ruleKind: "github_issue.v1",
+        repo: "clioo/drogon",
+      } as never),
+    ).toBe("clioo/drogon");
     expect(
       monitorSourceLabel({ ruleKind: "local_file_digest.v1", resource: "notes/a.md" } as never),
     ).toBe("notes/a.md");
@@ -446,6 +486,69 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
     expect(collapsedRowNote({ home: { path: "/x" } } as never)).toBe(
       "No automations or monitors yet · Standby workspace initialized",
     );
+  });
+
+  it("names every firing verdict the daemon can write, and never drops one", () => {
+    const firing = (lastOutcome: string) => ({
+      firing: {
+        lastEventId: "mev_1",
+        lastOutcome,
+        lastRunId: null,
+        lastDetail: null,
+        lastResource: null,
+        lastAtMs: 1_000,
+        countToday: 1,
+      },
+    });
+    const at = 1_000;
+    // A refused `harness.start` is NOT a dispatch that worked. Leaving
+    // this verdict unlabelled is what erased the whole Monitors column
+    // (#608), so it gets real, adverse words.
+    const failed = monitorLastFiring(firing("dispatch_failed") as never, at);
+    expect(failed?.label).toBe("Dispatch failed");
+    expect(failed?.adverse).toBe(true);
+    expect(monitorLastFiring(firing("dispatched") as never, at)?.adverse).toBe(
+      false,
+    );
+    // A verdict from a NEWER daemon is shown as the daemon's own token and
+    // treated as adverse — never silently dropped to "Never fired", and
+    // never painted as a success.
+    const unknown = monitorLastFiring(
+      firing("some_future_verdict") as never,
+      at,
+    );
+    expect(unknown).not.toBeNull();
+    expect(unknown?.label).toBe("some_future_verdict");
+    expect(unknown?.adverse).toBe(true);
+    // Only a monitor that genuinely never fired has no cell.
+    expect(monitorLastFiring({ firing: null } as never, at)).toBeNull();
+  });
+
+  it("never asserts an absence of monitors that no read established", () => {
+    // An unread monitor list has no count, so the "nothing configured"
+    // verdict may not claim there are none (#608). The muted line itself
+    // is then unreachable, which is why it takes no unread flag.
+    const bare = { responsibilities: [], currentSession: null } as never;
+    expect(isBotUnconfigured(bare, 0)).toBe(true);
+    expect(isBotUnconfigured(bare, 0, true)).toBe(false);
+    // ...so the pill does not read "Idle" off an unknown count either.
+    expect(
+      botStatusPill({ bot: bare, monitorCount: 0 }).label,
+    ).toBe("Idle");
+    expect(
+      botStatusPill({ bot: bare, monitorCount: 0, monitorsUnread: true })
+        .label,
+    ).not.toBe("Idle");
+    // ...and the header chip counts the same way: a bot whose monitors
+    // could not be read is not "idle" off an unverified zero.
+    const bots = [
+      { id: "bot-1", responsibilities: [], currentSession: null },
+    ] as never;
+    expect(countActiveBots(bots, {})).toBe(0);
+    expect(countActiveBots(bots, {}, undefined, {})).toBe(0);
+    expect(
+      countActiveBots(bots, {}, undefined, { "bot-1": "read failed" }),
+    ).toBe(1);
   });
 
   it("says nothing about a reopen that names the recorded conversation", () => {

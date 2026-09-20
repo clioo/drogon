@@ -333,11 +333,39 @@ impl Engine {
         let cwd = cwd.ok_or_else(|| {
             error::not_found("Workspace is not registered on this execution host.")
         })?;
-        // Issue #359 deviation: the fork derives a worker's parent from the
-        // orchestration DB's `created_by_pane_key` recorded at task-create
-        // time; this repo's coordination protocol carries no creator-session
-        // identity, so daemon-spawned workers have no parent to record (CLI-
-        // spawned terminals do — see `do_session_start`).
+        // Issue #622 (subagent nesting): the optional creator-session
+        // identity — `drogon-cli orchestration worker-start` sends its
+        // inherited `DROGON_SESSION_ID` as `parentSessionId`, exactly like
+        // `terminal create` / `harness start` children do. Only the shape
+        // is refused here (empty or NUL): an id that names no session on
+        // this host is DROPPED and the worker launches parentless. The CLI
+        // attaches that id automatically from its inherited environment —
+        // the caller never asked for a parent — so a stale or already-closed
+        // coordinator session id must never fail a launch over cosmetic
+        // attribution. The sidebar already renders a dangling parent as a
+        // flat root, so dropping is display-safe. A coordinator outside a
+        // Drogon terminal sends none, and the worker stays parentless.
+        let parent_session_id = match params.parent_session_id.as_deref() {
+            None => None,
+            Some(parent) => {
+                if parent.is_empty() || parent.contains('\0') {
+                    return Err(error::invalid_argument("parentSessionId must not be empty"));
+                }
+                let exists: bool = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM sessions WHERE id = ?1 AND host_id = ?2",
+                        rusqlite::params![parent, self.host_id],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .map_err(error::from_sqlite)?
+                    > 0;
+                if exists {
+                    Some(parent.to_string())
+                } else {
+                    None
+                }
+            }
+        };
         let prepared = session_admission::reserve(
             tx,
             &self.host_id,
@@ -346,7 +374,7 @@ impl Engine {
             &plan.harness.command,
             &plan.harness.args,
             Some(plan.preferences.harness_id.clone()),
-            None,
+            parent_session_id,
             None,
             100,
             32,

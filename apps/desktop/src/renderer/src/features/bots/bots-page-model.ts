@@ -247,12 +247,20 @@ export type BotStatusPill = {
 
 /** True when the bot has nothing configured at all: no responsibilities,
  *  no monitors, no session. Exactly the collapsed-row state the design
- *  calls out. */
+ *  calls out.
+ *
+ *  `monitorsUnread` (the read failed, or there was no source) means the
+ *  monitor count is UNKNOWN, not zero — a bot whose monitors could not be
+ *  read is never "nothing configured", because the collapsed row would
+ *  then assert an absence nobody verified. That conflation is the whole
+ *  complaint behind #608. */
 export function isBotUnconfigured(
   bot: Pick<BotsPanelBot, "responsibilities" | "currentSession">,
   monitorCount: number,
+  monitorsUnread = false,
 ): boolean {
   return (
+    !monitorsUnread &&
     bot.responsibilities.length === 0 &&
     monitorCount === 0 &&
     bot.currentSession === null
@@ -270,27 +278,36 @@ export function botStatusPill(input: {
   bot: Pick<BotsPanelBot, "responsibilities" | "currentSession">;
   monitorCount: number;
   observedLiveness?: BotsPanelHostObservation;
+  /** The monitor rows could not be read, so the count is unknown and
+   *  "Idle" would be an unverified claim. */
+  monitorsUnread?: boolean;
 }): BotStatusPill {
   if (input.observedLiveness === "live") {
     return { label: "In session", tone: "live" };
   }
-  if (isBotUnconfigured(input.bot, input.monitorCount)) {
+  if (isBotUnconfigured(input.bot, input.monitorCount, input.monitorsUnread)) {
     return { label: "Idle", tone: "idle" };
   }
   return { label: "Ready for a purpose", tone: "ready" };
 }
 
 /** The header count chip: bots that are more than idle — configured or
- *  observed in-session. Zero stays "0 active": a real count, never hidden. */
+ *  observed in-session. Zero stays "0 active": a real count, never hidden.
+ *
+ *  `monitorReadErrorByBotId` names the bots whose monitor read FAILED.
+ *  Their monitor count is unknown, so they are never counted as idle off
+ *  a zero nobody verified — the same rule the card and the pill follow. */
 export function countActiveBots(
   bots: BotsPanelBot[],
   monitorsByBotId: Record<string, BotMonitorView[]>,
   observedLivenessByBotId?: Record<string, BotsPanelHostObservation>,
+  monitorReadErrorByBotId?: Record<string, string>,
 ): number {
   return bots.filter((bot) => {
     const pill = botStatusPill({
       bot,
       monitorCount: monitorsByBotId[bot.id]?.length ?? 0,
+      monitorsUnread: monitorReadErrorByBotId?.[bot.id] !== undefined,
       observedLiveness: observedLivenessByBotId?.[bot.id],
     });
     return pill.tone !== "idle";
@@ -353,7 +370,7 @@ export function monitorHealthPill(health: BotMonitorHealth): MonitorHealthPill {
  *  that is the owner's headline case and must never render as a bare
  *  internal token. */
 export function monitorTitle(view: BotMonitorView): string {
-  if (view.ruleKind === "github_pr.v1") {
+  if (view.ruleKind === "github_pr.v1" || view.ruleKind === "github_issue.v1") {
     return typeof view.repo === "string" && view.repo.length > 0
       ? view.repo
       : view.ruleKind;
@@ -380,7 +397,8 @@ export function monitorTitle(view: BotMonitorView): string {
  */
 export function monitorSourceLabel(view: BotMonitorView): string {
   switch (view.ruleKind) {
-    case "github_pr.v1": {
+    case "github_pr.v1":
+    case "github_issue.v1": {
       const repo =
         typeof view.repo === "string" && view.repo ? view.repo : null;
       const filter =
@@ -388,12 +406,16 @@ export function monitorSourceLabel(view: BotMonitorView): string {
       const login =
         typeof view.login === "string" && view.login ? view.login : null;
       if (!repo) return view.ruleKind;
+      // The collection is part of the source: "opened" means something
+      // different for pull requests than for issues.
+      const collection =
+        view.ruleKind === "github_issue.v1" ? "issues" : "pull requests";
       const caseText = filter
         ? login
-          ? `case: ${filter} (${login})`
-          : `case: ${filter}`
-        : null;
-      return caseText ? `${repo} · ${caseText}` : repo;
+          ? `${collection}, case: ${filter} (${login})`
+          : `${collection}, case: ${filter}`
+        : collection;
+      return `${repo} · ${caseText}`;
     }
     case "local_file_digest.v1":
       return typeof view.resource === "string" && view.resource
@@ -488,10 +510,13 @@ export type MonitorLastFiring = {
 };
 
 const MONITOR_FIRING_LABELS: Record<
-  NonNullable<BotMonitorView["firing"]>["lastOutcome"],
+  string,
   { label: string; adverse: boolean }
 > = {
   dispatched: { label: "Prompt sent", adverse: false },
+  // A refused `harness.start`: no session was ever admitted. It must not
+  // read like a dispatch that worked.
+  dispatch_failed: { label: "Dispatch failed", adverse: true },
   joined_existing: { label: "Prompt sent (replay)", adverse: false },
   refused: { label: "Refused", adverse: true },
   orphaned: { label: "Target missing", adverse: true },
@@ -507,8 +532,14 @@ export function monitorLastFiring(
   now: number = Date.now(),
 ): MonitorLastFiring | null {
   if (!view.firing) return null;
-  const wording = MONITOR_FIRING_LABELS[view.firing.lastOutcome];
-  if (!wording) return null;
+  // A verdict this build has no wording for (a newer daemon) is shown as
+  // the daemon's own token, treated as adverse: a firing that happened is
+  // never reported as "Never fired", and an unknown verdict is never
+  // quietly painted as a success.
+  const wording = MONITOR_FIRING_LABELS[view.firing.lastOutcome] ?? {
+    label: view.firing.lastOutcome,
+    adverse: true,
+  };
   const deltaMs = Math.max(0, now - view.firing.lastAtMs);
   const minutes = Math.floor(deltaMs / 60_000);
   const ageLabel =

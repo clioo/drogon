@@ -45,10 +45,10 @@ function logRequest(record) {
   appendFileSync(values.log, `${JSON.stringify(record)}\n`)
 }
 
-function readPulls() {
+function readCollection(key) {
   try {
     const parsed = JSON.parse(readFileSync(values.data, 'utf8'))
-    return Array.isArray(parsed.pulls) ? parsed.pulls : []
+    return Array.isArray(parsed[key]) ? parsed[key] : []
   } catch {
     // A dataset the test is mid-write is an honest empty list, never a crash
     // that would take the whole fixture down between poll ticks.
@@ -77,14 +77,27 @@ const server = createServer((req, res) => {
     hasCredential: authorization.endsWith(FIXTURE_TOKEN),
   }
 
-  const pulls = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/pulls$/)
-  if (req.method === 'GET' && pulls) {
+  const listing = url.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/(pulls|issues)$/)
+  if (req.method === 'GET' && listing) {
     logRequest(entry)
     if (!entry.hasCredential) {
       send(res, 401, { message: 'Bad credentials' })
       return
     }
-    const listed = readPulls()
+    // GitHub's issues endpoint returns issues AND pull requests; the PRs it
+    // returns carry a `pull_request` object. Reproduce that faithfully, so a
+    // watch that fails to exclude them fails the test rather than passing on
+    // a fixture that is kinder than the real API.
+    const listed =
+      listing[3] === 'issues'
+        ? [
+            ...readCollection('issues'),
+            ...readCollection('pulls').map((pull) => ({
+              ...pull,
+              pull_request: { url: `${url.origin}/repos/${listing[1]}/${listing[2]}/pulls/${pull.number}` },
+            })),
+          ].sort((a, b) => Number(a.number) - Number(b.number))
+        : readCollection('pulls')
     const page = Number(url.searchParams.get('per_page') ?? '30') || 30
     send(res, 200, listed.slice(0, page))
     return

@@ -264,21 +264,52 @@ that home), and read everything the Bot owns with `drogon-cli bot list
 --bot <ID> --workspace <ID> --json` (automations, monitors with their
 health and revisions, home profile, audit count).
 
-### Pull-request watches (the headline case)
+`bot list` also reports `folder` (where the Bot's record actually lives)
+and `workspaceId` (the workspace that folder is registered under, which is
+NOT the home workspace `bot whoami` returns). A `workspaceId` of `null`
+with a `notice` means that folder has left the workspace registry — the
+project or worktree it was created in was removed. The read still answers
+in full, because the Bot's automations, monitors, home and audit trail are
+untouched, and `bot test-monitor` still dry-runs, since it commits nothing.
+Anything that must target a live workspace — creating or changing an
+automation or monitor, and `bot test-automation`, which really can dispatch
+— is refused with `workspace_deregistered` until the folder is registered
+again with `drogon-cli workspace add <FOLDER>`. That code means the Bot is
+intact; `unknown_workspace` means the id you passed names nothing on this
+host.
 
-`drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME>`
-watches a GitHub repository for the pull requests you name (`--filter`
-`opened` (default), `assigned` or `review_requested`; the last two need
-`--login <LOGIN>`) and releases the Bot's action once per NEW pull request.
-Unlike a file monitor this is the USER
-lane (`bot.monitor_create` can spell `kind: github_pr.v1`), so the rule's
-project is the project workspace the Bot lives in and the released session
-opens a WORKTREE OF THAT PROJECT — not of the Bot's home.
+### GitHub watches: pull requests and issues
+
+Two verbs, one machinery:
+
+- `drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME>`
+  watches a repository's PULL REQUESTS (`--filter` `opened` (default),
+  `assigned` or `review_requested`; the last two need `--login <LOGIN>`).
+- `drogon-cli bot watch-issue --bot <ID> --workspace <ID> --repo
+  <OWNER/NAME>` watches its ISSUES (`--filter` `opened` (default) or
+  `assigned`; `assigned` needs `--login <LOGIN>`). An issue cannot request
+  a review, so `review_requested` is refused here.
+
+Each releases the Bot's action once per NEW pull request (or issue). Unlike
+a file monitor these are the USER lane (`bot.monitor_create` spells
+`kind: github_pr.v1` / `kind: github_issue.v1`), so the rule's project is
+the project workspace the Bot lives in and the released session opens a
+WORKTREE OF THAT PROJECT — not of the Bot's home.
+
+GitHub's issue list also returns pull requests; an issue watch drops them,
+so a PR never releases an issue action.
+
+**Never hand-roll either of these with `bot create-automation`.** An
+automation that lists issues and keeps its own JSON "already seen" file has
+no baseline step, so its FIRST run treats every currently-open issue as new
+and fires one session per issue at once, with no cap — and its dedupe is
+only as reliable as a model remembering to write the file. `watch-pr` and
+`watch-issue` get both guarantees from the daemon.
 
 Two optional flags are the case's dispatch choices, and both ride inside
 the approval hash:
 
-- `--harness <ID>` — the harness the dispatched review session must use
+- `--harness <ID>` — the harness the dispatched session must use
   (`codex`, `claude`, `pi`, `opencode`). Without it the Bot's own harness
   policy decides.
 - `--skill <NAME>` (repeatable) — the skills the dispatched session must
@@ -293,19 +324,23 @@ and without it the watch stays parked at needs-approval and releases
 nothing. `--api-base <URL>` points at a GitHub Enterprise host (defaults to
 `https://api.github.com`).
 
-The same pull request never fires twice — dedupe is per pull NUMBER, not a
-digest of the response, so a comment on an already-reviewed PR is quiet —
-and a watch that was not running (its first check ever, or a gap wider than
-the greater of thirty minutes and twice its own cron interval) SEEDS its
-baseline instead of replaying the backlog. Manual-trigger watches use the
-thirty-minute grace.
+The same pull request (or issue) never fires twice — dedupe is per NUMBER,
+not a digest of the response, so a comment on an already-handled one is
+quiet — and a watch that was not running (its first check ever, or a gap
+wider than the greater of thirty minutes and twice its own cron interval)
+SEEDS its baseline instead of replaying the backlog. Manual-trigger watches
+use the thirty-minute grace. A burst drains one case per tick, oldest
+first, and the per-Bot daily delegation cap still applies.
 
 When it fires, the prompt it releases tells the Bot to open a worktree
-named after the pull request, start the session with `--harness
-<your choice>` and `--caused-by-event <event id>`, and use the skills the
-watch names. The session that appears therefore carries the event id, so
-"why did this session appear?" has an answer in Session details and in the
-monitor's own firing history.
+named after the case (`review-pr-<n>-<repo>` or `issue-<n>-<repo>`), start
+the session with `--harness <your choice>` and `--caused-by-event <event
+id>`, and use the skills the watch names. It also names the case in the
+right words and hands over the right command — `gh pr checkout <n>` /
+`gh pr diff <n>` for a pull request, `gh issue view <n>` for an issue. The
+session that appears therefore carries the event id, so "why did this
+session appear?" has an answer in Session details and in the monitor's own
+firing history.
 
 ### Bot automations
 

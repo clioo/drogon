@@ -20,10 +20,25 @@ use serde_json::{Value, json};
 
 use crate::agent_state::{self, Activity, AgentState};
 use crate::error;
+use std::collections::VecDeque;
+
 use crate::ring::RingBuffer;
 use crate::terminal_modes::{
     BRACKETED_PASTE_END, BRACKETED_PASTE_START, BracketedPasteScanner, TerminalModes,
 };
+
+/// One grid the pty held, and the ring offset it took effect at.
+#[derive(Clone, Copy)]
+pub(crate) struct GridChange {
+    pub(crate) cursor: u64,
+    pub(crate) cols: u16,
+    pub(crate) rows: u16,
+}
+
+/// How many grid changes a session retains. A drag is tens of resizes; a
+/// reader at the live edge consumes each within a page or two, so this only
+/// has to cover a reader that fell behind, not a whole session.
+const GRID_HISTORY_LIMIT: usize = 64;
 
 #[path = "session_admission.rs"]
 pub(crate) mod session_admission;
@@ -115,7 +130,17 @@ pub(crate) struct SessionHandle {
     writer: Mutex<Option<Box<dyn Write + Send>>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
     ring: Mutex<RingBuffer>,
-    size: Mutex<(u16, u16)>,
+    /// Every grid this pty has held, each with the ring offset it took
+    /// effect at, oldest first and never empty — the last entry is the
+    /// current grid. One mutex so a reader can never pair a grid with a
+    /// cursor from a different resize.
+    ///
+    /// A history rather than one cut (#605): two resizes can land inside a
+    /// single read page, and a reader told only the newest grid would parse
+    /// the bytes composed at the middle one at the wrong width — stranding
+    /// them exactly like the bug this whole mechanism exists to prevent.
+    /// A fast divider drag against a chatty TUI is how that happens.
+    size: Mutex<VecDeque<GridChange>>,
     /// Child observation is independent of PTY EOF and serialized with exact stop.
     exit_code: Mutex<Option<i64>>,
     /// Set by the reader thread when the PTY read side reached EOF or an
@@ -196,11 +221,15 @@ pub(crate) struct SessionHandle {
     /// whether `write_parts` frames a body before the Return that
     /// submits it.
     paste_is_text: AtomicBool,
-    /// The incremental scanner behind `bracketed_paste`. Held separately
+    /// The incremental scanner behind `paste_is_text`. Held separately
     /// because it carries a partial sequence across chunk boundaries;
     /// only the reader thread touches it, and readers of the flag use the
     /// lock-free `AtomicBool` instead.
     paste_mode_scanner: Mutex<BracketedPasteScanner>,
+    /// Memoized foreground-agent observation (issue #622, in-memory only,
+    /// never persisted). Keyed on the observed pgid with a short TTL so a
+    /// `session.list` poll never turns into a process-probe storm.
+    foreground: Mutex<crate::session_foreground::ForegroundMemo>,
     db: Arc<Mutex<Connection>>,
 }
 
@@ -241,7 +270,13 @@ impl SessionHandle {
             writer: Mutex::new(Some(writer)),
             child: Mutex::new(child),
             ring: Mutex::new(RingBuffer::new()),
-            size: Mutex::new((cols, rows)),
+            // Cursor 0: every byte this session ever writes was produced
+            // at the grid it was opened with, until a resize says otherwise.
+            size: Mutex::new(VecDeque::from([GridChange {
+                cursor: 0,
+                cols,
+                rows,
+            }])),
             exit_code: Mutex::new(None),
             reader_done: AtomicBool::new(false),
             last_activity: Mutex::new(None),
@@ -257,6 +292,7 @@ impl SessionHandle {
             headless: AtomicBool::new(false),
             paste_is_text: AtomicBool::new(false),
             paste_mode_scanner: Mutex::new(BracketedPasteScanner::default()),
+            foreground: Mutex::new(crate::session_foreground::ForegroundMemo::default()),
             db,
         })
     }
@@ -1218,7 +1254,51 @@ fn read_response(handle: &SessionHandle, outcome: &crate::ring::ReadOutcome) -> 
         "startCursor": outcome.start_cursor,
         "nextCursor": outcome.next_cursor,
         "truncated": outcome.truncated,
+        // Additive (#605): the grid in force at this page's first byte,
+        // then every change inside the page, in order. A reader switches
+        // its emulator at each one, so two resizes that land in the same
+        // page are both honoured instead of collapsing to the newest.
+        "gridChanges": grid_changes_for(handle, outcome.start_cursor, outcome.next_cursor),
     })
+}
+
+/// The grid a reader must hold at `start`, plus every change up to and
+/// including `end`. The leading entry is reported at `start` even when its
+/// cut is older, so a page always says what width to parse its first byte
+/// at — including after ring truncation carried the reader past a cut.
+fn grid_changes_for(handle: &SessionHandle, start: u64, end: u64) -> Value {
+    let history = handle.size.lock().unwrap();
+    let mut changes: Vec<Value> = Vec::new();
+    let mut in_force: Option<&GridChange> = None;
+    for change in history.iter() {
+        if change.cursor <= start {
+            in_force = Some(change);
+            continue;
+        }
+        if change.cursor > end {
+            break;
+        }
+        changes.push(json!({
+            "cursor": change.cursor,
+            "cols": change.cols,
+            "rows": change.rows,
+        }));
+    }
+    let mut out = Vec::with_capacity(changes.len() + 1);
+    // When eviction has dropped every cut at or before `start`, there is
+    // nothing truthful to stamp: the oldest grid still remembered took
+    // effect strictly after `start` (every retained cut has cursor >
+    // `start` exactly when this arm runs), so naming it at `start` would
+    // attribute bytes composed before it to a grid the pty did not hold
+    // for them. An empty array keeps the reader on the grid it holds,
+    // which for a contiguous reader is the grid those bytes were composed
+    // at; a reader that jumped here heals on the next page whose `start`
+    // a retained cut covers.
+    if let Some(change) = in_force {
+        out.push(json!({ "cursor": start, "cols": change.cols, "rows": change.rows }));
+    }
+    out.extend(changes);
+    Value::Array(out)
 }
 
 /// PERF-01 push channel: the long-poll twin of [`read`]. Blocks (bounded by
@@ -1482,8 +1562,46 @@ pub(crate) fn resize(handle: &SessionHandle, cols: u16, rows: u16) -> Result<Val
                 pixel_height: 0,
             })
             .map_err(|e| error::io_error(format!("pty resize failed: {e}")))?;
+        // Inside the native lock, immediately after the ioctl: every byte the
+        // ring already holds was composed for the OLD grid, and the child has
+        // not yet been able to act on the SIGWINCH this call just raised. That
+        // offset is the cut a reader needs (#605) — a terminal that switches
+        // grids anywhere else re-wraps the agent's in-flight frame, its
+        // cursor-relative erase then lands on the wrong rows, and the
+        // superseded frame is stranded on screen for the rest of the session.
+        //
+        // Truthfully, two kinds of byte can still land on the wrong side of
+        // this cut, and neither is fixable from here:
+        //  - bytes the reader thread has read out of the pty but not yet
+        //    pushed into the ring. One reader wake-up's worth.
+        //  - output a child writes from its own SIGWINCH handler *before*
+        //    re-reading the window size. That is unbounded and belongs to
+        //    the child: a TUI that repaints from cached dimensions composes
+        //    those bytes for the old grid after we have already cut. Every
+        //    TUI worth the name re-queries the size first, and for those the
+        //    residual is only the drain lag above.
+        // A native terminal emulator has the same property — bytes already
+        // in the kernel buffer when it calls TIOCSWINSZ are parsed at the
+        // new grid.
+        let grid_cursor = handle.ring.lock().unwrap().end_cursor();
+        let mut history = handle.size.lock().unwrap();
+        // A resize to the size it already has is not a cut: recording one
+        // would spend a history slot and make a reader re-apply a grid it
+        // already holds.
+        if history.back().map(|g| (g.cols, g.rows)) != Some((cols, rows)) {
+            history.push_back(GridChange {
+                cursor: grid_cursor,
+                cols,
+                rows,
+            });
+            // Bounded: a reader that has already passed an old cut will
+            // never ask for it again, and the ring drops those bytes long
+            // before this many resizes matter.
+            while history.len() > GRID_HISTORY_LIMIT {
+                history.pop_front();
+            }
+        }
     }
-    *handle.size.lock().unwrap() = (cols, rows);
     let conn = handle.db.lock().unwrap();
     conn.execute(
         "UPDATE sessions SET cols = ?2, rows = ?3 WHERE id = ?1",
@@ -1779,9 +1897,54 @@ fn has_live_child_process(_pid: u32) -> bool {
     false
 }
 
+/// Foreground-agent observation for `to_json` (issue #622): the harness id
+/// seen in the session PTY's foreground process group, or `None`. Only
+/// harness-less live sessions are probed; a `harness.start` session already
+/// names its harness and keeps the observed fields null. In-memory only,
+/// never persisted, and never authority for hooks, restart or `agentState`.
+/// Memoized per session on the observed pgid with a short TTL; read paths
+/// never spawn child processes.
+pub(crate) fn observed_harness(
+    handle: &SessionHandle,
+    verdict: &str,
+) -> (Option<String>, Option<String>) {
+    if handle.harness_id.is_some() || verdict != "live" || handle.is_exited() {
+        return (None, None);
+    }
+    let pgid = {
+        let native = handle.native.lock().unwrap();
+        let Some(native) = native.as_ref() else {
+            return (None, None);
+        };
+        crate::session_foreground::foreground_pgid(native.master.as_ref())
+    };
+    let now = Instant::now();
+    if let Some(cached) = handle.foreground.lock().unwrap().cached(pgid, now) {
+        return cached;
+    }
+    let harness = pgid.and_then(crate::session_foreground::resolve_harness);
+    let at = harness.as_ref().map(|_| crate::now_rfc3339());
+    // The wire stamp is the memo's effective stamp, not the locally minted
+    // `at`: while the same pgid keeps resolving to the same harness the
+    // memo pins the first stamp, so `observedHarnessAt` stays identical
+    // across reads that straddle the TTL instead of churning once per TTL.
+    handle
+        .foreground
+        .lock()
+        .unwrap()
+        .store(pgid, harness, at, now)
+}
+
 pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i64>) -> Value {
-    let (cols, rows) = *handle.size.lock().unwrap();
+    let current = *handle
+        .size
+        .lock()
+        .unwrap()
+        .back()
+        .expect("grid history is never empty");
+    let (cols, rows, grid_cursor) = (current.cols, current.rows, current.cursor);
     let (agent_state, agent_state_at) = agent_state_fields(handle, verdict);
+    let (observed_harness_id, observed_harness_at) = observed_harness(handle, verdict);
     json!({
         "id": handle.session_id,
         "workspaceId": handle.workspace_id,
@@ -1794,6 +1957,11 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         "causedByEventId": handle.caused_by_event_id,
         "cols": cols,
         "rows": rows,
+        // Additive (issue #605): the ring offset at which this grid took
+        // effect, so a reader can switch its emulator to `cols`x`rows` at
+        // the exact byte the pty did instead of guessing from RPC timing.
+        // Absent on an older daemon, which reads as "always been this grid".
+        "gridCursor": grid_cursor,
         "verdict": verdict,
         "exitCode": exit_code,
         "createdAt": handle.created_at,
@@ -1817,6 +1985,13 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
             .unwrap()
             .as_ref()
             .and_then(|s| s.transcript_path.clone()),
+        // Additive (issue #622): the harness id observed in the foreground
+        // process group, with its RFC 3339 stamp. An observation, never an
+        // inference, never persisted, and never authority for hooks,
+        // restart or `agentState`. Null unless a harness-less live session
+        // currently foregrounds a catalog harness.
+        "observedHarnessId": observed_harness_id,
+        "observedHarnessAt": observed_harness_at,
     })
 }
 

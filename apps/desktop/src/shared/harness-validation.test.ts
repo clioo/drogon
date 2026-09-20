@@ -313,3 +313,77 @@ describe("startHarness bridge input validation (renderer -> main trust boundary)
     ).toBe(false);
   });
 });
+
+// #605: the pty's grid is only actionable with the ring offset it took
+// effect at, so a terminal can switch grids at the byte the pty did.
+describe("session gridCursor (#605)", () => {
+  test("accepts the cut the daemon reports", () => {
+    const parsed = resultSchemas["session.read"].safeParse({
+      session: { ...validSession, cols: 120, gridCursor: 4096 },
+      dataBase64: "",
+      startCursor: 0,
+      nextCursor: 0,
+      truncated: false,
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect((parsed.data as { session: { gridCursor?: number } }).session.gridCursor).toBe(4096);
+    }
+  });
+
+  test("stays optional so a daemon without it still validates", () => {
+    expect(resultSchemas["session.start"].safeParse(validSession).success).toBe(true);
+  });
+
+  test("rejects a cut that cannot be a ring offset", () => {
+    for (const gridCursor of [-1, 1.5, "4096"]) {
+      expect(
+        resultSchemas["session.start"].safeParse({ ...validSession, gridCursor }).success,
+      ).toBe(false);
+    }
+  });
+});
+
+// #605 finding F1: one cut per page cannot express two resizes inside it.
+// The schema has to carry them all through, or the renderer silently sees
+// only the newest and strands the frame composed at the middle grid.
+describe("read page gridChanges (#605)", () => {
+  const page = (extra: Record<string, unknown>) => ({
+    session: validSession,
+    dataBase64: "",
+    startCursor: 0,
+    nextCursor: 12,
+    truncated: false,
+    ...extra,
+  });
+
+  test("carries every grid a page spans, in order", () => {
+    const changes = [
+      { cursor: 0, cols: 80, rows: 24 },
+      { cursor: 4, cols: 132, rows: 24 },
+      { cursor: 8, cols: 96, rows: 30 },
+    ];
+    const parsed = resultSchemas["session.read"].safeParse(page({ gridChanges: changes }));
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect((parsed.data as { gridChanges?: unknown }).gridChanges).toEqual(changes);
+    }
+  });
+
+  test("stays optional so a daemon that reports only the newest cut still validates", () => {
+    expect(resultSchemas["session.output"].safeParse(page({})).success).toBe(true);
+  });
+
+  test("refuses a change that is not a usable grid", () => {
+    for (const bad of [
+      { cursor: -1, cols: 80, rows: 24 },
+      { cursor: 0, cols: 0, rows: 24 },
+      { cursor: 0, cols: 80, rows: 1.5 },
+      { cursor: 0, cols: 2000, rows: 24 },
+    ]) {
+      expect(
+        resultSchemas["session.read"].safeParse(page({ gridChanges: [bad] })).success,
+      ).toBe(false);
+    }
+  });
+});

@@ -11,6 +11,7 @@ import {
   formatCompactDuration,
   formatRowHarnessLabel,
   formatShortTimeAgo,
+  resolveRowHarnessId,
   resolveRowSecondary,
   rowEvidenceMs,
 } from "./worktree-agent-rows";
@@ -141,6 +142,99 @@ describe("buildWorktreeAgentRows", () => {
     expect(summarizeCardAgentStates(lone.map((row) => row.session))).toBe(
       "1 session not reporting",
     );
+  });
+});
+
+describe("resolved harness (issue #622, B1)", () => {
+  it("answers launch harness, else observed harness, else null", () => {
+    expect(resolveRowHarnessId(session())).toBeNull();
+    expect(
+      resolveRowHarnessId(session({ observedHarnessId: "claude" })),
+    ).toBe("claude");
+    expect(resolveRowHarnessId(session({ harnessId: "pi" }))).toBe("pi");
+    // The launch harness wins over a stale observation.
+    expect(
+      resolveRowHarnessId(
+        session({ harnessId: "claude", observedHarnessId: "pi" }),
+      ),
+    ).toBe("claude");
+  });
+
+  it("labels a session running an agent by harness, shells keep Terminal N", () => {
+    const rows = buildWorktreeAgentRows(
+      [
+        session({
+          id: "s-1",
+          harnessId: null,
+          observedHarnessId: "claude",
+          command: "/bin/zsh",
+          createdAt: "2026-09-08T11:00:00.000Z",
+        }),
+        session({
+          id: "s-2",
+          harnessId: null,
+          command: "/bin/zsh",
+          createdAt: "2026-09-08T11:30:00.000Z",
+        }),
+      ],
+      { nowMs: NOW },
+    );
+    // The observed session reads the harness label, not a terminal number.
+    expect(rows.find((row) => row.session.id === "s-1")?.title).toBe("Claude");
+    expect(rows.find((row) => row.session.id === "s-1")?.secondary).toBe("");
+    // The genuine plain shell still reads exactly what its tab reads.
+    expect(rows.find((row) => row.session.id === "s-2")?.title).toBe(
+      "Terminal 2",
+    );
+    expect(rows.find((row) => row.session.id === "s-2")?.secondary).toBe("zsh");
+  });
+
+  it("keeps a harness.start session on its harness identity", () => {
+    const rows = buildWorktreeAgentRows(
+      [
+        session({
+          id: "s-1",
+          harnessId: "claude",
+          observedHarnessId: "pi",
+          command: "/bin/zsh",
+        }),
+      ],
+      { nowMs: NOW },
+    );
+    expect(rows[0]?.title).toBe("Claude");
+    expect(rows[0]?.secondary).toBe("");
+  });
+
+  it("a custom rename still wins over the harness label", () => {
+    const rows = buildWorktreeAgentRows(
+      [session({ id: "s-1", observedHarnessId: "codex" })],
+      { nowMs: NOW, customTitles: { "s-1": "Setup" } },
+    );
+    expect(rows[0]?.title).toBe("Setup");
+    // ...but the secondary still names the harness behind the rename.
+    expect(rows[0]?.secondary).toBe("Codex");
+  });
+
+  it("never reads `Claude - zsh` or `Claude - Claude`", () => {
+    expect(
+      resolveRowSecondary(
+        session({
+          agentState: "idle",
+          harnessId: null,
+          observedHarnessId: "claude",
+          command: "/bin/zsh",
+        }),
+        NOW,
+        "Claude",
+      ),
+    ).toBe("");
+    expect(
+      resolveRowSecondary(
+        session({ agentState: "idle", harnessId: "claude" }),
+        NOW,
+        "Claude",
+      ),
+    ).toBe("");
   });
 });
 

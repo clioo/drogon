@@ -16,7 +16,7 @@
    module is pure and side-effect free: callers decide how to surface the
    gap (a notice, a disabled control) and never restart or kill anything on
    its own — that stays a manual `drogon:daemon:restart` action. */
-import { BOTS_CAPABILITY } from "./bots-mount";
+import { BOTS_CAPABILITY } from "./bots-capability";
 
 /** The capability an old daemon predating Agent Settings support never
  *  advertises (crates/drogon-core/src/lib.rs's CAPABILITIES list). */

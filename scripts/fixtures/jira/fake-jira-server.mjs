@@ -38,19 +38,17 @@
 
 import { createServer } from 'node:http'
 import { appendFileSync, readFileSync } from 'node:fs'
-import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
 
 const FIXTURE_TOKEN = 'fixture-token'
 const SLOW_JQL_DELAY_MS = 10_000
 
 const { values } = parseArgs({
   options: {
-    // `fileURLToPath`, not `.pathname`: a URL keeps its path percent-encoded,
-    // so a checkout under a directory with a space in it (every Drogon
-    // workspace on macOS lives under `Application Support`) resolved to a
-    // `%20` path that does not exist, and every `jira_*` test failed on the
-    // fixture's missing LISTEN line.
+    // `fileURLToPath`, not `.pathname`: a checkout under a path with a
+    // space (Drogon's own worktrees live under "Application Support")
+    // keeps the %20 in a URL pathname and the dataset read fails.
     data: {
       type: 'string',
       default: fileURLToPath(new URL('./data/screenshot-site.json', import.meta.url)),

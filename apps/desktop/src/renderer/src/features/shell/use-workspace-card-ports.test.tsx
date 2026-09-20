@@ -12,7 +12,13 @@ function bridge(list = vi.fn().mockResolvedValue(snapshot(row("local", 3000)))) 
   window.drogon = { status, workspacePorts: { list } } as unknown as typeof window.drogon;
   return { list, status };
 }
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => {
+  cleanup();
+  // The suite shares one jsdom window across files: a bridge left here
+  // becomes another file's environment.
+  delete (window as { drogon?: unknown }).drogon;
+  vi.useRealTimers();
+});
 test("one host scan attributes only local workspace rows, deduplicated and sorted", async () => {
   const { list } = bridge(vi.fn().mockResolvedValue(snapshot(row("local", 4000), row("remote", 9000), row("local", 3000), row("local", 3000), row("local", 8000, "other"))));
   const view = renderHook(() => useWorkspaceCardPorts([local, remote], true));
