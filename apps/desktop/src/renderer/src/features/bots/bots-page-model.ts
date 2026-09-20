@@ -293,16 +293,22 @@ export function botStatusPill(input: {
 }
 
 /** The header count chip: bots that are more than idle — configured or
- *  observed in-session. Zero stays "0 active": a real count, never hidden. */
+ *  observed in-session. Zero stays "0 active": a real count, never hidden.
+ *
+ *  `monitorReadErrorByBotId` names the bots whose monitor read FAILED.
+ *  Their monitor count is unknown, so they are never counted as idle off
+ *  a zero nobody verified — the same rule the card and the pill follow. */
 export function countActiveBots(
   bots: BotsPanelBot[],
   monitorsByBotId: Record<string, BotMonitorView[]>,
   observedLivenessByBotId?: Record<string, BotsPanelHostObservation>,
+  monitorReadErrorByBotId?: Record<string, string>,
 ): number {
   return bots.filter((bot) => {
     const pill = botStatusPill({
       bot,
       monitorCount: monitorsByBotId[bot.id]?.length ?? 0,
+      monitorsUnread: monitorReadErrorByBotId?.[bot.id] !== undefined,
       observedLiveness: observedLivenessByBotId?.[bot.id],
     });
     return pill.tone !== "idle";

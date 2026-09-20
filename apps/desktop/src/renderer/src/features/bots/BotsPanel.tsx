@@ -152,6 +152,7 @@ export function BotsPanel({
     effective.bots,
     monitorsByBotId ?? {},
     observedLivenessByBotId,
+    monitorReadErrorByBotId,
   );
   const automationsById: Map<string, AutomationSummary> | null =
     automationSummaries === null

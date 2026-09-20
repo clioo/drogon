@@ -507,6 +507,16 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
       botStatusPill({ bot: bare, monitorCount: 0, monitorsUnread: true })
         .label,
     ).not.toBe("Idle");
+    // ...and the header chip counts the same way: a bot whose monitors
+    // could not be read is not "idle" off an unverified zero.
+    const bots = [
+      { id: "bot-1", responsibilities: [], currentSession: null },
+    ] as never;
+    expect(countActiveBots(bots, {})).toBe(0);
+    expect(countActiveBots(bots, {}, undefined, {})).toBe(0);
+    expect(
+      countActiveBots(bots, {}, undefined, { "bot-1": "read failed" }),
+    ).toBe(1);
   });
 
   it("says nothing about a reopen that names the recorded conversation", () => {
