@@ -138,6 +138,12 @@ and its Return arrive in one read on a session that is mid-turn, the
 TUI's paste heuristic takes the whole burst as pasted text, and the
 message sits in the composer unsubmitted.
 
+Two things follow. A send costs about 40 ms more than it used to, so a
+relay nudging many sessions pays that per session. And because the body
+and the Return are separate writes, a session that dies between them
+fails with an error naming what got through — resend just a Return, not
+the whole message, or it is typed twice.
+
 The result reports `acceptedBytes` (what reached the PTY — a trailing
 CRLF is the one byte Return really is), `submittedEnter` (a Return
 reached the PTY) and `enterDelivery`, which is the one to check:

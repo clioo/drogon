@@ -776,8 +776,16 @@ struct PasteAwareTui {
     submitted: Vec<String>,
 }
 
-/// Longest burst still read as typing rather than as a paste.
-const KEYSTROKE_BURST_MAX: usize = 8;
+/// Longest burst this model still reads as typing rather than as a paste.
+///
+/// It is deliberately the most pessimistic value that is still coherent —
+/// three bytes, one key or two — because the model exists to catch the
+/// bug, not to flatter the fix. The daemon's framing threshold is the
+/// same number, and
+/// `every_body_the_daemon_declines_to_frame_is_keystroke_sized` asserts
+/// that the two stay lined up: nothing this model would swallow is left
+/// unframed.
+const KEYSTROKE_BURST_MAX: usize = 3;
 
 impl PasteAwareTui {
     /// One `read()` worth of bytes.
@@ -882,6 +890,37 @@ fn the_tui_model_does_not_submit_the_fused_delivery_that_was_reported() {
     assert_eq!(typed.submitted, vec!["y".to_string()]);
 }
 
+/// The daemon's framing threshold and this model's paste cutoff have to
+/// stay lined up, or the suite would bless a gap: a body too big for the
+/// model to call typing but too small for the daemon to frame is exactly
+/// the shape that goes out unframed and is then swallowed. An adversarial
+/// pass found that gap when the two were 16 and 8.
+#[test]
+fn every_body_the_daemon_declines_to_frame_is_keystroke_sized() {
+    // Longest body the daemon leaves unframed: PASTE_FRAME_MIN_BYTES is
+    // 3, so two bytes is the last one — and unframed it reaches the far
+    // end as a three-byte burst, body and Return together.
+    let unframed_max = "ab";
+    let mut tui = PasteAwareTui::default();
+    tui.read_burst(format!("{unframed_max}\r").as_bytes());
+    assert_eq!(
+        tui.submitted,
+        vec![unframed_max.to_string()],
+        "a body the daemon will not frame must still submit when it and \
+         its Return arrive in one read"
+    );
+
+    // One byte more and the daemon frames it, which is what makes the
+    // same read submit. Unframed, the model shows why it must.
+    let mut swallowed = PasteAwareTui::default();
+    swallowed.read_burst(b"abc\r");
+    assert!(
+        swallowed.submitted.is_empty(),
+        "an unframed body at the threshold is already swallowable: {:?}",
+        swallowed.submitted
+    );
+}
+
 /// The headline regression. A long, single-line message sent to a
 /// bracketed-paste TUI that is mid-turn: the bytes are captured from a
 /// real PTY, from a real `read()` that really did get them all at once,
@@ -941,6 +980,56 @@ fn a_long_message_submits_on_a_busy_paste_detecting_tui() {
         assert_eq!(
             tui.submitted,
             vec![LONG_MESSAGE.to_string()],
+            "composer left holding {:?}",
+            tui.composer
+        );
+
+        fixture.close(&session, &incarnation);
+    }));
+    fixture.shut_down();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// The gap an adversarial pass found: a body too short to be framed under
+/// the old sixteen-byte threshold, but long enough to be read as a paste,
+/// sent to the same busy far end. It coalesced with its Return into one
+/// read and, by the model above, sat unsubmitted while the caller was
+/// told `keypress`. Eight bytes is a message now, so it is framed and it
+/// submits.
+#[test]
+fn a_short_message_submits_on_a_busy_paste_detecting_tui() {
+    const SHORT: &str = "continue";
+    let fixture = Fixture::start("dg-short-");
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (session, incarnation) =
+            fixture.script_session(fixture.busy_paste_tui.clone(), &["5"], "READY:");
+        let sent = ok(
+            &fixture.data_dir,
+            &[
+                "terminal",
+                "send",
+                "--session",
+                &session,
+                "--incarnation",
+                &incarnation,
+                "--text",
+                &format!("{SHORT}\n"),
+            ],
+        );
+        assert_eq!(sent["result"]["bracketedPaste"], true, "{sent:#}");
+        assert_eq!(sent["result"]["enterDelivery"], "keypress", "{sent:#}");
+
+        let text = wait_for_marker(&fixture.data_dir, &session, &incarnation, ":DONE");
+        let burst = from_hex(&between(&text, "READY:", ":DONE"));
+        let expected = [PASTE_START, SHORT.as_bytes(), PASTE_END, b"\r"].concat();
+        assert_eq!(to_hex(&burst), to_hex(&expected));
+        let mut tui = PasteAwareTui::default();
+        tui.read_burst(&burst);
+        assert_eq!(
+            tui.submitted,
+            vec![SHORT.to_string()],
             "composer left holding {:?}",
             tui.composer
         );
@@ -1088,20 +1177,30 @@ fn bracketed_framing_is_applied_only_where_it_is_safe_and_needed() {
         },
         // The threshold itself, from both sides.
         FrameCase {
-            what: "fifteen bytes is still keystrokes",
+            what: "two bytes is still a key or two",
             modes: ON,
-            text: "abcdefghijklmno\n",
+            text: "ab\n",
             literal: false,
             framed: false,
-            hex: "6162636465666768696a6b6c6d6e6f0d",
+            hex: "61620d",
         },
         FrameCase {
-            what: "sixteen bytes is a message",
+            what: "three bytes is a message",
             modes: ON,
-            text: "abcdefghijklmnop\n",
+            text: "abc\n",
             literal: false,
             framed: true,
-            hex: "1b5b3230307e6162636465666768696a6b6c6d6e6f701b5b3230317e0d",
+            hex: "1b5b3230307e6162631b5b3230317e0d",
+        },
+        // The body an adversarial pass coalesced with its Return on a
+        // busy far end while the threshold was still sixteen.
+        FrameCase {
+            what: "a short word is a message, not keystrokes",
+            modes: ON,
+            text: "continue\n",
+            literal: false,
+            framed: true,
+            hex: "1b5b3230307e636f6e74696e75651b5b3230317e0d",
         },
         FrameCase {
             what: "a tab is text, not a key that blocks framing",

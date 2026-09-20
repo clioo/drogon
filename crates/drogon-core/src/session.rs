@@ -1250,10 +1250,24 @@ pub(crate) fn read_long_poll(
 const ENTER_SETTLE: Duration = Duration::from_millis(40);
 
 /// Smallest body that is treated as a message rather than as keystrokes.
-/// Below it, framing would turn a single-key answer (`y`, `2`) into a
-/// paste a select prompt ignores — a worse bug than the one being fixed —
-/// and a body that short trips no paste heuristic anyway.
-const PASTE_FRAME_MIN_BYTES: usize = 16;
+///
+/// Framing a single-key answer (`y`, `2`) would turn it into a paste a
+/// select prompt ignores — a worse bug than the one being fixed — so the
+/// threshold exists. But it has to sit where a keystroke stops and a
+/// message starts, not higher: an adversarial pass showed an eight-byte
+/// body (`continue`) and its Return still coalescing into ONE read on a
+/// busy far end, which is the whole failure mode.
+///
+/// Three bytes is the line, and it is not arbitrary: an unframed body
+/// reaches the far end together with its Return, so a body of N bytes is
+/// an N+1 byte burst. Below three, that burst is at most the two or three
+/// bytes any heuristic must still call typing — which is the invariant
+/// the PTY suite's own TUI model asserts against this constant. One or
+/// two bytes is a key or a key pair; a key that is an escape sequence
+/// (arrows, function keys) carries `ESC`, which `should_frame` refuses on
+/// separately. A caller who really is sending longer keystroke input has
+/// `--literal`, which frames nothing.
+const PASTE_FRAME_MIN_BYTES: usize = 3;
 
 /// What one `session.write` actually put on the PTY.
 pub(crate) struct WriteOutcome {
@@ -1276,7 +1290,11 @@ pub(crate) struct WriteOutcome {
 /// like `ETX`) or be broken by (`ESC`). Sanitizing those bytes instead
 /// would corrupt what the caller asked to deliver, so a body containing
 /// them is written raw and keeps exactly today's meaning — including the
-/// documented interior carriage return, which stays a Return.
+/// documented interior carriage return, which stays a Return. That is a
+/// stated limit, not an oversight: a body carrying its own control bytes
+/// gets the paced Return and nothing more, so on a far end that is not
+/// reading it can still be read as one burst. Such a body is keystrokes,
+/// and keystrokes are what `--literal` and a second send are for.
 ///
 /// Useful: only a body big enough to read as a paste needs the frame.
 fn should_frame(body: &[u8], bracketed_mode: bool) -> bool {
@@ -1289,6 +1307,27 @@ fn should_frame(body: &[u8], bracketed_mode: bool) -> bool {
     !body
         .iter()
         .any(|byte| (*byte < 0x20 && *byte != b'\n' && *byte != b'\t') || *byte == 0x7f)
+}
+
+/// The error a failed PTY write reports.
+///
+/// Splitting the Return off the body (issue #625) created a state that
+/// did not exist when one write carried both: the body can land and the
+/// Return can fail, which leaves the message typed into the composer and
+/// unsubmitted. A caller told only "a write failed" would retry the whole
+/// send and type it twice, so the message says what got through and what
+/// to do about it. That is the cost of the split, named rather than
+/// hidden.
+fn write_failure(body_already_delivered: bool, cause: &str) -> RpcError {
+    if body_already_delivered {
+        error::io_error(format!(
+            "pty write failed after the body was already delivered, so the message \
+             is in the composer unsubmitted; send a lone Return rather than the \
+             whole message again: {cause}"
+        ))
+    } else {
+        error::io_error(format!("pty write failed: {cause}"))
+    }
 }
 
 /// Delivers one `session.write`.
@@ -1307,6 +1346,18 @@ fn should_frame(body: &[u8], bracketed_mode: bool) -> bool {
 /// which is why it lives here and not in the CLI: two agents nudging the
 /// same session cannot interleave a body between another send's body and
 /// its Return.
+///
+/// Two consequences of the split, both stated rather than papered over:
+///
+/// - A send now costs `ENTER_SETTLE` (measured at about 69 ms end to end
+///   per send against a real daemon), so a relay nudging many sessions
+///   pays it per session. That is the price of a Return the far end acts
+///   on.
+/// - The child can exit BETWEEN the body and the Return, where one fused
+///   write would have landed or not landed as a unit. The caller is told
+///   exactly that by [`write_failure`], which is better than the silent
+///   half-delivery the old shape produced whenever a paste heuristic ate
+///   the Return.
 pub(crate) fn write_parts(
     handle: &SessionHandle,
     data: &[u8],
@@ -1345,21 +1396,9 @@ pub(crate) fn write_parts(
         bytes: &[u8],
         already_delivered: bool,
     ) -> Result<(), RpcError> {
-        writer.write_all(bytes).map_err(|e| {
-            // A Return that fails AFTER the body landed leaves the message
-            // typed into the composer and unsubmitted. The caller has to
-            // be told that, not just "a write failed": retrying the whole
-            // send would type it twice.
-            if already_delivered {
-                error::io_error(format!(
-                    "pty write failed after the body was already delivered, so the \
-                     message is in the composer unsubmitted; send a lone Return \
-                     rather than the whole message again: {e}"
-                ))
-            } else {
-                error::io_error(format!("pty write failed: {e}"))
-            }
-        })
+        writer
+            .write_all(bytes)
+            .map_err(|e| write_failure(already_delivered, &e.to_string()))
     }
     if !submit_enter {
         put(writer, data, false)?;
@@ -1779,6 +1818,75 @@ pub(crate) fn base64_decode(text: &str) -> Result<Vec<u8>, RpcError> {
     base64::engine::general_purpose::STANDARD
         .decode(text)
         .map_err(|_| error::invalid_argument("dataBase64 is not valid base64"))
+}
+
+#[cfg(test)]
+mod write_parts_policy_tests {
+    use super::{PASTE_FRAME_MIN_BYTES, should_frame, write_failure};
+
+    /// The framing gate, without a PTY: the PTY suite pins the bytes,
+    /// this pins the decision and the reasons for it.
+    #[test]
+    fn framing_needs_an_announcement_a_message_and_no_control_bytes() {
+        let message = b"rebase onto v2 please";
+        assert!(should_frame(message, true));
+        // No announcement, no framing — the far end never asked.
+        assert!(!should_frame(message, false));
+        // Nothing to frame.
+        assert!(!should_frame(b"", true));
+        // A key or a key pair stays a keystroke; one byte more is a
+        // message, because unframed it would reach the far end as a
+        // burst with its Return.
+        assert!(!should_frame(b"y", true));
+        assert!(!should_frame(b"ab", true));
+        assert!(should_frame(b"abc", true));
+        assert_eq!(PASTE_FRAME_MIN_BYTES, 3);
+        // A short multi-line body is a message whatever its length.
+        assert!(should_frame(b"a\nb", true));
+        // Control bytes the frame would swallow or be broken by.
+        for hostile in [
+            &b"abcdefghij\x1b[201~"[..],
+            &b"abcdefghij\x03"[..],
+            &b"abcdefghij\rklm"[..],
+            &b"abcdefghij\x7f"[..],
+        ] {
+            assert!(
+                !should_frame(hostile, true),
+                "{hostile:?} must not be framed"
+            );
+        }
+        // A tab is text, not a key that blocks framing.
+        assert!(should_frame(b"abcdefghij\tklm", true));
+    }
+
+    /// A Return that fails after the body landed must not read like a
+    /// write that never happened: the difference decides whether the
+    /// caller resends the message (typing it twice) or just the Return.
+    #[test]
+    fn a_return_that_fails_after_the_body_says_what_got_through() {
+        let nothing_sent = write_failure(false, "Broken pipe (os error 32)");
+        assert_eq!(nothing_sent.code, "io_error");
+        assert!(nothing_sent.message.contains("Broken pipe"));
+        assert!(
+            !nothing_sent.message.contains("composer"),
+            "nothing was delivered, so nothing is waiting: {}",
+            nothing_sent.message
+        );
+
+        let half_sent = write_failure(true, "Input/output error (os error 5)");
+        assert_eq!(half_sent.code, "io_error");
+        assert!(half_sent.message.contains("Input/output error"));
+        assert!(
+            half_sent.message.contains("composer unsubmitted"),
+            "the caller must learn the message is sitting there: {}",
+            half_sent.message
+        );
+        assert!(
+            half_sent.message.contains("lone Return"),
+            "and what to do instead of resending it: {}",
+            half_sent.message
+        );
+    }
 }
 
 #[cfg(test)]

@@ -20,6 +20,18 @@
 //! Framing bytes a program never asked for would be worse than the bug, so
 //! [`BracketedPasteScanner`] is the gate: no observed DECSET 2004, no
 //! framing.
+//!
+//! The flag is the session's, not a program's, and it says what the last
+//! announcement said — exactly like a terminal. So a TUI that is killed
+//! before it can emit `ESC [ ? 2004 l` leaves the mode on for whatever
+//! runs next in that PTY, and a message-sized send to a plain shell there
+//! arrives wrapped in markers the shell shows as text. That is the same
+//! state a real terminal would be left in by the same bytes — the
+//! desktop's own xterm would be showing a bracketed-paste session too,
+//! and `reset`, a new TUI, or any shell that announces its own prompt
+//! mode corrects both at once. Tracking an exit here instead would mean
+//! guessing which program owns the PTY, which is exactly the guesswork
+//! this module exists to remove.
 
 /// `ESC` — the byte every sequence here starts with.
 const ESC: u8 = 0x1b;
@@ -27,13 +39,20 @@ const ESC: u8 = 0x1b;
 /// The DEC private mode number for bracketed paste.
 const BRACKETED_PASTE_MODE: u32 = 2004;
 
-/// Longest partial sequence carried across chunk boundaries. xterm caps a
-/// CSI at 30 parameters, so a real private-mode set is an order of
-/// magnitude shorter than this even when a TUI sets everything at once;
-/// anything longer is not a mode sequence and is dropped rather than
-/// retained forever. Only a sequence SPLIT across chunks is subject to the
-/// bound — one that arrives whole is parsed at any length.
+/// Longest partial sequence carried across chunk boundaries. A real
+/// private-mode set is far shorter than this even when a TUI sets
+/// everything at once; anything longer is not a mode sequence and is
+/// dropped rather than retained forever. Only a sequence SPLIT across
+/// chunks is subject to the bound — one that arrives whole is parsed up
+/// to [`MAX_PARAMS`].
 const MAX_PENDING: usize = 256;
+
+/// Parameters a private-mode sequence may carry before it stops being
+/// one. xterm's parser keeps 32 and discards a sequence with more, and
+/// the desktop renders these very bytes with xterm; being more permissive
+/// than the terminal beside us would mean framing for a far end the user's
+/// own screen says never asked.
+const MAX_PARAMS: usize = 32;
 
 /// Opening marker of a bracketed paste, as the terminal sends it.
 pub(crate) const BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
@@ -67,22 +86,23 @@ enum Scan {
 
 /// Classifies the bytes starting at an `ESC`.
 ///
-/// Three things this deliberately does NOT treat as a bracketed-paste mode
-/// change, each because a real terminal would not either:
+/// The reference for what counts is xterm's parser, because the desktop
+/// renders these same bytes with xterm: if the two disagreed, the daemon
+/// could frame a message for a far end the user's own screen says never
+/// asked for paste. Checked against `@xterm/headless` 6.0.0, this follows
+/// it on colon sub-parameters (`ESC [ ? 2004:1 h` sets the mode), on the
+/// 32-parameter cap, and on an `ESC` inside an OSC, DCS, APC or PM string
+/// aborting that string so a mode change written there still counts.
 ///
-/// - `0x9b` as a one-byte CSI. These PTYs are UTF-8, where `0x9b` is a
-///   continuation byte inside a multi-byte character; reading it as CSI
-///   would let ordinary text flip the mode.
-/// - A colon sub-parameter (`ESC [ ? 2004:1 h`). Sub-parameters are not
-///   defined for DEC private modes and xterm rejects the sequence.
-/// - An intermediate byte before the final (`ESC [ ? 2004 SP h`). An
-///   intermediate makes it a different sequence entirely.
+/// It deliberately differs on exactly one point. `0x9b` as a one-byte CSI
+/// is honoured by xterm but ignored here: these PTYs are UTF-8, where
+/// `0x9b` is a continuation byte inside an ordinary multi-byte character,
+/// and honouring it would let plain text flip the mode. The divergence is
+/// in the safe direction — it can only withhold framing, never add it.
 ///
-/// What it DOES follow a terminal on: an `ESC` inside an OSC, DCS, APC or
-/// PM string aborts that string and begins a new sequence, so a private
-/// mode change written inside one still counts — the same answer xterm's
-/// parser gives, and therefore the same answer the desktop's own terminal
-/// reaches about the very same bytes.
+/// An intermediate byte before the final (`ESC [ ? 2004 SP h`) is not a
+/// mode change for either parser: an intermediate makes it a different
+/// sequence entirely.
 fn scan_one(bytes: &[u8]) -> Scan {
     debug_assert_eq!(bytes.first(), Some(&ESC));
     let Some(&b'[') = bytes.get(1) else {
@@ -132,13 +152,27 @@ fn scan_one(bytes: &[u8]) -> Scan {
 }
 
 /// True when `2004` is one of the `;`-separated parameters.
+///
+/// A parameter's colon sub-parameters are not part of its value, so
+/// `2004:1` is mode 2004 — what xterm does with it. Beyond [`MAX_PARAMS`]
+/// the sequence is not a mode change at all, which is also what xterm
+/// does, so a far end whose announcement xterm drops is not framed for.
 fn mentions_bracketed_paste(params: &[u8]) -> bool {
-    params.split(|byte| *byte == b';').any(|param| {
-        std::str::from_utf8(param)
+    let mut found = false;
+    for (index, param) in params.split(|byte| *byte == b';').enumerate() {
+        if index >= MAX_PARAMS {
+            return false;
+        }
+        let value = param.split(|byte| *byte == b':').next().unwrap_or_default();
+        if std::str::from_utf8(value)
             .ok()
-            .and_then(|param| param.parse::<u32>().ok())
+            .and_then(|value| value.parse::<u32>().ok())
             == Some(BRACKETED_PASTE_MODE)
-    })
+        {
+            found = true;
+        }
+    }
+    found
 }
 
 impl BracketedPasteScanner {
@@ -288,19 +322,45 @@ mod tests {
         assert!(!enabled_after(&["\u{f6db}?2004h".as_bytes()]));
     }
 
-    /// Forms xterm itself rejects must not be honoured here either.
+    /// Sub-parameters belong to the parameter, not to the mode number:
+    /// xterm sets 2004 for `2004:1`, so this must too, or the daemon and
+    /// the desktop's terminal would disagree about the same bytes.
     #[test]
-    fn malformed_private_mode_sets_are_not_honoured() {
-        // A colon sub-parameter is not defined for DEC private modes.
-        assert!(!enabled_after(&[b"\x1b[?2004:1h"]));
-        // An intermediate byte before the final makes it another sequence.
+    fn a_colon_sub_parameter_is_the_same_mode() {
+        assert!(enabled_after(&[b"\x1b[?2004:1h"]));
+        assert!(!enabled_after(&[b"\x1b[?2004h", b"\x1b[?2004:1l"]));
+        assert!(enabled_after(&[b"\x1b[?1049;2004:1:2h"]));
+        // The sub-parameter is not the mode: `1:2004` is mode 1.
+        assert!(!enabled_after(&[b"\x1b[?1:2004h"]));
+    }
+
+    /// An intermediate byte makes it a different sequence for either
+    /// parser, so it is not a bracketed-paste change.
+    #[test]
+    fn an_intermediate_byte_is_a_different_sequence() {
         assert!(!enabled_after(&[b"\x1b[?2004 h"]));
-        // Neither may knock a real announcement back off.
-        assert!(enabled_after(&[
-            b"\x1b[?2004h",
-            b"\x1b[?2004:1l",
-            b"\x1b[?2004 l"
-        ]));
+        assert!(enabled_after(&[b"\x1b[?2004h", b"\x1b[?2004 l"]));
+    }
+
+    /// Past xterm's parameter cap the sequence is dropped there, so it is
+    /// dropped here: being more permissive than the terminal beside us
+    /// would mean framing for a far end the user's screen says never
+    /// asked.
+    #[test]
+    fn a_sequence_past_the_parameter_cap_is_not_a_mode_change() {
+        let mut over = b"\x1b[?".to_vec();
+        for _ in 0..MAX_PARAMS {
+            over.extend_from_slice(b"1000;");
+        }
+        over.extend_from_slice(b"2004h");
+        assert!(!enabled_after(&[&over]));
+        // Exactly at the cap it still counts.
+        let mut at_cap = b"\x1b[?".to_vec();
+        for _ in 0..(MAX_PARAMS - 1) {
+            at_cap.extend_from_slice(b"1000;");
+        }
+        at_cap.extend_from_slice(b"2004h");
+        assert!(enabled_after(&[&at_cap]));
     }
 
     /// A long private-mode set still resolves when a chunk boundary lands
@@ -309,8 +369,8 @@ mod tests {
     #[test]
     fn a_long_sequence_split_across_chunks_still_resolves() {
         let mut sequence = b"\x1b[?".to_vec();
-        for mode in 1..60u32 {
-            sequence.extend_from_slice(format!("{mode};").as_bytes());
+        for _ in 0..(MAX_PARAMS - 1) {
+            sequence.extend_from_slice(b"1000;");
         }
         sequence.extend_from_slice(b"2004h");
         assert!(
