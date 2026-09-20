@@ -156,6 +156,20 @@ export type Session = {
    * on older daemon payloads reads as idle.
    */
   hasForegroundChild?: boolean;
+  /**
+   * Additive (issue #622): the harness id the daemon observed in the
+   * session PTY's foreground process group, with its RFC 3339 stamp. An
+   * observation, never an inference, never persisted, and never authority
+   * for hooks, restart, or `agentState`. Null/absent unless a harness-less
+   * live session currently foregrounds a catalog harness.
+   */
+  observedHarnessId?: HarnessId | null;
+  /**
+   * Additive (issue #622): RFC 3339 stamp of the `observedHarnessId`
+   * observation. An observation, never an inference, never persisted, and
+   * never authority. Null/absent when no harness is observed.
+   */
+  observedHarnessAt?: string | null;
 };
 /**
  * Install-resilience P4/P5 (additive, both optional so an older daemon's

@@ -209,6 +209,10 @@ pub(crate) struct SessionHandle {
     /// so hook wait signals are ignored for it (see `hooks.rs`) and its
     /// exit advances the linked run rows (see `run_completion.rs`).
     headless: AtomicBool,
+    /// Memoized foreground-agent observation (issue #622, in-memory only,
+    /// never persisted). Keyed on the observed pgid with a short TTL so a
+    /// `session.list` poll never turns into a process-probe storm.
+    foreground: Mutex<crate::session_foreground::ForegroundMemo>,
     db: Arc<Mutex<Connection>>,
 }
 
@@ -269,6 +273,7 @@ impl SessionHandle {
             explicit_wait_clear: AtomicBool::new(false),
             turn_fact: AtomicU8::new(TURN_INACTIVE),
             headless: AtomicBool::new(false),
+            foreground: Mutex::new(crate::session_foreground::ForegroundMemo::default()),
             db,
         })
     }
@@ -1660,6 +1665,41 @@ fn has_live_child_process(_pid: u32) -> bool {
     false
 }
 
+/// Foreground-agent observation for `to_json` (issue #622): the harness id
+/// seen in the session PTY's foreground process group, or `None`. Only
+/// harness-less live sessions are probed; a `harness.start` session already
+/// names its harness and keeps the observed fields null. In-memory only,
+/// never persisted, and never authority for hooks, restart or `agentState`.
+/// Memoized per session on the observed pgid with a short TTL; read paths
+/// never spawn child processes.
+pub(crate) fn observed_harness(
+    handle: &SessionHandle,
+    verdict: &str,
+) -> (Option<String>, Option<String>) {
+    if handle.harness_id.is_some() || verdict != "live" || handle.is_exited() {
+        return (None, None);
+    }
+    let pgid = {
+        let native = handle.native.lock().unwrap();
+        let Some(native) = native.as_ref() else {
+            return (None, None);
+        };
+        crate::session_foreground::foreground_pgid(native.master.as_ref())
+    };
+    let now = Instant::now();
+    if let Some(cached) = handle.foreground.lock().unwrap().cached(pgid, now) {
+        return cached;
+    }
+    let harness = pgid.and_then(crate::session_foreground::resolve_harness);
+    let at = harness.as_ref().map(|_| crate::now_rfc3339());
+    handle
+        .foreground
+        .lock()
+        .unwrap()
+        .store(pgid, harness.clone(), at.clone(), now);
+    (harness, at)
+}
+
 pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i64>) -> Value {
     let current = *handle
         .size
@@ -1669,6 +1709,7 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         .expect("grid history is never empty");
     let (cols, rows, grid_cursor) = (current.cols, current.rows, current.cursor);
     let (agent_state, agent_state_at) = agent_state_fields(handle, verdict);
+    let (observed_harness_id, observed_harness_at) = observed_harness(handle, verdict);
     json!({
         "id": handle.session_id,
         "workspaceId": handle.workspace_id,
@@ -1709,6 +1750,13 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
             .unwrap()
             .as_ref()
             .and_then(|s| s.transcript_path.clone()),
+        // Additive (issue #622): the harness id observed in the foreground
+        // process group, with its RFC 3339 stamp. An observation, never an
+        // inference, never persisted, and never authority for hooks,
+        // restart or `agentState`. Null unless a harness-less live session
+        // currently foregrounds a catalog harness.
+        "observedHarnessId": observed_harness_id,
+        "observedHarnessAt": observed_harness_at,
     })
 }
 
