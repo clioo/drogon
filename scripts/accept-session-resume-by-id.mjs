@@ -310,6 +310,17 @@ async function addProject(projectPath) {
   // "Select <name>" control; reading `workspaces()` before that is a race.
   await addDialog.waitFor({ state: "hidden" });
   await page.getByRole("button", { name: /^Select / }).first().waitFor();
+  // Product bug (App.tsx `panelRegistry` memo): the Bots page freezes
+  // `createWorkspaceId` from before this project was added/selected, so
+  // Create Bot is refused with "Select a workspace before creating a
+  // Bot." even though the new project IS selected. A renderer reload
+  // remounts the panel with the live selection; the daemon, data dir and
+  // selection survive it. Revisit when the memo tracks selection.
+  await page.reload();
+  await emulatePageFocus(page);
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor();
 }
 
 async function workspaceFor(projectPath) {

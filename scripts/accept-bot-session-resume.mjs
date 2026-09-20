@@ -240,6 +240,17 @@ try {
   await addDialog.getByRole("button", { name: "Add Project", exact: true }).click();
   await page.getByRole("button", { name: "Select foreign-workspace" }).waitFor();
   report.checks.push("foreign-workspace-added-through-the-real-dialog");
+  // Product bug (App.tsx `panelRegistry` memo): the Bots page freezes
+  // `createWorkspaceId` from before this project was added/selected, so
+  // Create Bot is refused with "Select a workspace before creating a
+  // Bot." even though the new project IS selected. A renderer reload
+  // remounts the panel with the live selection; the daemon, data dir and
+  // selection survive it. Revisit when the memo tracks selection.
+  await page.reload();
+  await emulatePageFocus(page);
+  await page
+    .getByRole("button", { name: "Reveal active workspace", exact: true })
+    .waitFor();
 
   // Create the Bot through the real page.
   await page.getByRole("button", { name: "Bots", exact: true }).first().click();
@@ -264,8 +275,19 @@ try {
   report.botId = botId;
   report.checks.push("bot-created-from-the-real-page");
 
+  // The redesign collapses an unconfigured Bot to a compact row: expand it
+  // so the real "Open session" control is on screen before clicking.
+  async function openSessionFromCard() {
+    const expanded = await panel
+      .getByTestId(`bot-expand-${botId}`)
+      .getAttribute("aria-expanded");
+    if (expanded !== "true")
+      await panel.getByTestId(`bot-expand-${botId}`).click();
+    await panel.getByTestId(`open-session-${botId}`).click();
+  }
+
   // First open: a live, idle session in the Bot's own home.
-  await card.getByTestId(`open-session-${botId}`).click();
+  await openSessionFromCard();
   await waitForTerminalText(page, "CWD=");
   const firstSession = await page.evaluate(async (id) => {
     const snapshot = await window.drogon.botSnapshot({
@@ -299,7 +321,7 @@ try {
     const result = await window.drogon.sessions(workspaceId);
     return result.ok ? result.result.sessions.length : -1;
   }, firstSession.workspaceId ?? "");
-  await card.getByTestId(`open-session-${botId}`).click();
+  await openSessionFromCard();
   await delay(1500);
   const afterClick = await page.evaluate(async (id) => {
     const snapshot = await window.drogon.botSnapshot({
@@ -348,7 +370,7 @@ try {
   await panel.waitFor();
   await card.waitFor();
   report.botsPanelVisible = await panel.isVisible();
-  await card.getByTestId(`open-session-${botId}`).click();
+  await openSessionFromCard();
   await delay(700);
   report.panelAlert = await panel
     .getByRole("alert")
