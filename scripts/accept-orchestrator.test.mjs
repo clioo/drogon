@@ -36,6 +36,14 @@ test("orchestrator journey pins the current delegate brief verb", async () => {
   );
 });
 
+test("orchestrator thesis describes the durable run lifecycle", async () => {
+  const source = await readFile(journey, "utf8");
+  assert.ok(
+    source.includes("starts a REAL durable run through the daemon"),
+    "the header thesis must match the retired-loop rewrite",
+  );
+});
+
 test("orchestrator journey proves the run lifecycle, not the retired loop", async () => {
   const source = await readFile(journey, "utf8");
   for (const pin of [

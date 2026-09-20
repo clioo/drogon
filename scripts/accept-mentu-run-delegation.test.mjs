@@ -32,6 +32,14 @@ test("mentu journey proves the hash-bound approval gate", async () => {
   }
 });
 
+test("mentu thesis names the removed panel and the surviving path", async () => {
+  const source = await readFile(journey, "utf8");
+  assert.ok(
+    source.includes("the sidebar Mentu panel this journey once drove is gone"),
+    "the header thesis must record why the rewrite exists",
+  );
+});
+
 test("mentu journey drives the surviving surface, not the removed panel", async () => {
   const source = await readFile(journey, "utf8");
   assert.ok(
