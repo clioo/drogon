@@ -76,5 +76,11 @@
     "requires": null,
     "timeoutMs": 3600000,
     "note": "Settings Demo reproducible executed twice end to end against the dev build with fixture harness (no model inference): bot session, work graph, parallel workers, adversarial rounds, cost reporting."
+  },
+  {
+    "script": "scripts/accept-backup-restore.mjs",
+    "requires": null,
+    "timeoutMs": 1200000,
+    "note": "Pre-migration backup restore against a locally packaged ad-hoc bundle (node scripts/package-desktop.mjs): lock refusal, restore overlay light/dark, confirmation gate, relaunch healthy, CLI restore. All owned processes verified exited."
   }
 ]
