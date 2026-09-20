@@ -1340,13 +1340,29 @@ pub(crate) fn write_parts(
             "session already exited; cannot accept more input",
         ));
     };
-    fn put(writer: &mut (impl Write + ?Sized), bytes: &[u8]) -> Result<(), RpcError> {
-        writer
-            .write_all(bytes)
-            .map_err(|e| error::io_error(format!("pty write failed: {e}")))
+    fn put(
+        writer: &mut (impl Write + ?Sized),
+        bytes: &[u8],
+        already_delivered: bool,
+    ) -> Result<(), RpcError> {
+        writer.write_all(bytes).map_err(|e| {
+            // A Return that fails AFTER the body landed leaves the message
+            // typed into the composer and unsubmitted. The caller has to
+            // be told that, not just "a write failed": retrying the whole
+            // send would type it twice.
+            if already_delivered {
+                error::io_error(format!(
+                    "pty write failed after the body was already delivered, so the \
+                     message is in the composer unsubmitted; send a lone Return \
+                     rather than the whole message again: {e}"
+                ))
+            } else {
+                error::io_error(format!("pty write failed: {e}"))
+            }
+        })
     }
     if !submit_enter {
-        put(writer, data)?;
+        put(writer, data, false)?;
         let _ = writer.flush();
         return Ok(WriteOutcome {
             accepted: data.len(),
@@ -1356,18 +1372,18 @@ pub(crate) fn write_parts(
     }
     if !body.is_empty() {
         if frame {
-            put(writer, BRACKETED_PASTE_START)?;
-            put(writer, body)?;
-            put(writer, BRACKETED_PASTE_END)?;
+            put(writer, BRACKETED_PASTE_START, false)?;
+            put(writer, body, true)?;
+            put(writer, BRACKETED_PASTE_END, true)?;
         } else {
-            put(writer, body)?;
+            put(writer, body, false)?;
         }
         let _ = writer.flush();
         // Still holding the writer lock: the gap is part of one send, not
         // a window another send can type into.
         std::thread::sleep(ENTER_SETTLE);
     }
-    put(writer, b"\r")?;
+    put(writer, b"\r", !body.is_empty())?;
     let _ = writer.flush();
     Ok(WriteOutcome {
         accepted: data.len(),

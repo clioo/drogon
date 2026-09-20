@@ -953,6 +953,55 @@ fn a_long_message_submits_on_a_busy_paste_detecting_tui() {
     }
 }
 
+/// The issue's follow-up shape, pinned so its scope is not overclaimed: a
+/// lone Return to the same busy TUI. One byte cannot be mistaken for a
+/// paste by any burst-size heuristic, and it is not framed, so this
+/// delivery is byte-identical before and after the fix. It submits here.
+/// That is the evidence for the limit stated in `terminal_send`'s module
+/// doc: whatever swallowed the reporter's follow-up Return, it was not
+/// this mechanism, and this change does not claim to have fixed it.
+#[test]
+fn a_lone_return_reaches_a_busy_paste_detecting_tui_as_one_keypress() {
+    let fixture = Fixture::start("dg-lone-");
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (session, incarnation) =
+            fixture.script_session(fixture.busy_paste_tui.clone(), &["5"], "READY:");
+        let sent = ok(
+            &fixture.data_dir,
+            &[
+                "terminal",
+                "send",
+                "--session",
+                &session,
+                "--incarnation",
+                &incarnation,
+                "--text",
+                "\n",
+            ],
+        );
+        assert_eq!(sent["result"]["acceptedBytes"], 1, "{sent:#}");
+        assert_eq!(sent["result"]["enterDelivery"], "keypress", "{sent:#}");
+        assert_eq!(sent["result"]["bracketedPaste"], false, "{sent:#}");
+
+        let text = wait_for_marker(&fixture.data_dir, &session, &incarnation, ":DONE");
+        let burst = from_hex(&between(&text, "READY:", ":DONE"));
+        assert_eq!(to_hex(&burst), "0d", "one read delivered {burst:?}");
+        let mut tui = PasteAwareTui::default();
+        tui.read_burst(&burst);
+        assert_eq!(
+            tui.submitted,
+            vec![String::new()],
+            "a lone Return must submit"
+        );
+
+        fixture.close(&session, &incarnation);
+    }));
+    fixture.shut_down();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
 /// The other half of the delivery: with no bracketed paste to frame, the
 /// Return still has to be its own write. A reader blocked in `read()`
 /// proves it — the body comes back from one read and the Return from the
@@ -1036,6 +1085,65 @@ fn bracketed_framing_is_applied_only_where_it_is_safe_and_needed() {
             literal: false,
             framed: false,
             hex: "790d",
+        },
+        // The threshold itself, from both sides.
+        FrameCase {
+            what: "fifteen bytes is still keystrokes",
+            modes: ON,
+            text: "abcdefghijklmno\n",
+            literal: false,
+            framed: false,
+            hex: "6162636465666768696a6b6c6d6e6f0d",
+        },
+        FrameCase {
+            what: "sixteen bytes is a message",
+            modes: ON,
+            text: "abcdefghijklmnop\n",
+            literal: false,
+            framed: true,
+            hex: "1b5b3230307e6162636465666768696a6b6c6d6e6f701b5b3230317e0d",
+        },
+        FrameCase {
+            what: "a tab is text, not a key that blocks framing",
+            modes: ON,
+            text: "abcdefghijklmnop\tqrst\n",
+            literal: false,
+            framed: true,
+            hex: "1b5b3230307e6162636465666768696a6b6c6d6e6f700971727374\
+                  1b5b3230317e0d",
+        },
+        // The threshold counts BYTES, and a framed body is passed through
+        // byte for byte — no transcoding, no sanitizing.
+        FrameCase {
+            what: "non-ASCII is measured and delivered in bytes",
+            modes: ON,
+            text: "héllo → wörld ✓✓\n",
+            literal: false,
+            framed: true,
+            hex: "1b5b3230307e68c3a96c6c6f20e286922077c3b6726c6420e29c93\
+                  e29c931b5b3230317e0d",
+        },
+        // A body that spells the closing marker cannot escape a frame,
+        // because its ESC is exactly what stops it being framed at all.
+        FrameCase {
+            what: "a body spelling the end marker is never framed",
+            modes: ON,
+            text: "abcdefghijklmnop\u{1b}[201~qrst\n",
+            literal: false,
+            framed: false,
+            hex: "6162636465666768696a6b6c6d6e6f701b5b3230317e717273740d",
+        },
+        // Issue #625's follow-up shape: a lone Return. There is no body to
+        // frame and nothing to pace it against, so it is one byte, exactly
+        // as before the fix — see the module doc on what that does and
+        // does not explain.
+        FrameCase {
+            what: "a lone Return is one byte and is never framed",
+            modes: ON,
+            text: "\n",
+            literal: false,
+            framed: false,
+            hex: "0d",
         },
         FrameCase {
             what: "a short multi-line body is still a message",

@@ -27,11 +27,13 @@ const ESC: u8 = 0x1b;
 /// The DEC private mode number for bracketed paste.
 const BRACKETED_PASTE_MODE: u32 = 2004;
 
-/// Longest partial sequence carried across chunk boundaries. A private
-/// mode set with every parameter a real terminal emits is far shorter;
+/// Longest partial sequence carried across chunk boundaries. xterm caps a
+/// CSI at 30 parameters, so a real private-mode set is an order of
+/// magnitude shorter than this even when a TUI sets everything at once;
 /// anything longer is not a mode sequence and is dropped rather than
-/// retained forever.
-const MAX_PENDING: usize = 128;
+/// retained forever. Only a sequence SPLIT across chunks is subject to the
+/// bound — one that arrives whole is parsed at any length.
+const MAX_PENDING: usize = 256;
 
 /// Opening marker of a bracketed paste, as the terminal sends it.
 pub(crate) const BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
@@ -64,6 +66,23 @@ enum Scan {
 }
 
 /// Classifies the bytes starting at an `ESC`.
+///
+/// Three things this deliberately does NOT treat as a bracketed-paste mode
+/// change, each because a real terminal would not either:
+///
+/// - `0x9b` as a one-byte CSI. These PTYs are UTF-8, where `0x9b` is a
+///   continuation byte inside a multi-byte character; reading it as CSI
+///   would let ordinary text flip the mode.
+/// - A colon sub-parameter (`ESC [ ? 2004:1 h`). Sub-parameters are not
+///   defined for DEC private modes and xterm rejects the sequence.
+/// - An intermediate byte before the final (`ESC [ ? 2004 SP h`). An
+///   intermediate makes it a different sequence entirely.
+///
+/// What it DOES follow a terminal on: an `ESC` inside an OSC, DCS, APC or
+/// PM string aborts that string and begins a new sequence, so a private
+/// mode change written inside one still counts — the same answer xterm's
+/// parser gives, and therefore the same answer the desktop's own terminal
+/// reaches about the very same bytes.
 fn scan_one(bytes: &[u8]) -> Scan {
     debug_assert_eq!(bytes.first(), Some(&ESC));
     let Some(&b'[') = bytes.get(1) else {
@@ -254,6 +273,76 @@ mod tests {
         assert!(!enabled_after(&[
             BRACKETED_PASTE_START,
             BRACKETED_PASTE_END
+        ]));
+    }
+
+    /// `0x9b` is a UTF-8 continuation byte here, never a one-byte CSI:
+    /// reading it as one would let any accented character start a mode
+    /// sequence.
+    #[test]
+    fn a_c1_csi_byte_is_text_not_a_control_in_a_utf8_stream() {
+        assert!(!enabled_after(&[b"\x9b[?2004h"]));
+        assert!(!enabled_after(&[b"\x9b?2004h"]));
+        // The byte really does occur in ordinary output: U+F6DB is
+        // e0 9b 9b in UTF-8.
+        assert!(!enabled_after(&["\u{f6db}?2004h".as_bytes()]));
+    }
+
+    /// Forms xterm itself rejects must not be honoured here either.
+    #[test]
+    fn malformed_private_mode_sets_are_not_honoured() {
+        // A colon sub-parameter is not defined for DEC private modes.
+        assert!(!enabled_after(&[b"\x1b[?2004:1h"]));
+        // An intermediate byte before the final makes it another sequence.
+        assert!(!enabled_after(&[b"\x1b[?2004 h"]));
+        // Neither may knock a real announcement back off.
+        assert!(enabled_after(&[
+            b"\x1b[?2004h",
+            b"\x1b[?2004:1l",
+            b"\x1b[?2004 l"
+        ]));
+    }
+
+    /// A long private-mode set still resolves when a chunk boundary lands
+    /// in the middle of it — the carry bound is for runaway input, not for
+    /// a real sequence.
+    #[test]
+    fn a_long_sequence_split_across_chunks_still_resolves() {
+        let mut sequence = b"\x1b[?".to_vec();
+        for mode in 1..60u32 {
+            sequence.extend_from_slice(format!("{mode};").as_bytes());
+        }
+        sequence.extend_from_slice(b"2004h");
+        assert!(
+            sequence.len() > 128,
+            "the case is only interesting when long"
+        );
+        for split in [1, 50, 129, 150, sequence.len() - 1] {
+            let (head, tail) = sequence.split_at(split);
+            assert!(enabled_after(&[head, tail]), "split at {split}");
+        }
+        let mut byte_at_a_time = BracketedPasteScanner::default();
+        for byte in &sequence {
+            byte_at_a_time.feed(&[*byte]);
+        }
+        assert!(byte_at_a_time.enabled());
+    }
+
+    /// A mode change written inside a string sequence still counts,
+    /// because the `ESC` aborts the string — which is what a terminal
+    /// does with the same bytes, so the daemon and the desktop's own
+    /// terminal never disagree about whether paste is on.
+    #[test]
+    fn an_escape_inside_a_string_sequence_aborts_it_the_way_a_terminal_does() {
+        assert!(enabled_after(&[b"\x1b]0;title \x1b[?2004h\x07"]));
+        assert!(!enabled_after(&[
+            b"\x1b[?2004h",
+            b"\x1b]0;log \x1b[?2004l\x07"
+        ]));
+        // A string with no escape inside it is just a string.
+        assert!(!enabled_after(&[b"\x1b]0;my title\x07"]));
+        assert!(!enabled_after(&[
+            b"\x1b]8;;https://example.invalid/2004h\x07"
         ]));
     }
 

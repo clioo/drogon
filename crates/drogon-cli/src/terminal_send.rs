@@ -56,6 +56,18 @@
 //! swallowed), or `none`. Neither is a claim the far end submitted a
 //! turn; only reading the session proves that, and the guide says so.
 //!
+//! **What this does not explain.** #625 also reports a follow-up send of
+//! a lone newline that returned `submittedEnter: true` and still did not
+//! produce a turn minutes later. A lone Return is one byte with no body
+//! to be absorbed into, framed by nothing and paced against nothing — it
+//! is delivered exactly as it was before this change, and the PTY test
+//! `a_lone_return_reaches_a_busy_paste_detecting_tui_as_one_keypress`
+//! pins that it arrives as a keypress even on a busy paste-detecting far
+//! end. So whatever swallowed that Return was something else, which the
+//! issue itself did not determine. `enterDelivery` is the honest answer
+//! in the meantime: it says what the PTY got, and the guide says to read
+//! the session when what the agent DID with it is what matters.
+//!
 //! `--literal` opts out: the bytes go to the PTY exactly as given, with no
 //! Return translation and no `submitEnter`, which is what a caller piping
 //! data (rather than typing a message) wants.
