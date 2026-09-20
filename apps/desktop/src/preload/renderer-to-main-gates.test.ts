@@ -2,7 +2,7 @@
 // Invalid renderer payloads must throw in preload, before any IPC leaves
 // for main. Each throw-test pins the THROW decision: the matching mutation
 // passes the payload through and the test fails.
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const electron = vi.hoisted(() => ({
   ipcRenderer: {
@@ -14,10 +14,32 @@ const electron = vi.hoisted(() => ({
 
 vi.mock("electron", () => electron);
 
-import { appMenu } from "./app-menu";
-import { mentu } from "./mentu";
 import { MENTU_OPEN_TAB_RESULT_CHANNEL } from "../shared/mentu-contract";
 import { menuIpcChannels } from "../shared/menu-contract";
+
+// Worker-reuse hermeticity (docs/reference/desktop-test-isolation.md): the
+// desktop suite shares one module registry per worker, so a statically
+// imported bridge would stay bound to whichever file's `electron` mock won
+// the import race and `invoke` assertions below would observe the wrong
+// mock. Rebinding after a registry reset keeps them deterministic.
+let appMenu: typeof import("./app-menu").appMenu;
+let mentu: typeof import("./mentu").mentu;
+
+beforeAll(async () => {
+  vi.resetModules();
+  ({ appMenu } = await import("./app-menu"));
+  ({ mentu } = await import("./mentu"));
+});
+
+beforeEach(() => {
+  electron.ipcRenderer.on.mockClear();
+  electron.ipcRenderer.removeListener.mockClear();
+  electron.ipcRenderer.invoke.mockClear();
+});
+
+afterAll(() => {
+  vi.resetModules();
+});
 
 const APPEARANCE_STATE = {
   statusBarVisible: true,

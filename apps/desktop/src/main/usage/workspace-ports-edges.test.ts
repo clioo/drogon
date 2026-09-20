@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 
 const { execCalls } = vi.hoisted(() => ({ execCalls: [] as unknown[][] }));
 
@@ -9,16 +9,39 @@ vi.mock("node:child_process", () => ({
     callback(new Error("lsof unavailable in tests"), "");
   },
 }));
-import {
-  connectHostForBindHost,
-  dedupeRawPorts,
-  loadDarwinProcessMetadata,
-  normalizeWorkspacePortProbes,
-  parseAddressWithPort,
-  parseLsofListeningOutput,
-  parseProcNetTcp,
-  scanPlatformListeningPorts,
-} from "./workspace-ports";
+
+// Worker-reuse hermeticity (docs/reference/desktop-test-isolation.md): the
+// desktop suite shares one module registry per worker, so a statically
+// imported scanner would stay bound to whichever `node:child_process` won
+// the import race — the real one, which runs a live `lsof` and leaves this
+// file's `execCalls` empty (observed as rotating failures). Rebinding after
+// a registry reset keeps the mocked spawn deterministic.
+let connectHostForBindHost: typeof import("./workspace-ports").connectHostForBindHost;
+let dedupeRawPorts: typeof import("./workspace-ports").dedupeRawPorts;
+let loadDarwinProcessMetadata: typeof import("./workspace-ports").loadDarwinProcessMetadata;
+let normalizeWorkspacePortProbes: typeof import("./workspace-ports").normalizeWorkspacePortProbes;
+let parseAddressWithPort: typeof import("./workspace-ports").parseAddressWithPort;
+let parseLsofListeningOutput: typeof import("./workspace-ports").parseLsofListeningOutput;
+let parseProcNetTcp: typeof import("./workspace-ports").parseProcNetTcp;
+let scanPlatformListeningPorts: typeof import("./workspace-ports").scanPlatformListeningPorts;
+
+beforeAll(async () => {
+  vi.resetModules();
+  ({
+    connectHostForBindHost,
+    dedupeRawPorts,
+    loadDarwinProcessMetadata,
+    normalizeWorkspacePortProbes,
+    parseAddressWithPort,
+    parseLsofListeningOutput,
+    parseProcNetTcp,
+    scanPlatformListeningPorts,
+  } = await import("./workspace-ports"));
+});
+
+afterAll(() => {
+  vi.resetModules();
+});
 
 describe("proc/net tcp parsing (listener boundaries)", () => {
   const header = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode";

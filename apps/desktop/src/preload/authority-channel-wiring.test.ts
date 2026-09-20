@@ -3,7 +3,7 @@
 // renamed channel or a rewritten op silently disconnects the authority
 // path. Each test pins one (channel, payload) decision: the matching
 // mutation renames the channel/op or drops a field and the test fails.
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const electron = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => void>();
@@ -23,14 +23,35 @@ const electron = vi.hoisted(() => {
 
 vi.mock("electron", () => electron);
 
-import { automationBridge } from "./automation";
-import { backups } from "./backups";
-import { browser } from "./browser";
-import { daemon } from "./daemon";
-import { meetings } from "./meetings";
-import { shell } from "./shell";
 import { browserIpcChannels } from "../shared/browser-contract";
 import { SHELL_OPEN_EXTERNAL_CHANNEL } from "../shared/shell-contract";
+
+// Worker-reuse hermeticity (docs/reference/desktop-test-isolation.md): the
+// desktop suite shares one module registry per worker, so statically
+// imported bridges would stay bound to whichever file's `electron` mock won
+// the import race (browser-state-replay.test.ts mocks the same module with
+// an incompatible shape). Rebinding after a registry reset keeps the
+// channel assertions below deterministic under any file order.
+let automationBridge: typeof import("./automation").automationBridge;
+let backups: typeof import("./backups").backups;
+let browser: typeof import("./browser").browser;
+let daemon: typeof import("./daemon").daemon;
+let meetings: typeof import("./meetings").meetings;
+let shell: typeof import("./shell").shell;
+
+beforeAll(async () => {
+  vi.resetModules();
+  ({ automationBridge } = await import("./automation"));
+  ({ backups } = await import("./backups"));
+  ({ browser } = await import("./browser"));
+  ({ daemon } = await import("./daemon"));
+  ({ meetings } = await import("./meetings"));
+  ({ shell } = await import("./shell"));
+});
+
+afterAll(() => {
+  vi.resetModules();
+});
 
 describe("daemon restart authority rides its own gated channels", () => {
   it("restarts through drogon:daemon:restart with the input untouched", async () => {
