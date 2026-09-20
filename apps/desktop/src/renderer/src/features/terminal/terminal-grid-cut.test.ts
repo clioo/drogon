@@ -224,4 +224,45 @@ describe("planGridCutWrites with several cuts in one page", () => {
       ),
     ).toEqual(["ab", "grid:132", "cd"]);
   });
+
+  it("reads an empty changes array as 'no change', not as 'unknown'", () => {
+    // Absent means an old daemon (fall back to `gridCursor`); present but
+    // empty means the daemon knows of no change for this page.
+    const steps = planGridCutWrites(
+      page(0, "abcd"),
+      { ...at132, gridCursor: 2, gridChanges: [] },
+      at80,
+    );
+    expect(steps.filter((step) => step.kind === "grid")).toEqual([]);
+    expect(
+      steps
+        .filter((step) => step.kind === "write")
+        .map((step) => decode((step as { bytes: Uint8Array }).bytes))
+        .join(""),
+    ).toBe("abcd");
+  });
+
+  it("collapses several cuts at one cursor to the last", () => {
+    // A resize storm with no output between resizes: no byte was composed
+    // at any grid but the last, so applying each one would reflow the
+    // buffer for nothing and end wherever the pile's parity lands.
+    const steps = planGridCutWrites(
+      page(0, "abcdef"),
+      {
+        ...at80,
+        gridChanges: [
+          { cursor: 0, ...at80 },
+          { cursor: 3, ...at132 },
+          { cursor: 3, ...at80 },
+          { cursor: 3, cols: 96, rows: 24 },
+        ],
+      },
+      at80,
+    );
+    expect(
+      steps.map((step) =>
+        step.kind === "grid" ? `grid:${step.grid.cols}` : decode(step.bytes),
+      ),
+    ).toEqual(["abc", "grid:96", "def"]);
+  });
 });

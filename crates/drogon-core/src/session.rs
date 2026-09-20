@@ -1214,8 +1214,20 @@ fn grid_changes_for(handle: &SessionHandle, start: u64, end: u64) -> Value {
         }));
     }
     let mut out = Vec::with_capacity(changes.len() + 1);
-    if let Some(change) = in_force {
-        out.push(json!({ "cursor": start, "cols": change.cols, "rows": change.rows }));
+    match in_force {
+        Some(change) => {
+            out.push(json!({ "cursor": start, "cols": change.cols, "rows": change.rows }));
+        }
+        // Eviction dropped every cut at or before `start` (dozens of
+        // resizes with almost no output between them). Name the oldest
+        // grid still remembered, at this page's own first byte, rather
+        // than naming nothing: a reader with no entry parses at whatever
+        // it happens to hold, which no pty ever reported for these bytes.
+        None => {
+            if let Some(oldest) = history.front() {
+                out.push(json!({ "cursor": start, "cols": oldest.cols, "rows": oldest.rows }));
+            }
+        }
     }
     out.extend(changes);
     Value::Array(out)

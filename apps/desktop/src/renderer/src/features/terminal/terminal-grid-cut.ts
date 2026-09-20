@@ -82,9 +82,11 @@ const sameGrid = (a: TerminalGrid, b: TerminalGrid) =>
  *
  * A cut at or before the page's start applies before any byte is written,
  * which is also how a reader carried past a cut by ring truncation still
- * lands on the right grid. A change to the grid the emulator already holds
- * is dropped: resizing to the current size would reflow the buffer for
- * nothing.
+ * lands on the right grid. Cuts sharing one cursor collapse to the last:
+ * no byte was composed between them (a resize storm with no output in
+ * between), so only that grid ever governs a byte and the earlier ones
+ * would reflow the buffer for nothing. A change to the grid the emulator
+ * already holds is dropped for the same reason.
  *
  * Falls back to the single `gridCursor` when a daemon reports no changes
  * array, and to "no change" when it reports neither.
@@ -140,7 +142,7 @@ function normalizeChanges(
         rows: reported.rows,
       },
     ];
-  return source
+  const ordered = source
     .filter(
       (change) =>
         !!change &&
@@ -149,4 +151,11 @@ function normalizeChanges(
         isGrid(change),
     )
     .sort((a, b) => a.cursor - b.cursor);
+  // A resize storm with no output between resizes leaves several cuts at
+  // one cursor; only the last governs any byte, so the earlier ones are
+  // not this page's to apply.
+  return ordered.filter(
+    (change, index) =>
+      index + 1 >= ordered.length || ordered[index + 1].cursor !== change.cursor,
+  );
 }

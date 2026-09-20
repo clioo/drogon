@@ -1473,3 +1473,73 @@ fn a_read_page_carries_every_grid_it_spans() {
         json!({ "sessionId": session_id, "incarnation": incarnation }),
     );
 }
+
+/// #605 iteration 2: the history is bounded (64), so dozens of resizes with
+/// almost no output between them evict every cut at or before an old page.
+/// The page must still name a grid for its first byte — the oldest one
+/// still remembered — rather than an empty array, which a reader parses at
+/// whatever it happens to hold.
+#[test]
+fn an_evicted_page_still_names_a_grid() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_id = register_workspace(&engine, dir.path(), "ws-evict");
+
+    let session = ok(
+        &engine,
+        "session.start",
+        "start-evict",
+        json!({
+            "workspaceId": workspace_id,
+            "command": "/bin/sh",
+            "args": ["-c", "printf hello; sleep 30"],
+            "cols": 80, "rows": 24
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    let read_old = |tag: &str| {
+        ok(
+            &engine,
+            "session.read",
+            tag,
+            json!({ "sessionId": session_id, "incarnation": incarnation, "cursor": 0, "limitBytes": 3 }),
+        )
+    };
+    assert!(
+        wait_for(
+            || read_old("evict-wait")["nextCursor"].as_u64().unwrap() >= 3,
+            Duration::from_secs(5),
+        ),
+        "child must emit its greeting"
+    );
+
+    // Alternating resizes with no output between them: each records a cut
+    // at the same ring offset and the opening cut falls off the history.
+    for i in 0..70 {
+        let cols = if i % 2 == 0 { 120 } else { 80 };
+        ok(
+            &engine,
+            "session.resize",
+            &format!("evict-resize-{i}"),
+            json!({ "sessionId": session_id, "incarnation": incarnation, "cols": cols, "rows": 24 }),
+        );
+    }
+
+    // A page ending before the surviving pile still carries one entry,
+    // stamped at its own first byte.
+    let page = read_old("evict-read");
+    assert_eq!(page["startCursor"], 0);
+    assert_eq!(page["nextCursor"], 3);
+    let changes = page["gridChanges"].as_array().unwrap();
+    assert_eq!(changes.len(), 1, "evicted page must still name a grid: {changes:?}");
+    assert_eq!(changes[0]["cursor"], 0);
+
+    ok(
+        &engine,
+        "session.stop",
+        "stop-evict",
+        json!({ "sessionId": session_id, "incarnation": incarnation }),
+    );
+}
