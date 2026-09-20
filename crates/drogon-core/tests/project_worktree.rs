@@ -1106,10 +1106,10 @@ fn worktree_remove_refuses_to_take_a_nested_workspace_down_with_it() {
     );
     std::fs::write(Path::new(&inner_path).join("work.txt"), "uncommitted\n").unwrap();
 
-    // Send the outer one down the recovery path, where Drogon deletes the
-    // directory itself: a plain `remove_dir_all` would take the inner
-    // checkout with it and leave the inner row pointing at nothing.
-    std::fs::write(Path::new(&outer_path).join(".git"), "not a gitfile\n").unwrap();
+    // The outer checkout is perfectly healthy, which is the case that
+    // matters: `git worktree remove --force` on it exits 0 and takes the
+    // nested checkout with it, so a guard that only runs after git has
+    // refused never sees this at all.
     let refusal = err_message(
         &engine,
         "worktree.remove",
@@ -1140,6 +1140,97 @@ fn worktree_remove_refuses_to_take_a_nested_workspace_down_with_it() {
         json!({"id": outer["id"], "force": true}),
     );
     assert!(!Path::new(&outer_path).exists());
+}
+
+#[test]
+fn worktree_remove_refuses_a_nested_workspace_on_the_recovery_path_too() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let outer = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "outer"}),
+    );
+    let inner = ok(
+        &engine,
+        "worktree.create",
+        "w2",
+        json!({"projectId": project_id, "name": "outer/inner", "branch": "inner-branch"}),
+    );
+    let outer_path = outer["path"].as_str().unwrap().to_string();
+    let inner_path = inner["path"].as_str().unwrap().to_string();
+
+    // Broken outer .git: git refuses even twice-forced, so the removal takes
+    // the recovery path and deletes the directory itself. The guard has to
+    // hold on that route as well as on the healthy one.
+    std::fs::write(Path::new(&outer_path).join(".git"), "not a gitfile\n").unwrap();
+    let refusal = err_message(
+        &engine,
+        "worktree.remove",
+        "w3",
+        json!({"id": outer["id"], "force": true}),
+    );
+    assert!(refusal.contains("is inside it"), "got: {refusal}");
+    assert!(Path::new(&inner_path).exists());
+}
+
+#[test]
+fn worktree_remove_refuses_a_project_registered_inside_the_checkout() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let wt = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "host"}),
+    );
+    let host_path = wt["path"].as_str().unwrap().to_string();
+
+    // A folder project registered inside the checkout is a card of its own,
+    // and `project.remove` promises its files are never touched. A sibling
+    // workspace's delete must not be the thing that deletes them.
+    let inside = Path::new(&host_path).join("notes");
+    std::fs::create_dir_all(&inside).unwrap();
+    std::fs::write(inside.join("keep.txt"), "the user's notes\n").unwrap();
+    ok(
+        &engine,
+        "project.add",
+        "p2",
+        json!({"path": inside.to_string_lossy()}),
+    );
+
+    let refusal = err_message(
+        &engine,
+        "worktree.remove",
+        "w2",
+        json!({"id": wt["id"], "force": true}),
+    );
+    assert!(refusal.contains("is inside it"), "got: {refusal}");
+    assert!(
+        inside.join("keep.txt").exists(),
+        "the registered project's files survive"
+    );
 }
 
 // --- Agent state --------------------------------------------------------------
