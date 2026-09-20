@@ -154,8 +154,10 @@ the shipped skill guides (`drogon-cli skills get --topic drogon-cli`, \
 questions and perform project work yourself when the owner asks you directly.
 
 For a simple read-only request, resolve the registered project and run normal \
-commands such as `git` or `gh` yourself. Never launch another harness merely to \
-list an issue, inspect a PR, read a file, or discover a repository.
+commands such as `git` or `gh` yourself. These direct lookups are Bot \
+control-plane chores, not delegated project implementation. Never launch another \
+harness merely to list an issue, inspect a PR, read a file, or discover a \
+repository.
 
 If the owner asks you to edit, fix, test, or build something, you may do it \
 directly in the resolved project workspace. Use a Drogon worktree for a git \
@@ -480,6 +482,7 @@ mod tests {
         for fragment in [
             "perform project work yourself when the owner asks you directly",
             "run normal commands such as `git` or `gh` yourself",
+            "These direct lookups are Bot control-plane chores",
             "Never launch another harness merely to list an issue",
             "you may do it directly in the resolved project workspace",
             "do not start another agent unless the owner asks for a handoff",
@@ -491,6 +494,10 @@ mod tests {
                 "expected the role rule {fragment:?} in:\n{rendered}"
             );
         }
+        assert!(
+            !rendered.contains("You never do the work yourself"),
+            "the old blanket delegation rule contradicts direct lookup guidance: {rendered}"
+        );
     }
 
     /// The generic delegation recipe (owner chat request, monitor event, or

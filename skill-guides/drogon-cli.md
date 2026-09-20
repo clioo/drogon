@@ -509,59 +509,100 @@ Read the graph with `drogon-cli graph read --workspace <ID> --json` —
 each node's status is projected from real observation (`running` requires
 a confirmed live process; loss of contact is `unverifiable`, never
 failed), or inspect one node with
-`drogon-cli graph node-state --workspace <ID> --node <ID>`. Write your
-graph INTENT with
-`drogon-cli graph write-intent --workspace <ID> --file graph-intent.json`
-(intent only: a payload carrying `state` is refused, and a newer file
-version is refused rather than rewritten).
+`drogon-cli graph node-state --workspace <ID> --node <ID>`. Write only the
+human-owned intent with
+`drogon-cli graph write-intent --workspace <ID> --file graph-intent.json`.
+For example, `graph-intent.json` can contain:
+
+```json
+{
+  "nodes": [],
+  "policy": {
+    "approvedRuntimes": [
+      {
+        "harness": "pi",
+        "provider": "openai-codex",
+        "model": "gpt-5.6-luna"
+      }
+    ],
+    "fallbackRuntime": {
+      "harness": "claude",
+      "model": "claude-sonnet-5"
+    },
+    "adversarial": {
+      "enabled": true,
+      "maxIterations": 3
+    },
+    "delegate": false
+  }
+}
+```
+
+A payload carrying `state` is refused, and a newer file version is refused
+rather than rewritten. In this example `delegate` is false because the two
+stored selectors are mutually exclusive; Adversarial itself already implies
+delegation.
 
 ### Subagent Policy And The Adversarial Loop
 
-A graph's intent can carry a Subagent policy at `intent.policy` (visible in
+The canonical mode definitions and the leader-driven adversarial procedure live
+in `drogon-cli skills get --topic orchestration`; read its **Read The Workspace
+Policy Before Delegating** section before acting on a policy. Do not reinterpret
+the mutual-exclusion rule as an instruction to implement directly:
+Adversarial means Delegate plus the critique/correction loop. The leader does
+not implement in either delegated mode. The adversarial loop exits as soon as a
+round finds nothing adversarial and otherwise stops at `maxIterations`.
+
+A graph's intent carries its Subagent policy at `intent.policy` (visible in
 `drogon-cli graph read --workspace <ID> --json`). The main agent MUST read that
 result and `drogon-cli graph observability --workspace <ID> --json` before it
 plans or delegates. These are the native `.drogon` policy, evidence, and usage
 records: use them to avoid duplicating completed work and to choose the configured
-runtime order without guessing. A workspace with no configured
-policy has no Drogon-managed policy block in `AGENTS.md`: no policy block in
-`AGENTS.md` means Delegate OFF, Adversarial OFF, and no approved runtimes. Read
-`.drogon/graph.json` via the `drogon-cli graph read --workspace <ID> --json` command
-to confirm before deciding how to act. A configured policy is delivered into the
-next session's managed block; returning to the default removes that block
-without touching owner content:
+runtime order without guessing. A simple lookup, repository discovery, or
+ordinary `gh` command remains direct coordination work and does not require a
+worker.
 
-- `policy.delegate: true` and adversarial OFF makes delegation available, not
-  mandatory. The main agent handles simple lookups, repository discovery, `gh`
-  commands, and bounded edits directly, and may always make changes the user
-  explicitly requests. Use native depth-one workers only when independent work
-  benefits from parallelism or specialization. Every child must be told not to
-  delegate. No automatic tester is added in this mode.
-- `policy.adversarial.enabled: true` is mutually exclusive with Delegate. The
-  main agent implements directly unless a genuinely independent subtask benefits
-  from a native depth-one worker. It never delegates a simple lookup, repository
-  discovery, one `gh` command, or a small bounded edit. Drogon runs the final
-  bounded whole-workflow Adversarial-test / Code-review sessions after the main
-  work settles, so the main agent does not dispatch duplicate testers. Findings
-  are successful evaluations, not failed runtime launches.
-- When both flags are false, the main agent works directly and does not
-  proactively dispatch subagents; an explicit user request may authorize
-  delegation. A policy with both flags true is invalid and is refused.
-- `policy.approvedRuntimes` (an ordered list) and `policy.fallbackRuntime`
-  are the runtimes a native worker session may run under, in priority order.
-  Each runtime stores `harness`, `provider`, and `model` together. Provider and
-  model are an inseparable selection; a worker must never guess a provider for
-  an ambiguous model id. `drogon-cli orchestration worker-start --run <ID>
-  --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID>`
-  applies that order and records the actual pair. An explicit
-  `--harness --provider --model` is an intentional override; omitting those
-  fresh flags lets the daemon select from policy.
+A workspace with no configured policy has no Drogon-managed policy block in
+`AGENTS.md`: no policy block means Delegate OFF, Adversarial OFF, and no
+approved runtimes. Read the graph to confirm before deciding how to act. A
+configured policy is delivered into the next session's managed block; returning
+to the default removes that block without touching owner content. A policy with
+both stored selectors true is invalid and is refused.
 
-The Orchestrator uses a main-task node (the normal `GraphNodeIntent` JSON
-shape: id, title, harness, model, prompt, enabled, and no dependencies).
-The desktop saves that task and the policy automatically. Run captures their
-configuration, executes the main task even with adversarial testing off,
-and schedules the optional test/review roles in the daemon. Closing a view
-does not stop its scheduling. The same workflow is available to agents:
+`policy.approvedRuntimes` is ordered, and `policy.fallbackRuntime` is tried only
+after the approved entries fail to execute. Each runtime entry stores only
+`harness`, `provider`, and `model`; provider and model are an inseparable
+selection, and a worker must never guess a provider for an ambiguous model id.
+There is currently no effort field in a policy runtime, so an effort level shown
+by a runtime picker is not persisted in `approvedRuntimes` and cannot be passed
+to policy-selected workers from that entry. Adding policy-runtime effort is a
+follow-up, not part of this schema.
+
+After `run-create`, use the returned `consumerGeneration` in
+`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --task <ID> --workspace <ID>`.
+That command applies the policy order and records the actual pair. An explicit
+`--harness --provider --model` is an intentional override; omitting those fresh
+flags lets the daemon select from policy.
+
+The Orchestrator accepts one main-task node: the normal `GraphNodeIntent` JSON
+shape with an enabled node and no dependencies. For example,
+`main-task.json` can contain:
+
+```json
+{
+  "id": "main",
+  "title": "Implement the requested change",
+  "harness": "claude",
+  "model": "claude-sonnet-5",
+  "prompt": "Implement the requested change, validate it, and report the evidence.",
+  "enabled": true,
+  "dependsOn": []
+}
+```
+
+The desktop saves the task and policy automatically. A run captures their
+configuration, and closing a view does not stop it. The same admission and
+control surface is available to agents:
 
 ```sh
 drogon-cli graph orchestrator-start --workspace <ID> --file main-task.json
@@ -573,10 +614,9 @@ drogon-cli graph orchestrator-resume --workspace <ID> --run <RUN_ID>
 Status includes the captured policy, iterations, evaluations and actual
 runtime attempts. Policy edits apply to the next run. Stop requests
 cancellation: wait for `stopped` before treating work as stopped. Resume
-retains completed roles and refuses an unverifiable run. The scheduler
-creates only depth-one roles; their briefs prohibit further delegation. The
-main agent must enforce the same limit in every authored child brief. This is
-not a sandbox restriction on arbitrary commands an agent can run.
+retains completed roles and refuses an unverifiable run. Every authored child
+brief must prohibit further delegation so all workers remain at depth one.
+This is not a sandbox restriction on arbitrary commands an agent can run.
 
 ### Native Evidence And Usage
 

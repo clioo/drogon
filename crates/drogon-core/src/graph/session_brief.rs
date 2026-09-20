@@ -104,36 +104,39 @@ pub fn render_policy_section(workspace_id: &str, policy: &GraphPolicy) -> String
     ));
     out.push_str(
         "- **Who this mode is addressed to: the graph's MAIN agent.** The root/main node is \
-         the coordinator, not a depth-one worker. This policy controls when the main agent may \
-         proactively delegate; it never forbids direct work the user explicitly requests. A Bot \
-         that releases this graph only dispatches on the user's behalf and is outside the graph's \
-         depth budget; it must not implement or supervise the graph's work. Only the main agent's \
-         implementation, test, review, and correction children are depth-one workers. Their own \
-         task prompts win over this block; a worker implements its own task and dispatches \
-         nothing.\n",
+         the coordinator, not a depth-one worker. In a delegated mode, the main agent leads and \
+         children implement; simple lookups, repository discovery, and ordinary `gh` commands \
+         remain direct coordination chores, not implementation. A Bot that releases this graph \
+         only dispatches on the user's behalf and is outside the graph's depth budget; it must \
+         not implement or supervise the graph's work. Only the main agent's implementation, \
+         test, and correction children are depth-one workers. Their own task prompts win over \
+         this block; a worker implements its own task and dispatches nothing.\n",
     );
     if policy.adversarial.enabled {
         out.push_str(&format!(
-            "- **Mode: ADVERSARIAL (Delegate is mutually exclusive and OFF), up to {} \
-             cycle(s).** Implement the user's request directly unless a genuinely independent \
-             subtask benefits from a depth-one worker. Never delegate a simple lookup, repository \
-             discovery, one `gh` command, or a small bounded edit. The daemon launches the final \
-             whole-workflow Adversarial-test / Code-review sessions after your work settles; do \
-             not dispatch duplicate testers yourself. Any child you do launch must not delegate \
+            "- **Mode: ADVERSARIAL (semantically includes delegation; the Delegate selector is \
+             mutually exclusive and OFF), up to {} cycle(s).** Lead only: split implementation \
+             into features or teams, dispatch depth-one implementation workers, direct them, and \
+             check their reports. Do not implement product changes yourself. For every completed \
+             implementation, dispatch a separate depth-one tester immediately; do not wait for \
+             every worker to finish. Read and critique the tester's report. If a round finds \
+             nothing adversarial, stop that stream immediately even when iterations remain. If \
+             it finds problems, dispatch a sibling correction worker and then a fresh tester. \
+             Continue only until a round finds nothing adversarial or the saved iteration bound \
+             is reached. Every implementation, test, and correction worker must not delegate \
              further.\n",
             policy.adversarial.max_iterations
         ));
     } else if policy.delegate {
         out.push_str(
-            "- **Mode: DELEGATE (Adversarial testing is mutually exclusive and OFF).** \
-             Delegation is available, not mandatory. Do simple lookups, repository discovery, \
-             `gh` commands, and bounded edits directly; if the user asks you to make changes, you \
-             may make them yourself. Use depth-one children only when independent work benefits \
-             from parallelism or specialization. For those children, use `drogon-cli orchestration \
-             run-create`, `task-create`, and `worker-start` with no fresh runtime flags so the \
-             approved provider/model policy selects each child; observe reports with \
-             `orchestration check` and `worker-show`. Children must not delegate further. No \
-             automatic tester is added.\n",
+            "- **Mode: DELEGATE (Adversarial testing is mutually exclusive and OFF).** Lead \
+             only: split implementation into features or teams, dispatch depth-one workers, \
+             direct them, and check their reports. Never implement their assigned product work \
+             yourself. Use `drogon-cli orchestration run-create`, `task-create`, and \
+             `worker-start` with no fresh runtime flags so the approved provider/model policy \
+             selects each child; observe reports with `orchestration check` and `worker-show`. \
+             Children must not delegate further. Do not add the adversarial critique/correction \
+             loop.\n",
         );
     } else {
         out.push_str(
@@ -405,9 +408,9 @@ mod tests {
         };
         let rendered = render_policy_section("ws-1", &policy);
         assert!(rendered.contains("Mode: DELEGATE"));
-        assert!(rendered.contains("Delegation is available, not mandatory"));
-        assert!(rendered.contains("`gh` commands"));
-        assert!(rendered.contains("may make them yourself"));
+        assert!(rendered.contains("Lead only"));
+        assert!(rendered.contains("ordinary `gh` commands"));
+        assert!(rendered.contains("Never implement their assigned product work yourself"));
         assert!(rendered.contains("Children must not delegate further"));
         assert!(rendered.contains("drogon-cli orchestration run-create"));
         assert!(rendered.contains("drogon-cli orchestration worker-start"));
@@ -433,9 +436,12 @@ mod tests {
         };
         let rendered = render_policy_section("ws-1", &policy);
         assert!(rendered.contains("Mode: ADVERSARIAL"));
+        assert!(rendered.contains("semantically includes delegation"));
         assert!(rendered.contains("up to 4 cycle(s)"));
-        assert!(rendered.contains("Never delegate a simple lookup"));
-        assert!(rendered.contains("daemon launches the final whole-workflow"));
+        assert!(rendered.contains("Do not implement product changes yourself"));
+        assert!(rendered.contains("dispatch a separate depth-one tester immediately"));
+        assert!(rendered.contains("stop that stream immediately even when iterations remain"));
+        assert!(rendered.contains("sibling correction worker"));
         assert!(rendered.contains("must not delegate further"));
     }
 
