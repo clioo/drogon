@@ -43,6 +43,16 @@ fn err_code(engine: &Engine, method: &str, request_id: &str, params: Value) -> S
     response.error.unwrap().code
 }
 
+fn err_message(engine: &Engine, method: &str, request_id: &str, params: Value) -> String {
+    let response = engine.dispatch(req(method, request_id, params));
+    assert!(
+        !response.ok,
+        "expected error for {method}, got {:?}",
+        response.result
+    );
+    response.error.unwrap().message
+}
+
 fn wait_for<F: FnMut() -> bool>(mut pred: F, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     loop {
@@ -632,10 +642,11 @@ fn worktree_remove_forces_a_checkout_git_no_longer_registers() {
     std::fs::rename(&stashed, &path).unwrap();
     assert!(Path::new(&path).exists());
 
-    assert_eq!(
-        err_code(&engine, "worktree.remove", "w2", json!({"id": id})),
-        "io_error",
-        "an unregistered checkout is still not deleted behind the user's back"
+    let refusal = err_message(&engine, "worktree.remove", "w2", json!({"id": id}));
+    assert!(
+        refusal.contains("git no longer registers a working tree") && refusal.contains("Use Force"),
+        "an unregistered checkout is refused with copy the user can act on, \
+         not git's useless fatal -- got: {refusal}"
     );
     assert!(
         Path::new(&path).exists(),
@@ -828,9 +839,11 @@ fn worktree_remove_still_reports_a_failure_git_owns() {
 
     // A worktree git still registers keeps git's own verdict: the recovery
     // path must never swallow a refusal by deleting the directory itself.
-    assert_eq!(
-        err_code(&engine, "worktree.remove", "w2", json!({"id": id})),
-        "io_error"
+    let refusal = err_message(&engine, "worktree.remove", "w2", json!({"id": id}));
+    assert!(
+        refusal.contains("use --force to delete it"),
+        "git still registers this one, so git's own verdict is what comes \
+         back -- not the unregistered-workspace copy -- got: {refusal}"
     );
     assert!(
         Path::new(&path).join("README.md").exists(),
@@ -949,6 +962,110 @@ fn worktree_remove_never_unregisters_a_git_project_through_its_project_id() {
             .iter()
             .any(|p| p["id"] == project_id.as_str()),
         "the project is still registered"
+    );
+}
+
+#[test]
+fn worktree_remove_refuses_a_recorded_path_that_is_not_normalized() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let wt = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "kept"}),
+    );
+    let id = wt["id"].as_str().unwrap().to_string();
+    let path = wt["path"].as_str().unwrap().to_string();
+
+    // `worktree.create` never writes a `..`, but a row that acquired one
+    // must not make a forced delete report success having removed nothing:
+    // the checkout would stay on disk with the rows gone, so nothing could
+    // reach it again -- the very shape of #604, re-entered through the fix.
+    let detoured = format!("{path}/../no-such-dir-zzz/../kept");
+    {
+        let db = data_dir.path().join("drogon.sqlite3");
+        let conn = rusqlite::Connection::open(db).unwrap();
+        conn.execute(
+            "UPDATE worktrees SET path = ?1 WHERE id = ?2",
+            rusqlite::params![detoured, id],
+        )
+        .unwrap();
+    }
+
+    let refusal = err_message(
+        &engine,
+        "worktree.remove",
+        "w2",
+        json!({"id": id, "force": true}),
+    );
+    assert!(refusal.contains("not normalized"), "got: {refusal}");
+    assert!(
+        Path::new(&path).exists(),
+        "and the checkout it could not resolve is still there"
+    );
+    let listed = ok(
+        &engine,
+        "worktree.list",
+        "w3",
+        json!({"projectId": project_id}),
+    );
+    assert!(
+        listed["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["id"] == id.as_str()),
+        "a refusal never drops the row -- that is what makes it unreachable"
+    );
+}
+
+#[test]
+fn folder_workspace_remove_carries_project_removes_file_semantics() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+
+    // A Quick Session's scratch is app-owned, lives under the data dir, and
+    // `project.remove` deletes it on an explicit delete -- which is already
+    // what the Chats card does, since ChatsList submits `project.remove`.
+    // Routing the implicit worktree to the same method has to mean the same
+    // thing, or the two surfaces disagree about the same card.
+    let quick = ok(
+        &engine,
+        "project.quickSessionCreate",
+        "q1",
+        json!({"name": "scratch chat"}),
+    );
+    let quick_id = quick["project"]["id"].as_str().unwrap().to_string();
+    let scratch = quick["project"]["path"].as_str().unwrap().to_string();
+    assert!(Path::new(&scratch).exists());
+
+    let listed = ok(
+        &engine,
+        "worktree.list",
+        "w1",
+        json!({"projectId": quick_id}),
+    );
+    let implicit = listed["worktrees"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        implicit, quick_id,
+        "a quick session's implicit worktree is the project"
+    );
+
+    ok(&engine, "worktree.remove", "w2", json!({"id": implicit}));
+    assert!(
+        !Path::new(&scratch).exists(),
+        "the app-owned scratch goes, exactly as project.remove documents"
     );
 }
 

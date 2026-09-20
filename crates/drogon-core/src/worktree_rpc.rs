@@ -391,6 +391,23 @@ fn delete_checkout_directory(project_path: &Path, worktree_path: &Path) -> Resul
             worktree_path.display()
         )));
     }
+    // `..` never survives `worktree.create`, but a row that acquired one
+    // anyway must not be waved through: `canonicalize` cannot resolve a `..`
+    // whose intermediate is missing, and the lexical fallback below would
+    // then carry it into a target that resolves to nothing -- so the delete
+    // would "succeed" having removed nothing, while the caller drops the rows
+    // and the real checkout stays on disk, unreachable and undeletable.
+    if worktree_path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        )
+    }) {
+        return Err(error::invalid_argument(format!(
+            "refusing to delete \"{}\": the recorded workspace path is not normalized",
+            worktree_path.display()
+        )));
+    }
     // The parent is resolved but the final component deliberately is not: a
     // symlinked workspace has to be unlinked, never followed, or the guards
     // below would clear a directory belonging to whatever the link points at.
@@ -485,6 +502,12 @@ fn remove_worktree_checkout(
             // also deregister every *other* worktree whose directory merely
             // happens to be away right now (an unmounted volume, a detached
             // drive), which deleting this workspace has no business doing.
+            // Deliberately not fatal: the rows the user asked to be rid of
+            // are about to go either way, and failing here over an entry git
+            // would not let go of (a read-only `.git`, a squashed NFS root)
+            // is how a workspace became undeletable in the first place. The
+            // cost of the rare miss is a prunable entry keeping the branch
+            // name taken, which `git worktree prune` clears.
             let _ = run_git(project_path, &git_worktree_remove_argv(worktree_path, true));
             Ok(())
         }
@@ -1407,8 +1430,11 @@ impl Engine {
     /// nothing and the sidebar's "Remove Workspace" answered "worktree not
     /// found" every time, with no Force checkbox to fall back on -- a folder
     /// workspace could not be deleted at all (#604). What that row owns is a
-    /// registration, so removing it is `project.remove`: the rows go, the
-    /// user's folder stays. Genuinely unknown ids keep the same `not_found`.
+    /// registration, so removing it is `project.remove`, with that method's
+    /// file semantics exactly: an ordinary folder project keeps its folder,
+    /// and a Quick Session's app-owned scratch under the data dir is cleaned
+    /// up, which is already what deleting a Chat card does (`ChatsList`
+    /// submits `project.remove`). Unknown ids keep the same `not_found`.
     fn remove_implicit_folder_worktree(&self, id: &str) -> Result<Value, RpcError> {
         let is_folder_project = {
             let conn = self.db.lock().unwrap();
