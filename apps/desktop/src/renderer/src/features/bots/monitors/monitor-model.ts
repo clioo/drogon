@@ -166,6 +166,8 @@ export function monitorResourceLabel(
       return "http poll (URL sealed by the daemon)";
     case MONITOR_RULE_KIND_GITHUB_PR:
       return "GitHub pull-request watch";
+    case MONITOR_RULE_KIND_GITHUB_ISSUE:
+      return "GitHub issue watch";
     default:
       return record.ruleKind;
   }
