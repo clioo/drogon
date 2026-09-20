@@ -157,10 +157,42 @@ fn match_harness_in_argv(args: &[String]) -> Option<String> {
     None
 }
 
+/// Basename of the process's own `argv[0]`, when it names a harness
+/// executable. `argv[0]` is self-reported by whoever `exec`'d the process —
+/// a hostile parent can set it to anything — and that is acceptable here
+/// because this field is a label, never authority: hook admission, restart,
+/// resume and `agentState` still use the launch `harness_id` alone.
+fn match_harness_in_argv0(argv: &[String]) -> Option<String> {
+    let first = argv.first()?;
+    // `argv[0]` is one entry, not a shell line: the candidate is its final
+    // `/`-separated component, matched exactly like an executable name.
+    let base = first.rsplit('/').next().unwrap_or(first);
+    let base = base.split(['?', '#']).next().unwrap_or(base);
+    if base.is_empty() {
+        return None;
+    }
+    match_harness_executable(base)
+}
+
 /// Resolves a foreground pgid to a harness id (the contract's `HarnessId`
 /// wire spelling, never an executable name), or `None` when nothing
-/// matches. Direct executable match first; shim executables fall back to an
-/// argv scan; anything else reports nothing.
+/// matches, in this precedence:
+/// 1. the resolved executable's basename, exactly as before (catches a
+///    native binary installed under its own name);
+/// 2. the process's own `argv[0]` basename — this is what catches a
+///    symlinked or version-directory install (e.g. `claude` as a symlink
+///    to `.../versions/2.1.278`, where the canonical executable basename
+///    is a version number), because the shell sets `argv[0]` from the name
+///    it resolved on `PATH`. `argv[0]` is self-reported by whoever `exec`'d
+///    the process, and that is acceptable here: this field is a label,
+///    never authority — hook admission, restart, resume and `agentState`
+///    still use the launch `harness_id` alone;
+/// 3. an `argv[1..]` scan, ONLY when the resolved executable is a runtime
+///    shim (`node`, `bun`, `deno`, `python`, `python3`, `npx`). A non-shim
+///    executable's arguments are never scanned: `git commit -m claude`
+///    must not be labelled an agent. (`pi` already worked through this
+///    step, because `/opt/homebrew/bin/pi` is a `#!/usr/bin/env node`
+///    script, so node's `argv[1]` ends in `pi`.)
 #[cfg(unix)]
 pub(crate) fn resolve_harness(pgid: i32) -> Option<String> {
     if pgid <= 0 {
@@ -173,11 +205,14 @@ pub(crate) fn resolve_harness(pgid: i32) -> Option<String> {
     if let Some(harness) = match_harness_executable(&exe_name) {
         return Some(harness);
     }
+    let argv = process_argv(pgid as u32);
+    if let Some(harness) = match_harness_in_argv0(&argv) {
+        return Some(harness);
+    }
     if !is_runtime_shim(&exe_name) {
         return None;
     }
-    let argv = process_argv(pgid as u32);
-    match_harness_in_argv(&argv)
+    match_harness_in_argv(argv.get(1..).unwrap_or(&[]))
 }
 
 /// Non-unix stub: no probe exists, so nothing is ever observed.

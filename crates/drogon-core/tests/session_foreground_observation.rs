@@ -317,6 +317,121 @@ fn shim_argv_path_observes_claude() {
     assert_eq!(stopped["verdict"], "exited");
 }
 
+/// A symlinked version-directory install (issue #622, F10): the owner's
+/// real `claude` is a symlink to `.../versions/<n>`, so the canonical
+/// executable basename is a version number and only the process's own
+/// `argv[0]` (`claude`, as the shell resolved it on `PATH`) identifies the
+/// harness. The session's shell puts the versioned bin dir on `PATH` and
+/// `exec`s `claude`, exactly the owner's install shape.
+#[test]
+fn symlinked_versioned_claude_is_observed_via_argv0() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_dir = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    let workspace_id = register_workspace_at(&engine, &workspace_dir);
+
+    let bin = dir.path().join("bin");
+    let versions = bin.join("versions");
+    std::fs::create_dir_all(&versions).unwrap();
+    let real = versions.join("9.9.9");
+    build_timed_sleeper(&real);
+    std::os::unix::fs::symlink(&real, bin.join("claude")).unwrap();
+    let session = ok(
+        &engine,
+        "session.start",
+        json!({
+            "workspaceId": workspace_id,
+            "command": find_bash(),
+            "args": ["-i"],
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    // Polled past the 1 s memo TTL like the neighbouring tests: the
+    // spawn-time probe caches its pre-exec `None`, so reads inside the TTL
+    // would never see the live fixture.
+    ok(
+        &engine,
+        "session.write",
+        json!({
+            "sessionId": session_id,
+            "incarnation": incarnation,
+            "dataBase64": base64_of(&format!(
+                "export PATH=\"{}:$PATH\"\nexec claude 8\n",
+                bin.to_string_lossy()
+            )),
+        }),
+    );
+    let row = poll_observed(
+        &engine,
+        &session_id,
+        &json!("claude"),
+        Duration::from_secs(12),
+    );
+    assert_eq!(row["harnessId"], Value::Null);
+    assert!(
+        row["observedHarnessAt"]
+            .as_str()
+            .is_some_and(|at| !at.is_empty()),
+        "an observation carries its RFC 3339 stamp"
+    );
+
+    let stopped = stop_session(&engine, &session_id, &incarnation);
+    assert_eq!(stopped["verdict"], "exited");
+}
+
+/// A non-shim executable with a harness-named argument reports nothing
+/// (issue #622, F10): `argv[1..]` is scanned only for runtime shims, so a
+/// neutral binary run as `holder claude` (the `git commit -m claude` shape)
+/// must never be labelled an agent.
+#[test]
+fn non_shim_executable_with_harness_argument_reports_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace_dir = dir.path().join("ws");
+    std::fs::create_dir_all(&workspace_dir).unwrap();
+    let workspace_id = register_workspace_at(&engine, &workspace_dir);
+
+    // `build_sleeper` ignores its argv (unlike `build_timed_sleeper`, which
+    // would read `claude` as a zero sleep), so the harness-named argument
+    // is just an argument.
+    let holder = dir.path().join("holder");
+    build_sleeper(&holder);
+    let session = ok(
+        &engine,
+        "session.start",
+        json!({
+            "workspaceId": workspace_id,
+            "command": holder.to_string_lossy(),
+            "args": ["claude"],
+        }),
+    );
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let incarnation = session["incarnation"].as_str().unwrap().to_string();
+
+    // Past the 1 s memo TTL, like `shell_prompt_...`: the spawn-time probe
+    // caches its pre-exec `None`, so only reads past the TTL prove the live
+    // fixture itself reports nothing.
+    std::thread::sleep(Duration::from_millis(1500));
+    for _ in 0..2 {
+        let listed = ok(&engine, "session.list", json!({}));
+        let row = listed["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == session_id)
+            .expect("session must be listed");
+        assert_eq!(row["observedHarnessId"], Value::Null);
+        assert_eq!(row["observedHarnessAt"], Value::Null);
+        std::thread::sleep(Duration::from_millis(600));
+    }
+
+    let stopped = stop_session(&engine, &session_id, &incarnation);
+    assert_eq!(stopped["verdict"], "exited");
+}
+
 /// A shell sitting at its prompt never reports a harness named in its own
 /// command line (issue #622, F5): the foreground process IS the shell, and
 /// a shell's argv describes what it was asked to run, not what is running

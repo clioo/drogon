@@ -8,12 +8,15 @@
 // and the root row must read the agent, not `Terminal 1 - zsh`.
 //
 // The fixture agent is a tiny C program compiled with `cc` into a temp bin
-// directory under the name `claude` (a `sleep(argv[1])` program). A shell
-// script named `claude` does NOT work (the kernel execs the interpreter, so
-// the path resolves to `/bin/sh`, and shells are deliberately not
-// argv-scanned), and a copy of a system binary does NOT work either (macOS
-// SIGKILLs ad-hoc copies of signed platform binaries). Without `cc` the run
-// skips with a clear message, never a silent pass.
+// directory under `versions/<n>` and symlinked as `claude` (a
+// `sleep(argv[1])` program) — the owner's real version-directory install
+// shape, where the canonical executable basename is a version number and
+// only the process's own `argv[0]` names the harness. A shell script named
+// `claude` does NOT work (the kernel execs the interpreter, so the path
+// resolves to `/bin/sh`, and shells are deliberately not argv-scanned),
+// and a copy of a system binary does NOT work either (macOS SIGKILLs
+// ad-hoc copies of signed platform binaries). Without `cc` the run skips
+// with a clear message, never a silent pass.
 //
 // No real model inference anywhere in this script: every level is the
 // compiled sleeper, and the orchestration worker uses a fixture `pi` shell
@@ -26,7 +29,7 @@
 //     -u DROGON_INCARNATION -u DROGON_TERMINAL \
 //     node scripts/accept-sidebar-agent-tree.mjs
 import assert from "node:assert/strict";
-import { access, chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -285,12 +288,19 @@ export async function runSidebarAgentTreeAcceptance() {
       return report;
     }
     checkCancelled();
-    // The real fixture agent: a compiled binary named `claude`, so the
-    // daemon's foreground observation names it directly.
-    await writeFile(path.join(binDir, "claude.c"), TIMED_SLEEPER_C_SOURCE);
-    await exec("cc", ["-O2", "-o", path.join(binDir, "claude"), path.join(binDir, "claude.c")]);
-    await rm(path.join(binDir, "claude.c"));
-    await chmod(path.join(binDir, "claude"), 0o755);
+    // The real fixture agent: a compiled binary under `versions/<n>`,
+    // symlinked as `claude` — the owner's real install shape, where the
+    // canonical executable basename is a version number and only the
+    // process's own `argv[0]` names the harness. Every reference below
+    // keeps execing the `claude` symlink path, so the acceptance proves
+    // that shape instead of agreeing with a natively-named binary.
+    const versionsDir = path.join(binDir, "versions");
+    await mkdir(versionsDir, { recursive: true });
+    await writeFile(path.join(versionsDir, "9.9.9.c"), TIMED_SLEEPER_C_SOURCE);
+    await exec("cc", ["-O2", "-o", path.join(versionsDir, "9.9.9"), path.join(versionsDir, "9.9.9.c")]);
+    await rm(path.join(versionsDir, "9.9.9.c"));
+    await chmod(path.join(versionsDir, "9.9.9"), 0o755);
+    await symlink(path.join(versionsDir, "9.9.9"), path.join(binDir, "claude"));
     // The orchestration worker's harness: a fixture that only sleeps, so
     // the worker-start check proves lineage with no model inference.
     await writeFile(path.join(binDir, "pi"), "#!/bin/sh\nsleep 120\n");
