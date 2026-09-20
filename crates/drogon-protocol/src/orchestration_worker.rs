@@ -89,6 +89,13 @@ pub struct WorkerStartParams {
     /// Prior attempt being explicitly replaced (source: `retryOf`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_of: Option<String>,
+    /// Optional creator-session identity (issue #622): the session that
+    /// asked for this worker, so the sidebar can nest it. Sent by
+    /// `drogon-cli orchestration worker-start` from its inherited
+    /// `DROGON_SESSION_ID`; absent for parentless (coordinator-outside-
+    /// terminal) starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
 }
 
 impl WorkerStartParams {
@@ -105,6 +112,14 @@ impl WorkerStartParams {
         }
         if let Some(retry_of) = &self.retry_of {
             validate_opaque_token(retry_of, 128, "Invalid retry reference.")?;
+        }
+        if let Some(parent) = &self.parent_session_id
+            && (parent.is_empty() || parent.contains('\0'))
+        {
+            return Err(RpcError::new(
+                "invalid_argument",
+                "parentSessionId must not be empty.",
+            ));
         }
         Ok(())
     }
