@@ -3,8 +3,7 @@
     "script": "scripts/accept-bot-monitors.mjs",
     "requires": "pi",
     "timeoutMs": 1500000,
-    "note": "SKIPPED: a Bot's own monitor and automation act end to end; needs real pi/dgx-spark inference plus two minute-scale scheduler ticks, unavailable under the no-real-inference rule on this host.",
-    "status": "skipped"
+    "note": "SKIPPED: a Bot's own monitor and automation act end to end; needs real pi/dgx-spark inference plus two minute-scale scheduler ticks, unavailable under the no-real-inference rule on this host."
   },
   {
     "script": "scripts/accept-bot-graph-sidebar.mjs",
@@ -59,5 +58,29 @@
     "requires": null,
     "timeoutMs": 1200000,
     "note": "Fan-out subagents group under their leader, one click folds the group, typed input reaches only the leader while folded, and the fold survives reload."
+  },
+  {
+    "script": "scripts/accept-preload-close-guard.mjs",
+    "requires": null,
+    "timeoutMs": 300000,
+    "note": "Main-world window.close guard is installed, non-native, and irreversible over live CDP against the dev build (DROGON_BACKGROUND_WINDOW=1, disposable data dir)."
+  },
+  {
+    "script": "scripts/accept-meetings.mjs",
+    "requires": null,
+    "timeoutMs": 600000,
+    "note": "Meetings section over live CDP against the dev build: missing/empty/populated states, 320-transcript corpus, search, filters, extraction via fixture pi, read-only guarantee, light/dark sweeps."
+  },
+  {
+    "script": "scripts/accept-repro-demo.mjs",
+    "requires": null,
+    "timeoutMs": 3600000,
+    "note": "Settings Demo reproducible executed twice end to end against the dev build with fixture harness (no model inference): bot session, work graph, parallel workers, adversarial rounds, cost reporting."
+  },
+  {
+    "script": "scripts/accept-backup-restore.mjs",
+    "requires": null,
+    "timeoutMs": 1200000,
+    "note": "Pre-migration backup restore against a locally packaged ad-hoc bundle (node scripts/package-desktop.mjs): lock refusal, restore overlay light/dark, confirmation gate, relaunch healthy, CLI restore. All owned processes verified exited."
   }
 ]
