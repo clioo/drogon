@@ -331,6 +331,87 @@ test("(f) infrastructure failure exits 2, never 0", () => {
   }
 });
 
+test("(g) an untracked .drogon/ directory does not block the gate and is named in the report", () => {
+  const dir = initRepo();
+  try {
+    writeFiles(dir, { "scripts/add.mjs": ADD_BASE });
+    const base = commitAll(dir, "base");
+    writeFiles(dir, { "scripts/add.mjs": ADD_CHANGED, "scripts/add.test.mjs": PINNING_TEST });
+    commitAll(dir, "pinned change");
+    writeFiles(dir, { ".drogon/session.json": `{"run":"fixture"}\n` });
+    const run = runGate(dir, "--base", base);
+    assert.equal(run.status, 0, `stdout:\n${run.stdout}\nstderr:\n${run.stderr}`);
+    assert.match(run.stdout, /RESULT: PASS/);
+    assert.match(run.stdout, /\.drogon\//);
+    assert.match(run.stdout, /ignoring .* untracked/);
+    const asJson = runGate(dir, "--base", base, "--json");
+    assert.equal(asJson.status, 0, `stdout:\n${asJson.stdout}\nstderr:\n${asJson.stderr}`);
+    const report = JSON.parse(asJson.stdout);
+    assert.ok(
+      report.untrackedIgnored.some((p) => p.includes(".drogon/")),
+      `untrackedIgnored should name the .drogon path: ${JSON.stringify(report.untrackedIgnored)}`,
+    );
+    // Ignored means left alone: the untracked directory survives the run.
+    assert.match(treeState(dir), /\.drogon\//);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("(h) an unstaged modification to a tracked file refuses with exit 2", () => {
+  const dir = initRepo();
+  try {
+    writeFiles(dir, { "scripts/add.mjs": ADD_BASE, "scripts/add.test.mjs": WEAK_TEST("weak") });
+    const base = commitAll(dir, "base");
+    writeFiles(dir, { "scripts/add.mjs": ADD_CHANGED });
+    const run = runGate(dir, "--base", base);
+    assert.equal(run.status, 2, `stdout:\n${run.stdout}\nstderr:\n${run.stderr}`);
+    assert.match(run.stderr, /refusing/);
+    assert.match(run.stderr, /dirty/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("(i) a staged modification to a tracked file refuses with exit 2", () => {
+  const dir = initRepo();
+  try {
+    writeFiles(dir, { "scripts/add.mjs": ADD_BASE, "scripts/add.test.mjs": WEAK_TEST("weak") });
+    const base = commitAll(dir, "base");
+    writeFiles(dir, { "scripts/add.mjs": ADD_CHANGED });
+    git(dir, "add", "scripts/add.mjs");
+    const run = runGate(dir, "--base", base);
+    assert.equal(run.status, 2, `stdout:\n${run.stdout}\nstderr:\n${run.stderr}`);
+    assert.match(run.stderr, /refusing/);
+    assert.match(run.stderr, /dirty/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("(j) an unmerged conflict entry refuses with exit 2", () => {
+  const dir = initRepo();
+  try {
+    writeFiles(dir, { "conflict.txt": "base\n", "scripts/add.mjs": ADD_BASE });
+    const base = commitAll(dir, "base");
+    git(dir, "checkout", "-b", "side", "--quiet");
+    writeFiles(dir, { "conflict.txt": "side\n" });
+    commitAll(dir, "side change");
+    git(dir, "checkout", "main", "--quiet");
+    writeFiles(dir, { "conflict.txt": "main\n" });
+    commitAll(dir, "main change");
+    const merge = spawnSync("git", ["merge", "side"], { cwd: dir, encoding: "utf8", env: GIT_ENV, timeout: 30000 });
+    assert.notEqual(merge.status, 0, "fixture should produce a merge conflict");
+    assert.match(treeState(dir), /^UU conflict\.txt/m);
+    const run = runGate(dir, "--base", base);
+    assert.equal(run.status, 2, `stdout:\n${run.stdout}\nstderr:\n${run.stderr}`);
+    assert.match(run.stderr, /refusing/);
+    assert.match(run.stderr, /dirty/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("rust and non-code hunks are reported as unverified, never silently passed", () => {
   const dir = initRepo();
   try {

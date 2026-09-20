@@ -245,6 +245,33 @@ export function decideExit(records) {
   return 0;
 }
 
+// Porcelain v1 dirtiness rule: the gate only ever reverts and restores
+// TRACKED files, so only tracked changes can corrupt a run. Untracked paths
+// (`??`) never block; they are reported as ignored instead.
+export function isUntrackedPorcelainLine(line) {
+  return line.startsWith("??");
+}
+
+export function splitPorcelainLines(output) {
+  const lines = output.split("\n").filter((l) => l.trim() !== "");
+  return {
+    tracked: lines.filter((l) => !isUntrackedPorcelainLine(l)),
+    untracked: lines.filter((l) => isUntrackedPorcelainLine(l)),
+  };
+}
+
+export function untrackedPathOf(line) {
+  const rest = line.slice(2).trimStart();
+  if (rest.length >= 2 && rest.startsWith('"') && rest.endsWith('"')) {
+    try {
+      return JSON.parse(rest);
+    } catch {
+      // Fall through to the raw remainder.
+    }
+  }
+  return rest;
+}
+
 export function sha256Hex(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -401,12 +428,13 @@ async function main() {
     console.error(`discrimination gate: could not inspect the working tree: ${dirty.stderr.trim() || dirty.error}.`);
     return 2;
   }
-  const dirtyLines = dirty.stdout.split("\n").filter((l) => l.trim() !== "");
-  if (dirtyLines.length > 0) {
+  const { tracked: trackedDirty, untracked: untrackedPresent } = splitPorcelainLines(dirty.stdout);
+  const untrackedIgnored = untrackedPresent.map(untrackedPathOf);
+  if (trackedDirty.length > 0) {
     console.error(
-      `discrimination gate: refusing to run on a dirty working tree (${dirtyLines.length} changed path(s)); commit or stash first, then re-run.`,
+      `discrimination gate: refusing to run on a dirty working tree (${trackedDirty.length} tracked changed path(s)); commit or stash first, then re-run.`,
     );
-    for (const line of dirtyLines.slice(0, 10)) console.error(`  ${line}`);
+    for (const line of trackedDirty.slice(0, 10)) console.error(`  ${line}`);
     return 2;
   }
 
@@ -490,7 +518,8 @@ async function main() {
   }
 
   const statusResult = gitSync(root, ["status", "--porcelain"]);
-  if (!statusResult.ok || statusResult.stdout.trim() !== "") {
+  const trackedAfter = statusResult.ok ? splitPorcelainLines(statusResult.stdout).tracked : null;
+  if (!statusResult.ok || trackedAfter === null || trackedAfter.length > 0) {
     console.error("discrimination gate: working tree is not clean after the run; refusing to report success.");
     return 2;
   }
@@ -521,6 +550,7 @@ async function main() {
           hunks: records,
           counts,
           scopeNote,
+          untrackedIgnored,
           exitCode,
           outcome,
         },
@@ -530,6 +560,11 @@ async function main() {
     );
   } else {
     console.log(`discrimination gate: base ${base}, ${records.length} source-hunk verdict(s), ${testHunksSkipped} test hunk(s) skipped`);
+    if (untrackedIgnored.length > 0) {
+      console.log(
+        `note: ignoring ${untrackedIgnored.length} untracked path(s) present at start (not tracked, not reverted): ${untrackedIgnored.join(", ")}`,
+      );
+    }
     for (const record of records) {
       const tests = record.tests.length > 0 ? ` [tests: ${record.tests.join(", ")}]` : "";
       const hashes = record.shaBefore ? ` [sha256 before ${record.shaBefore} after ${record.shaAfter}]` : "";
