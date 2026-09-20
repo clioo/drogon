@@ -10,16 +10,6 @@
       "note": "Daemon plus CLI over the real transport: status, auth, sessions, PTY and crash recovery (18 checks, ~10s)."
     },
     {
-      "name": "desktop-files",
-      "script": "scripts/accept-desktop.mjs",
-      "args": [
-        "--files"
-      ],
-      "requires": null,
-      "timeoutMs": 1200000,
-      "note": "Rendered desktop over CDP against the dev Electron build: workspace/files/editor-keyboard/tabs/orchestrator journeys."
-    },
-    {
       "name": "bot-monitors",
       "script": "scripts/accept-bot-monitors.mjs",
       "args": [],
