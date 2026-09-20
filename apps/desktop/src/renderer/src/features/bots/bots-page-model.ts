@@ -13,7 +13,6 @@ import type {
   BotRunHarnessOverrides,
   BotsPanelBot,
   BotsPanelHostObservation,
-  BotMonitorFiringOutcome,
   BotMonitorHealth,
   BotMonitorView,
 } from "../../../../shared/bot-contract";
@@ -388,9 +387,8 @@ export function monitorTitle(view: BotMonitorView): string {
 /**
  * The SOURCE cell, honest per rule kind — never the bare rule kind for a
  * kind this build renders:
- * - a `github_pr.v1` / `github_issue.v1` watch shows the repository it
- *   watches, WHICH collection it reads, and its case (the filter, with
- *   the login it compares against);
+ * - a `github_pr.v1` watch shows the repository it watches and its case
+ *   (the filter, with the login it compares against);
  * - a file watch shows its path; a script watch shows its script path;
  * - an http poll's URL text is sealed daemon-side (only its hash
  *   travels), so the cell says that in words instead of printing the
@@ -512,7 +510,7 @@ export type MonitorLastFiring = {
 };
 
 const MONITOR_FIRING_LABELS: Record<
-  BotMonitorFiringOutcome,
+  string,
   { label: string; adverse: boolean }
 > = {
   dispatched: { label: "Prompt sent", adverse: false },
@@ -538,10 +536,10 @@ export function monitorLastFiring(
   // the daemon's own token, treated as adverse: a firing that happened is
   // never reported as "Never fired", and an unknown verdict is never
   // quietly painted as a success.
-  const wording =
-    MONITOR_FIRING_LABELS[
-      view.firing.lastOutcome as BotMonitorFiringOutcome
-    ] ?? { label: view.firing.lastOutcome, adverse: true };
+  const wording = MONITOR_FIRING_LABELS[view.firing.lastOutcome] ?? {
+    label: view.firing.lastOutcome,
+    adverse: true,
+  };
   const deltaMs = Math.max(0, now - view.firing.lastAtMs);
   const minutes = Math.floor(deltaMs / 60_000);
   const ageLabel =
@@ -561,19 +559,11 @@ export function monitorLastFiring(
 
 /** Collapsed-row muted line: what is genuinely true about the bot. The
  *  "Standby workspace initialized" suffix is only claimed when the daemon
- *  actually provisioned the bot's dedicated home.
- *
- *  When the monitors could not be read, the line says exactly that instead
- *  of "no monitors yet": the collapsed row must never assert an absence
- *  that no read established. */
+ *  actually provisioned the bot's dedicated home. */
 export function collapsedRowNote(
   bot: Pick<BotsPanelBot, "home">,
-  monitorsUnread = false,
 ): string {
-  const configured = monitorsUnread
-    ? "No automations · monitors could not be read"
-    : "No automations or monitors yet";
   return bot.home
-    ? `${configured} · Standby workspace initialized`
-    : configured;
+    ? "No automations or monitors yet · Standby workspace initialized"
+    : "No automations or monitors yet";
 }

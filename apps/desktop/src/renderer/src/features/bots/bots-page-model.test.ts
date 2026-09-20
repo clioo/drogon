@@ -21,6 +21,7 @@ import {
   monitorTitle,
   monitorTriggerLabel,
   isBotUnconfigured,
+  monitorLastFiring,
 } from "./bots-page-model";
 
 describe("bots-page-model", () => {
@@ -487,15 +488,46 @@ describe("owner-design page model (task_197f6a7eb370)", () => {
     );
   });
 
+  it("names every firing verdict the daemon can write, and never drops one", () => {
+    const firing = (lastOutcome: string) => ({
+      firing: {
+        lastEventId: "mev_1",
+        lastOutcome,
+        lastRunId: null,
+        lastDetail: null,
+        lastResource: null,
+        lastAtMs: 1_000,
+        countToday: 1,
+      },
+    });
+    const at = 1_000;
+    // A refused `harness.start` is NOT a dispatch that worked. Leaving
+    // this verdict unlabelled is what erased the whole Monitors column
+    // (#608), so it gets real, adverse words.
+    const failed = monitorLastFiring(firing("dispatch_failed") as never, at);
+    expect(failed?.label).toBe("Dispatch failed");
+    expect(failed?.adverse).toBe(true);
+    expect(monitorLastFiring(firing("dispatched") as never, at)?.adverse).toBe(
+      false,
+    );
+    // A verdict from a NEWER daemon is shown as the daemon's own token and
+    // treated as adverse — never silently dropped to "Never fired", and
+    // never painted as a success.
+    const unknown = monitorLastFiring(
+      firing("some_future_verdict") as never,
+      at,
+    );
+    expect(unknown).not.toBeNull();
+    expect(unknown?.label).toBe("some_future_verdict");
+    expect(unknown?.adverse).toBe(true);
+    // Only a monitor that genuinely never fired has no cell.
+    expect(monitorLastFiring({ firing: null } as never, at)).toBeNull();
+  });
+
   it("never asserts an absence of monitors that no read established", () => {
-    // An unread monitor list has no count, so neither the muted line nor
-    // the "nothing configured" verdict may claim there are none (#608).
-    expect(collapsedRowNote({} as never, true)).toBe(
-      "No automations · monitors could not be read",
-    );
-    expect(collapsedRowNote({ home: { path: "/x" } } as never, true)).toBe(
-      "No automations · monitors could not be read · Standby workspace initialized",
-    );
+    // An unread monitor list has no count, so the "nothing configured"
+    // verdict may not claim there are none (#608). The muted line itself
+    // is then unreachable, which is why it takes no unread flag.
     const bare = { responsibilities: [], currentSession: null } as never;
     expect(isBotUnconfigured(bare, 0)).toBe(true);
     expect(isBotUnconfigured(bare, 0, true)).toBe(false);

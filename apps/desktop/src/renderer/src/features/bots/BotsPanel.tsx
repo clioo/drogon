@@ -57,9 +57,6 @@ export type BotsPanelHydrationProps = BotsPanelProps & {
   }) => Promise<{
     ok: boolean;
     result?: { monitors: BotMonitorView[]; workspaceId: string };
-    /** Why the read failed, when it did. Surfaced verbatim: a failed
-     *  read and an absent bridge are different facts. */
-    error?: { message: string };
   }>;
   /** Host-supplied monitor approval (the parked-watch affordance);
    *  injectable so tests can pin it. Defaults to the gated bridge's
@@ -291,7 +288,9 @@ export function BotsPanel({
                         busy={busy}
                         observedLiveness={observedLivenessByBotId?.[bot.id]}
                         expanded={expandedOverrides[bot.id] ?? !unconfigured}
-                        onToggleExpanded={() => toggleExpanded(bot.id)}
+                        onToggleExpanded={() =>
+                          toggleExpanded(bot.id, monitorsUnread)
+                        }
                         onAddResponsibility={() => {
                           setSelectedBotId(bot.id);
                           setShowResponsibilityForm(true);

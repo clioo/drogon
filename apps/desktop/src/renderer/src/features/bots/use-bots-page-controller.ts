@@ -108,9 +108,6 @@ export type BotsPageControllerDeps = {
   }) => Promise<{
     ok: boolean;
     result?: { monitors: BotMonitorView[]; workspaceId: string };
-    /** Why the read failed, when it did. Surfaced verbatim: a failed
-     *  read and an absent bridge are different facts. */
-    error?: { message: string };
   }>;
   /** Parked-watch approval (the redesigned MONITORS column's real
    *  affordance): arms the monitor's CURRENT rule text through the
@@ -133,6 +130,24 @@ function mintRequestId(prefix: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** The daemon's own reason a monitor read failed.
+ *
+ *  The injectable `monitorList` dep type declares only `{ ok, result }` —
+ *  the minimum a test double must supply — while the real gated bridge
+ *  answers with the full `Result` union, whose failures carry
+ *  `error.message`. Reading it structurally keeps the dep contract small
+ *  and still surfaces the true reason; a failure with no message at all
+ *  gets an honest generic line, never an invented cause. */
+function monitorReadFailure(listed: {
+  ok: boolean;
+  error?: { message?: string };
+}): string {
+  const message = listed.error?.message?.trim();
+  return message && message.length > 0
+    ? message
+    : "The monitor read failed.";
 }
 
 export function useBotsPageController(deps: BotsPageControllerDeps) {
@@ -294,8 +309,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
         if (listed.ok && listed.result) {
           nextMonitors[botId] = listed.result.monitors;
         } else {
-          nextErrors[botId] =
-            listed.error?.message ?? "The monitor read failed.";
+          nextErrors[botId] = monitorReadFailure(listed);
         }
       }
       if (cancelled) return;
@@ -760,12 +774,11 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
   // written to the persisted envelope before the state update so a reload
   // mid-flight cannot lose it.
   const toggleExpanded = useCallback(
-    (botId: string): void => {
+    (botId: string, monitorsUnread = false): void => {
       const bot = (localSnapshot ?? snapshot).bots.find(
         (candidate) => candidate.id === botId,
       );
       const monitorCount = monitorsByBotId?.[botId]?.length ?? 0;
-      const monitorsUnread = monitorReadErrorByBotId[botId] !== undefined;
       const defaultExpanded = bot
         ? !isBotUnconfigured(bot, monitorCount, monitorsUnread)
         : true;
@@ -776,13 +789,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       saveBotCardExpansion(next);
       setExpandedOverrides(next);
     },
-    [
-      localSnapshot,
-      snapshot,
-      monitorsByBotId,
-      monitorReadErrorByBotId,
-      expandedOverrides,
-    ],
+    [localSnapshot, snapshot, monitorsByBotId, expandedOverrides],
   );
 
   return {

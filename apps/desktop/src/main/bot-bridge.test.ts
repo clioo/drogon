@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { botMonitorListResultSchema } from "../shared/bot-validation";
 import {
   dispatchBotMonitorApprove,
   dispatchBotMonitorList,
@@ -382,6 +383,56 @@ describe("Bot monitor list bridge", () => {
       "github_issue.v1",
     );
     expect(read.ok && read.result.monitors[0]?.repo).toBe("clioo/drogon");
+  });
+
+  /// Straight at the schema, not only the dispatcher around it: this is
+  /// the gate that actually rejected the daemon's `dispatch_failed`
+  /// verdict and, because the WHOLE result is parsed at once, took every
+  /// one of that bot's monitors down with it (#608).
+  it("parses every firing verdict the daemon can write, and an unknown one", () => {
+    const withOutcome = (lastOutcome: string) => ({
+      hostId: "host",
+      botId: "bot-1",
+      workspaceId: "resolved-ws",
+      monitors: [
+        {
+          ...monitorView,
+          firing: {
+            lastEventId: "mev_1",
+            lastOutcome,
+            lastRunId: null,
+            lastDetail: null,
+            lastResource: null,
+            lastAtMs: 1_726_000_000_000,
+            countToday: 1,
+          },
+        },
+      ],
+    });
+    for (const outcome of [
+      "dispatched",
+      "dispatch_failed",
+      "joined_existing",
+      "refused",
+      "orphaned",
+      "cap_exceeded",
+      "stale_skipped",
+      // A verdict from a newer daemon must cost one unlabelled cell, not
+      // the whole column.
+      "some_future_verdict",
+    ]) {
+      expect(
+        botMonitorListResultSchema.safeParse(withOutcome(outcome)).success,
+        `verdict ${outcome} must parse`,
+      ).toBe(true);
+    }
+    // Still bounded: a verdict is a token, never prose or an object.
+    for (const bad of ["Dispatch Failed", "has space", "", "a".repeat(65)]) {
+      expect(
+        botMonitorListResultSchema.safeParse(withOutcome(bad)).success,
+        `verdict ${JSON.stringify(bad)} must be refused`,
+      ).toBe(false);
+    }
   });
 
   it("rejects a resolved-echo of '' and a foreign bot id", async () => {

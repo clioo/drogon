@@ -133,8 +133,12 @@ export function BotResponsibilityCard({
   onLaunch,
   onLaunchNew,
   onApproveMonitor,
+  /** Why this bot's monitor read failed, when it did — the daemon's own
+   *  message. Null means no read was attempted (no data source this
+   *  session), which is a DIFFERENT fact and gets different words. */
   monitorReadError = null,
 }: {
+  monitorReadError?: string | null;
   bot: BotsPanelBot;
   history: BotsPanelHistoryEntry[];
   /** Real scheduler records joined by automationId (host-supplied
@@ -142,13 +146,9 @@ export function BotResponsibilityCard({
    *  session; the automations column then renders the bot record's own
    *  fields only. */
   automationsById: Map<string, AutomationSummary> | null;
-  /** Durable monitors from `bot.monitor_list`. Null means the rows could
-   *  not be read; the column says so instead of claiming an empty watch. */
+  /** Durable monitors from `bot.monitor_list`. Null means no monitor data
+   *  source; the column says so instead of claiming an empty watch. */
   monitors: BotMonitorView[] | null;
-  /** Why this bot's monitor read failed, when it did — the daemon's own
-   *  message. Null means no read was attempted (no data source this
-   *  session), which is a DIFFERENT fact and gets different words. */
-  monitorReadError?: string | null;
   /** Shared busy gate (a mutation is in flight): automation Run buttons
    *  disable while it lasts, exactly like the controller's own gate. */
   busy?: boolean;
@@ -193,7 +193,7 @@ export function BotResponsibilityCard({
   // form, the chevron expands the full card.
   if (!expanded) {
     const note = unconfigured
-      ? collapsedRowNote(bot, monitorsUnread)
+      ? collapsedRowNote(bot)
       : [
           scheduled.length === 1
             ? "1 automation"

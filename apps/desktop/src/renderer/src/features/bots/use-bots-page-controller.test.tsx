@@ -690,6 +690,69 @@ describe("use-bots-page-controller: design column side reads", () => {
     expect(screen.queryByText("Idle")).toBeNull();
   });
 
+  it("counts a failed-read bot in the header chip and keeps its card expanded", async () => {
+    // The header's "N active" was the last surface reading an unknown
+    // monitor count as zero: the bot showed "Ready for a purpose" on its
+    // own card yet was excluded from the count as if it were idle.
+    render(
+      <BotsPanel
+        snapshot={{ bots: [bot({ responsibilities: [] })], history: [] }}
+        scope={scope}
+        monitorList={async () => ({
+          ok: false as const,
+          error: { message: "The monitor read failed." },
+        })}
+      />,
+    );
+    await screen.findByText(/Could not read this Bot's monitors/);
+    // Scoped to the chip itself: other cases in this file render their own
+    // panels, so a bare text query is not a statement about this one.
+    expect(
+      screen.getByTestId("bots-active-count").textContent,
+    ).toContain("1 active");
+  });
+
+  it("collapses on the FIRST click for a failed-read bot, because it starts expanded", async () => {
+    // The chevron flips the card's EFFECTIVE state. A failed-read bot is
+    // not "nothing configured", so it renders expanded; if the toggle
+    // still assumed the collapsed default, the first click would compute
+    // "expand" and nothing would visibly happen.
+    render(
+      <BotsPanel
+        snapshot={{ bots: [bot({ responsibilities: [] })], history: [] }}
+        scope={scope}
+        monitorList={async () => ({
+          ok: false as const,
+          error: { message: "The monitor read failed." },
+        })}
+      />,
+    );
+    await screen.findByText(/Could not read this Bot's monitors/);
+    fireEvent.click(screen.getByTestId("bot-expand-bot-1"));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Could not read this Bot's monitors/),
+      ).toBeNull(),
+    );
+  });
+
+  it("falls back to an honest line when a failed read carries no reason", async () => {
+    render(
+      <BotsPanel
+        snapshot={{ bots: [bot({ responsibilities: [] })], history: [] }}
+        scope={scope}
+        monitorList={async () => ({ ok: false as const })}
+      />,
+    );
+    // No invented cause, and never silence: the column still says the
+    // read failed rather than presenting the bot as having no monitors.
+    expect(
+      await screen.findByText(
+        /Could not read this Bot's monitors: The monitor read failed\./,
+      ),
+    ).toBeTruthy();
+  });
+
   it("says there is no monitor source when the bridge supplies none", async () => {
     render(
       <BotsPanel

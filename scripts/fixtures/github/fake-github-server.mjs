@@ -1,15 +1,9 @@
-// Fake GitHub REST server for Drogon's `github_pr.v1` / `github_issue.v1`
-// watch tests.
+// Fake GitHub REST server for Drogon's `github_pr.v1` watch tests.
 //
 // HARD RULE: this fixture never contacts github.com and never reads a real
-// token. It implements exactly the two endpoints those watches read:
+// token. It implements exactly the one endpoint a pull-request watch reads:
 //
 //   GET /repos/:owner/:repo/pulls   (state=open&sort=created&direction=asc&per_page=N)
-//   GET /repos/:owner/:repo/issues  (same query)
-//
-// Like the real API, the ISSUES endpoint also returns pull requests: any
-// dataset entry carrying a `pull_request` object is served from /issues too,
-// so a test can prove an issue watch drops them instead of firing for a PR.
 //
 // Auth: `Authorization: Bearer fixture-token` (or `token fixture-token`).
 // Anything else — including no header at all — gets GitHub's real 401 body,
@@ -18,12 +12,11 @@
 //
 // The dataset is a JSON file re-read on EVERY request
 // (`{"pulls": [{"number": 42, "assignees": [{"login": "clioo"}],
-//  "requested_reviewers": [{"login": "clioo"}], ...}],
-//   "issues": [{"number": 7, "assignees": [...]}, ...]}`), so a test can make
-// "a new pull request appears" (or "a new issue appears") true by writing the
-// file — no HTTP client code and no in-process control endpoint. Every handled
-// request appends one JSON line when `--log` is given, so a test can assert
-// the exact path and Authorization header the daemon sent.
+//  "requested_reviewers": [{"login": "clioo"}], ...}]}`), so a test can make
+// "a new pull request appears" true by writing the file — no HTTP client
+// code and no in-process control endpoint. Every handled request appends one
+// JSON line when `--log` is given, so a test can assert the exact path and
+// Authorization header the daemon sent.
 //
 // Usage: node fake-github-server.mjs --data <json> [--port 0] [--log <file>]
 // Prints `LISTEN <port>` on stdout once bound (port 0 = ephemeral).
