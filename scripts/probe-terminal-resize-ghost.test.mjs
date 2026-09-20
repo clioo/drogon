@@ -3,7 +3,10 @@
 // a stranded frame.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { test } from "node:test";
+import { describe, it, test } from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { strandedFrames, TERMINAL_RESIZE_FIXTURE } from "./probe-terminal-resize-ghost.mjs";
 
 test("the fixture is valid POSIX sh", () => {
@@ -39,4 +42,55 @@ test("stranded frames are every frame but the newest", () => {
   assert.deepEqual(strandedFrames(null), []);
   // Frame ids arrive in buffer order, which is not necessarily sorted.
   assert.deepEqual(strandedFrames([9, 3, 4]), [3, 4]);
+});
+
+// Lane 1 second-pass pins: the determinism hunks. Reverting any of them
+// must fail these tests — that is what the discrimination gate checks.
+// The live run (`node scripts/accept-desktop.mjs --files`, background
+// window, shell fixture) proves the behaviour itself.
+const ghostProbeSource = readFileSync(
+  path.join(
+    fileURLToPath(new URL(".", import.meta.url)),
+    "probe-terminal-resize-ghost.mjs",
+  ),
+  "utf8",
+);
+
+describe("resize-ghost determinism", () => {
+  it("settles the pane to the pty grid before writing the fixture", () => {
+    const settle = ghostProbeSource.indexOf("Settle before drawing, not only after");
+    assert.ok(settle !== -1, "the pre-fixture settle must exist");
+    const write = ghostProbeSource.indexOf("fixture write rejected");
+    assert.ok(write !== -1, "the fixture write must exist");
+    assert.ok(
+      settle < write,
+      "the settle must come before the fixture starts drawing",
+    );
+  });
+
+  it("repaints from scratch when the kernel width changes", () => {
+    assert.ok(
+      TERMINAL_RESIZE_FIXTURE.includes("\\033[2J\\033[H"),
+      "the fixture must clear and home on a width change",
+    );
+    assert.ok(
+      TERMINAL_RESIZE_FIXTURE.includes("w=$c"),
+      "the fixture must track the width it last painted at",
+    );
+  });
+
+  it("judges the idle viewport, never whole-buffer history", () => {
+    assert.ok(
+      ghostProbeSource.includes("framesInViewport"),
+      "the verdict must read the viewport",
+    );
+    assert.ok(
+      ghostProbeSource.includes("stranded frames visible after the loop stopped"),
+      "the assertion must target settled visible strands",
+    );
+    assert.ok(
+      !ghostProbeSource.includes("resize steps that stranded a superseded frame"),
+      "the per-step whole-buffer assertion must be gone",
+    );
+  });
 });
