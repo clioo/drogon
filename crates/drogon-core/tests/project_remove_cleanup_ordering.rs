@@ -214,6 +214,14 @@ fn a_managed_folder_that_already_vanished_still_unregisters() {
 fn deleting_files_still_refuses_a_folder_outside_the_projects_home() {
     let data = tempfile::tempdir().unwrap();
     let engine = Engine::open(data.path()).unwrap();
+    // A projects home that exists, so the refusal below comes from the guard
+    // and not from an unresolvable home: without this the assertion passes
+    // against a deleted guard.
+    ok(
+        &engine,
+        "project.create",
+        json!({"name": "neighbour-9f8e7d"}),
+    );
     let owned = tempfile::tempdir().unwrap();
     let path = owned.path().to_str().unwrap().to_string();
     std::fs::write(owned.path().join("notes.md"), "mine").unwrap();
@@ -230,13 +238,143 @@ fn deleting_files_still_refuses_a_folder_outside_the_projects_home() {
         json!({"id": id, "deleteFiles": true}),
     );
     assert!(!refused.ok, "the owner's folder is never deleted");
+    let error = refused.error.unwrap();
+    assert_eq!(error.code, "invalid_argument", "{}", error.message);
     assert!(
-        refused.error.unwrap().message.contains("projects home"),
-        "the guard survives the cleanup reordering"
+        error
+            .message
+            .contains("folders it created under its own projects home"),
+        "the guard survives the cleanup reordering: {}",
+        error.message
     );
     assert!(
         is_registered(&engine, &id),
         "a refused delete keeps the registration"
     );
     assert!(owned.path().join("notes.md").exists());
+}
+
+#[test]
+fn deleting_files_refuses_a_vanished_folder_outside_the_projects_home() {
+    let data = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data.path()).unwrap();
+    ok(
+        &engine,
+        "project.create",
+        json!({"name": "neighbour-1a2b3c"}),
+    );
+    let owned = tempfile::tempdir().unwrap();
+    let path = owned.path().to_str().unwrap().to_string();
+    let added = ok(
+        &engine,
+        "project.add",
+        json!({"path": path, "name": "mine"}),
+    );
+    let id = added["id"].as_str().unwrap().to_string();
+    // An unreachable folder (an unmounted volume, a directory renamed from a
+    // terminal) is still the owner's: "delete its files" must not quietly
+    // become a success receipt for a deletion that never happened.
+    std::fs::remove_dir_all(&path).unwrap();
+
+    let refused = call(
+        &engine,
+        "project.remove",
+        json!({"id": id, "deleteFiles": true}),
+    );
+    assert!(!refused.ok, "an unresolvable path must not skip the guard");
+    let error = refused.error.unwrap();
+    assert_eq!(error.code, "invalid_argument", "{}", error.message);
+    assert!(is_registered(&engine, &id));
+
+    // The registration is never stuck: plain removal still unregisters it.
+    let removed = call(&engine, "project.remove", json!({"id": id}));
+    assert!(removed.ok, "{:?}", removed.error);
+    assert!(!is_registered(&engine, &id));
+}
+
+#[test]
+fn deleting_files_refuses_when_no_projects_home_was_ever_created() {
+    let data = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data.path()).unwrap();
+    let owned = tempfile::tempdir().unwrap();
+    let path = owned.path().to_str().unwrap().to_string();
+    let added = ok(
+        &engine,
+        "project.add",
+        json!({"path": path, "name": "mine"}),
+    );
+    let id = added["id"].as_str().unwrap().to_string();
+
+    // No home means no folder this daemon created, which is the guard's own
+    // answer -- not an io_error about a directory the user never named.
+    let refused = call(
+        &engine,
+        "project.remove",
+        json!({"id": id, "deleteFiles": true}),
+    );
+    assert!(!refused.ok);
+    let error = refused.error.unwrap();
+    assert_eq!(error.code, "invalid_argument", "{}", error.message);
+    assert!(is_registered(&engine, &id));
+    assert!(owned.path().is_dir());
+}
+
+#[test]
+fn a_dangling_scratch_symlink_is_unlinked_with_the_registration() {
+    let data = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data.path()).unwrap();
+    let chat = ok(&engine, "project.quickSessionCreate", json!({}));
+    let id = chat["project"]["id"].as_str().unwrap().to_string();
+    let path = chat["project"]["path"].as_str().unwrap().to_string();
+    let scratch = Path::new(&path);
+    // The scratch replaced by a link to something that no longer exists: the
+    // link is app-owned litter in the quick-sessions root, so it goes with
+    // the registration instead of being stranded there (#623 at link size).
+    let elsewhere = tempfile::tempdir().unwrap();
+    let target = elsewhere.path().join("moved-scratch");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::remove_dir_all(scratch).unwrap();
+    std::os::unix::fs::symlink(&target, scratch).unwrap();
+    std::fs::remove_dir_all(&target).unwrap();
+
+    let removed = call(&engine, "project.remove", json!({"id": id}));
+    assert!(
+        removed.ok,
+        "a dangling scratch link is cleanup, not a dead end: {:?}",
+        removed.error
+    );
+    assert!(!is_registered(&engine, &id));
+    assert!(
+        std::fs::symlink_metadata(scratch).is_err(),
+        "the dangling link is unlinked, not left behind"
+    );
+}
+
+#[test]
+fn a_scratch_symlinked_outside_the_root_is_refused_and_its_target_survives() {
+    let data = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data.path()).unwrap();
+    let chat = ok(&engine, "project.quickSessionCreate", json!({}));
+    let id = chat["project"]["id"].as_str().unwrap().to_string();
+    let path = chat["project"]["path"].as_str().unwrap().to_string();
+    let scratch = Path::new(&path);
+    let elsewhere = tempfile::tempdir().unwrap();
+    std::fs::write(elsewhere.path().join("theirs.md"), "not ours").unwrap();
+    std::fs::remove_dir_all(scratch).unwrap();
+    std::os::unix::fs::symlink(elsewhere.path(), scratch).unwrap();
+
+    let refused = call(&engine, "project.remove", json!({"id": id}));
+    assert!(!refused.ok, "a link out of the root is never followed");
+    assert!(
+        refused
+            .error
+            .unwrap()
+            .message
+            .contains("outside the quick-sessions root")
+    );
+    assert!(is_registered(&engine, &id));
+    assert!(
+        elsewhere.path().join("theirs.md").exists(),
+        "the link target is untouched"
+    );
 }

@@ -986,6 +986,45 @@ pub(crate) fn sparse_presets_save(
     }
 }
 
+/// `deleteFiles` reaches only folders `project.create` made under the
+/// daemon's own projects home; everything else is the owner's.
+fn refuse_foreign_project_folder() -> drogon_protocol::RpcError {
+    error::invalid_argument(
+        "Drogon deletes only the folders it created under its own projects home; this project's files stay where they are.",
+    )
+}
+
+/// What a Quick Session removal still has to unlink.
+enum ScratchCleanup {
+    /// Nothing is left on disk, so the removal proceeds to the rows.
+    Done,
+    /// The app-owned scratch directory, ownership just re-verified.
+    Directory(std::path::PathBuf),
+    /// A dangling symlink standing where the scratch was. The link itself
+    /// sits in the app's own quick-sessions root, so leaving it behind would
+    /// strand app-owned litter the way #623 stranded whole folders.
+    DanglingLink(std::path::PathBuf),
+}
+
+/// A scratch path that no longer resolves: gone, or a link to something gone.
+fn vanished_scratch(canonical_root: &std::path::Path, path: &str) -> ScratchCleanup {
+    let link = std::path::Path::new(path);
+    let (Some(parent), Some(name)) = (link.parent(), link.file_name()) else {
+        return ScratchCleanup::Done;
+    };
+    if !std::fs::symlink_metadata(link).is_ok_and(|m| m.is_symlink()) {
+        return ScratchCleanup::Done;
+    }
+    // Resolve the directory holding the link, never the link: a link planted
+    // outside the quick-sessions root is not this daemon's to unlink.
+    match std::fs::canonicalize(parent) {
+        Ok(parent) if parent.starts_with(canonical_root) => {
+            ScratchCleanup::DanglingLink(parent.join(name))
+        }
+        _ => ScratchCleanup::Done,
+    }
+}
+
 impl Engine {
     pub(super) fn do_project_add(
         &self,
@@ -1014,7 +1053,9 @@ impl Engine {
             .map_err(error::from_sqlite)?
         };
         if let Some(path) = &scratch {
-            self.validate_quick_session_scratch(id, path)?;
+            // Refuse a scratch this daemon cannot prove it owns before
+            // stopping anything; the decision itself is remade at the unlink.
+            let _ = self.validate_quick_session_scratch(id, path)?;
             self.settle_quick_session_members(path)?;
         }
         // `deleteFiles` asks for the folder to go with the registration. Only
@@ -1035,23 +1076,36 @@ impl Engine {
                 .map_err(error::from_sqlite)?
             };
             let path = path.ok_or_else(|| error::not_found("project not found"))?;
-            // A folder that is already gone leaves nothing to delete, so the
-            // registration is free to go with it instead of being stranded
-            // behind an unresolvable path.
+            // The guard decides this branch, so it has to answer even when a
+            // path will not resolve: a projects home this daemon never
+            // created holds nothing, and a folder that is already gone may
+            // skip the delete only if the registration pointed inside that
+            // home. `add` stores canonical paths, so comparing a vanished one
+            // by prefix is exact enough for a branch that deletes nothing.
+            let home = match std::fs::canonicalize(self.data_dir.join(PROJECTS_HOME)) {
+                Ok(home) => Some(home),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => {
+                    return Err(error::io_error(format!(
+                        "cannot resolve the projects home: {e}"
+                    )));
+                }
+            };
             let candidate = match std::fs::canonicalize(&path) {
                 Ok(candidate) => {
-                    let home =
-                        std::fs::canonicalize(self.data_dir.join(PROJECTS_HOME)).map_err(|e| {
-                            error::io_error(format!("cannot resolve the projects home: {e}"))
-                        })?;
+                    let home = home.ok_or_else(refuse_foreign_project_folder)?;
                     if candidate == home || !candidate.starts_with(&home) {
-                        return Err(error::invalid_argument(
-                            "Drogon deletes only the folders it created under its own projects home; this project's files stay where they are.",
-                        ));
+                        return Err(refuse_foreign_project_folder());
                     }
                     Some(candidate)
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let home = home.ok_or_else(refuse_foreign_project_folder)?;
+                    if !std::path::Path::new(&path).starts_with(&home) {
+                        return Err(refuse_foreign_project_folder());
+                    }
+                    None
+                }
                 Err(e) => {
                     return Err(error::io_error(format!(
                         "cannot resolve the project folder: {e}"
@@ -1094,27 +1148,30 @@ impl Engine {
         project_id: &str,
         path: &str,
     ) -> Result<(), drogon_protocol::RpcError> {
-        let Some(candidate) = self.validate_quick_session_scratch(project_id, path)? else {
-            return Ok(());
-        };
-        std::fs::remove_dir_all(&candidate)
-            .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}")))
+        match self.validate_quick_session_scratch(project_id, path)? {
+            ScratchCleanup::Done => Ok(()),
+            ScratchCleanup::Directory(scratch) => std::fs::remove_dir_all(&scratch)
+                .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}"))),
+            // Unlinked, never followed: the target is unknown and not this
+            // daemon's to delete.
+            ScratchCleanup::DanglingLink(link) => std::fs::remove_file(&link)
+                .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}"))),
+        }
     }
 
     /// Check before any destructive action and again immediately before unlink.
-    /// `Ok(None)` means the scratch is already gone: there is nothing left to
-    /// delete, so the removal proceeds rather than stranding a registration
-    /// whose folder the user (or a temp sweep) removed behind the app's back.
     fn validate_quick_session_scratch(
         &self,
         project_id: &str,
         path: &str,
-    ) -> Result<Option<std::path::PathBuf>, drogon_protocol::RpcError> {
+    ) -> Result<ScratchCleanup, drogon_protocol::RpcError> {
         let root = self.data_dir.join(QUICK_SESSION_ROOT);
         let canonical_root = std::fs::canonicalize(&root).unwrap_or(root);
         let candidate = match std::fs::canonicalize(path) {
             Ok(candidate) => candidate,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(vanished_scratch(&canonical_root, path));
+            }
             Err(e) => {
                 return Err(error::io_error(format!(
                     "quick session scratch cleanup failed: {e}"
@@ -1140,7 +1197,7 @@ impl Engine {
                 "quick session scratch marker ownership mismatch; not deleting",
             ));
         }
-        Ok(Some(candidate))
+        Ok(ScratchCleanup::Directory(candidate))
     }
 
     /// Quick Session (`project.quickSessionCreate`): the fork's composer
