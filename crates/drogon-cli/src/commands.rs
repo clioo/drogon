@@ -2486,6 +2486,14 @@ async fn bot(
                 )
                 .await?;
             let result = call.result.clone();
+            // The read answers in full even when the Bot's folder has left
+            // the workspace registry (#609); the service says so in
+            // `notice`, and that belongs on stderr in both output modes
+            // rather than only inside the JSON a human may not read.
+            let notice = result
+                .get("notice")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             emit(
                 call,
                 json,
@@ -2509,7 +2517,7 @@ async fn bot(
                     )
                 },
                 0,
-                None,
+                notice,
             )
         }
         BotAction::CreateAutomation {
