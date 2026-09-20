@@ -67,6 +67,7 @@ mod ports;
 mod ring;
 mod session;
 mod session_env;
+mod terminal_modes;
 mod worker_brief;
 mod workspace;
 mod workspace_file_rpc;
@@ -1069,12 +1070,27 @@ impl Engine {
         session::read_long_poll(&handle, cursor, limit as usize, wait_ms)
     }
 
+    /// Issue #625 made this additive: `submitEnter` says the payload ends
+    /// with the Return that submits it, and asks for that Return to be
+    /// delivered as a discrete keypress (its own write, after the body and
+    /// after any paste frame) instead of fused into one burst a
+    /// paste-detecting TUI swallows whole. Omitting it keeps the verbatim
+    /// single write byte for byte, so an older client — and every
+    /// non-message writer, from harness prompt delivery to a shell
+    /// command — is untouched. `acceptedBytes` counts the caller's payload
+    /// either way; `enterDelivery` and `bracketedPaste` report what the
+    /// PTY actually got.
     fn do_session_write(&self, params: &Value) -> Result<Value, RpcError> {
         let (handle, _) = self.require_session_with_incarnation(params)?;
         let data_b64 = require_str(params, "dataBase64")?;
         let bytes = session::base64_decode(data_b64)?;
-        let accepted = session::write(&handle, &bytes)?;
-        Ok(json!({ "acceptedBytes": accepted }))
+        let submit_enter = optional_bool(params, "submitEnter", false)?;
+        let outcome = session::write_parts(&handle, &bytes, submit_enter)?;
+        Ok(json!({
+            "acceptedBytes": outcome.accepted,
+            "enterDelivery": outcome.enter_delivery,
+            "bracketedPaste": outcome.bracketed,
+        }))
     }
 
     fn do_session_resize(&self, params: &Value) -> Result<Value, RpcError> {
@@ -1304,6 +1320,18 @@ fn optional_u64(params: &Value, field: &str, default: u64) -> Result<u64, RpcErr
         Some(value) => value.as_u64().ok_or_else(|| {
             error::invalid_argument(format!("{field} must be a non-negative integer"))
         }),
+    }
+}
+
+/// Same present-but-invalid-is-an-error rule as `optional_u64`: a caller
+/// who spells a flag wrong must see the error, never silently get the
+/// default behaviour they were trying to opt out of.
+fn optional_bool(params: &Value, field: &str, default: bool) -> Result<bool, RpcError> {
+    match params.get(field) {
+        None | Some(Value::Null) => Ok(default),
+        Some(value) => value
+            .as_bool()
+            .ok_or_else(|| error::invalid_argument(format!("{field} must be a boolean"))),
     }
 }
 

@@ -123,14 +123,30 @@ not the two characters backslash-n; a trailing carriage return or CRLF means
 the same thing. That trailing terminator is delivered as one carriage
 return — the byte a terminal puts on the wire when you press Enter, and the
 only byte a raw-mode TUI reads as submit. Every other byte is delivered
-unchanged in a single write, so a message whose lines end in LF lands in the
-composer whole and the one Return at the end submits it as a single turn.
+unchanged, so a message whose lines end in LF lands in the composer whole
+and the one Return at the end submits it as a single turn.
 A carriage return INSIDE the value is Enter too, so convert CRLF line
 endings to LF before sending a multi-line message, or each CR will submit
-early. The result reports `submittedEnter` so you can confirm the message
-was submitted and not just typed into the composer, and `acceptedBytes`
-counts what reached the PTY (a trailing CRLF is the one byte Return really
-is). Pass `--literal` to write the bytes verbatim instead, with no Return
+early.
+
+That Return goes out as its own keypress: the body is written and flushed
+first, and only then the Return — and when the far end has asked for
+bracketed paste (a full-screen TUI like Claude Code does), a
+message-sized body is wrapped in paste markers so the Return lands
+*after* the marker that closes the paste. Without that, a long message
+and its Return arrive in one read on a session that is mid-turn, the
+TUI's paste heuristic takes the whole burst as pasted text, and the
+message sits in the composer unsubmitted.
+
+The result reports `acceptedBytes` (what reached the PTY — a trailing
+CRLF is the one byte Return really is), `submittedEnter` (a Return
+reached the PTY) and `enterDelivery`, which is the one to check:
+`keypress` means it went out as a discrete keystroke, `inline` means it
+was fused into the body's burst and a paste-detecting TUI may not submit
+it, `none` means there was no Return to send. None of them is proof the
+agent actually started a turn — a send is delivery, not receipt. Confirm
+with `terminal read` (or `terminal wait --for output`) when it matters.
+Pass `--literal` to write the bytes verbatim instead, with no Return
 translation and no Enter, when you are piping data rather than typing a
 message. Read bounded output with
 `drogon-cli terminal read --session <ID> --incarnation <TOKEN> --cursor 0 --limit-bytes 4096`,

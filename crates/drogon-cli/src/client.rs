@@ -216,6 +216,16 @@ pub struct ReadResult {
 #[serde(rename_all = "camelCase")]
 pub struct WriteResult {
     pub accepted_bytes: u64,
+    /// How the service says the Return went out (issue #625): `keypress`
+    /// when it was written on its own after the body, `raw` when the
+    /// payload went out verbatim in one burst. `None` from a service that
+    /// predates the field — which is itself the answer, and is reported
+    /// as `inline` rather than guessed at.
+    #[serde(default)]
+    pub enter_delivery: Option<String>,
+    /// Whether the service wrapped the body in bracketed-paste markers.
+    #[serde(default)]
+    pub bracketed_paste: Option<bool>,
 }
 
 /// `harness.list` catalog. Harness ids stay strings (not the closed

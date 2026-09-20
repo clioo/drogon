@@ -352,14 +352,20 @@ async fn terminal(
 }
 
 /// `terminal send`: delivers `--text` the way a terminal delivers typed
-/// input (issue #599). `crate::terminal_send` owns the why; this function
-/// owns the round trip — exactly one, so two agents nudging the same session
-/// cannot interleave inside a single message.
+/// input (issues #599, #625). `crate::terminal_send` owns the why; this
+/// function owns the round trip — exactly one, so two agents nudging the
+/// same session cannot interleave inside a single message.
 ///
-/// The envelope gains an additive `submittedEnter` so a caller can verify
-/// the keystroke that used to go missing, rather than inferring it from
-/// `acceptedBytes` (which counts what reached the PTY, and so is one byte
-/// short of a `--text` that ended in CRLF).
+/// `submitEnter` asks the service to deliver that trailing Return as a
+/// discrete keypress rather than fused into the body's burst. The payload
+/// on the wire is unchanged either way, so a service that predates the
+/// flag writes exactly what it used to; the reply says which happened and
+/// `enterDelivery` reports it rather than the CLI assuming the better one.
+///
+/// The envelope's `submittedEnter` says a Return reached the PTY;
+/// `enterDelivery` says whether it got there as a keystroke a
+/// paste-detecting TUI can act on. Neither is a claim that the far end
+/// submitted a turn — only reading the session proves that.
 async fn terminal_send(
     client: &Client,
     request_id: &str,
@@ -375,6 +381,7 @@ async fn terminal_send(
         "incarnation": incarnation,
         // UTF-8 encoded once, here; never shell-interpolated anywhere.
         "dataBase64": STANDARD.encode(plan.text.as_bytes()),
+        "submitEnter": plan.submitted_enter,
     });
     let expected = plan.byte_len();
     let call = client
@@ -383,22 +390,44 @@ async fn terminal_send(
     let write: WriteResult = Client::decode_checked(&call, "session.write", |result| {
         check_write(result, expected)
     })?;
+    let delivery = enter_delivery(plan.submitted_enter, write.enter_delivery.as_deref());
+    let bracketed = write.bracketed_paste.unwrap_or(false);
     let mut call = call;
     call.raw["result"] = json!({
         "acceptedBytes": write.accepted_bytes,
         "submittedEnter": plan.submitted_enter,
+        "enterDelivery": delivery,
+        "bracketedPaste": bracketed,
     });
     call.result = call.raw["result"].clone();
     let session_id = session.to_string();
     let accepted = write.accepted_bytes;
-    let submitted_enter = plan.submitted_enter;
     emit(
         call,
         json,
-        || output::session_wrote_bytes(accepted, &session_id, submitted_enter),
+        || output::session_wrote_bytes(accepted, &session_id, delivery, bracketed),
         0,
         None,
     )
+}
+
+/// What the envelope reports for `enterDelivery`, from what was asked for
+/// and what the service said it did.
+///
+/// A service that answers `keypress` did the #625 delivery. One that
+/// answers `raw`, or that is too old to answer at all, wrote the payload
+/// verbatim — the Return went out fused with the body, which is the shape
+/// a mid-turn paste-detecting TUI swallows. That is `inline`, and saying
+/// so is the point: the caller learns the weaker delivery happened instead
+/// of being told what the CLI hoped for.
+fn enter_delivery(submitted_enter: bool, reported: Option<&str>) -> &'static str {
+    if !submitted_enter {
+        return "none";
+    }
+    match reported {
+        Some("keypress") => "keypress",
+        _ => "inline",
+    }
 }
 
 /// Client-side wait over the existing `session.read`: no new RPC was added

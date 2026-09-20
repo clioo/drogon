@@ -51,11 +51,40 @@ const ROW_SETTLE: Duration = Duration::from_millis(250);
 /// appears.
 const RAW_READER_SCRIPT: &str = r#"#!/bin/sh
 stty raw -echo
+printf '%b' "$2"
 printf 'READY:'
 dd bs=1 count="$1" 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
 printf ':DONE:'
 dd bs=1 count=1 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
 printf ':EXTRA'
+"#;
+
+/// Issue #625's far end: a TUI that asked for bracketed paste and is then
+/// BUSY. It announces `ESC [ ? 2004 h`, says READY, and spends the next
+/// few seconds not reading its input at all — exactly a Claude Code
+/// session mid-turn. Everything written meanwhile queues in the PTY, so
+/// the single `dd` afterwards takes it all in ONE read, which is the
+/// condition under which a paste heuristic swallows a fused Return.
+const BUSY_PASTE_TUI_SCRIPT: &str = r#"#!/bin/sh
+stty raw -echo
+printf '\033[?2004h'
+printf 'READY:'
+sleep "$1"
+dd bs=65536 count=1 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
+printf ':DONE'
+"#;
+
+/// The other far end: a TUI blocked in `read()` with no bracketed paste.
+/// It dumps its first TWO reads separately, so where the read boundary
+/// fell is visible — which is how "the Return went out as its own write"
+/// stops being a claim and becomes an observation.
+const TWO_READS_SCRIPT: &str = r#"#!/bin/sh
+stty raw -echo
+printf 'READY:A:'
+dd bs=65536 count=1 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
+printf ':B:'
+dd bs=65536 count=1 2>/dev/null | od -An -v -tx1 | tr -d '[:space:]'
+printf ':END'
 "#;
 
 fn workspace_root() -> PathBuf {
@@ -317,9 +346,9 @@ fn assert_still_live(data_dir: &Path, session: &str, incarnation: &str, label: &
     );
 }
 
-fn write_raw_reader(dir: &Path) -> PathBuf {
-    let path = dir.join("raw-reader.sh");
-    std::fs::write(&path, RAW_READER_SCRIPT).expect("write fixture");
+fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(&path, body).expect("write fixture");
     let mut perms = std::fs::metadata(&path)
         .expect("stat fixture")
         .permissions();
@@ -336,6 +365,8 @@ struct Fixture {
     data_dir: PathBuf,
     workspace_id: String,
     reader: PathBuf,
+    busy_paste_tui: PathBuf,
+    two_reads: PathBuf,
     _root: tempfile::TempDir,
 }
 
@@ -349,7 +380,9 @@ impl Fixture {
         let data_dir = root.path().join("d");
         let workspace = root.path().join("w");
         std::fs::create_dir_all(&workspace).expect("create workspace");
-        let reader = write_raw_reader(&workspace);
+        let reader = write_script(&workspace, "raw-reader.sh", RAW_READER_SCRIPT);
+        let busy_paste_tui = write_script(&workspace, "busy-paste-tui.sh", BUSY_PASTE_TUI_SCRIPT);
+        let two_reads = write_script(&workspace, "two-reads.sh", TWO_READS_SCRIPT);
         let daemon = Daemon::start(&drogond, &data_dir);
         let workspace_id = field(
             &ok(
@@ -363,6 +396,8 @@ impl Fixture {
             data_dir,
             workspace_id,
             reader,
+            busy_paste_tui,
+            two_reads,
             _root: root,
         }
     }
@@ -370,22 +405,40 @@ impl Fixture {
     /// A session running the raw-mode reader, already blocked on its first
     /// read of `expect_bytes` bytes.
     fn raw_session(&self, expect_bytes: usize) -> (String, String) {
-        let created = ok(
-            &self.data_dir,
-            &[
-                "terminal",
-                "create",
-                "--workspace",
-                &self.workspace_id,
-                "--",
-                "/bin/sh",
-                self.reader.to_str().expect("utf-8 path"),
-                &expect_bytes.to_string(),
-            ],
-        );
+        self.raw_session_with_modes(expect_bytes, "")
+    }
+
+    /// The same reader, but announcing `modes` first (a `printf '%b'`
+    /// string, so `\033[?2004h` turns bracketed paste on). Waiting for
+    /// `READY:` is what makes the announcement ordered: the daemon scans
+    /// each output chunk for mode changes BEFORE the chunk is readable,
+    /// so output that shows `READY:` cannot precede the flag.
+    fn raw_session_with_modes(&self, expect_bytes: usize, modes: &str) -> (String, String) {
+        self.script_session(
+            self.reader.clone(),
+            &[&expect_bytes.to_string(), modes],
+            "READY:",
+        )
+    }
+
+    /// A session running `script` with `args`, waited until it prints
+    /// `marker`.
+    fn script_session(&self, script: PathBuf, args: &[&str], marker: &str) -> (String, String) {
+        let script = script.to_str().expect("utf-8 path").to_string();
+        let mut argv = vec![
+            "terminal",
+            "create",
+            "--workspace",
+            &self.workspace_id,
+            "--",
+            "/bin/sh",
+            &script,
+        ];
+        argv.extend_from_slice(args);
+        let created = ok(&self.data_dir, &argv);
         let session = field(&created, "/result/id");
         let incarnation = field(&created, "/result/incarnation");
-        wait_for_marker(&self.data_dir, &session, &incarnation, "READY:");
+        wait_for_marker(&self.data_dir, &session, &incarnation, marker);
         (session, incarnation)
     }
 
@@ -685,6 +738,463 @@ fn a_replayed_send_reaches_the_pty_exactly_once() {
             !settled.contains(":EXTRA"),
             "the replay delivered the message twice: {settled:?}"
         );
+    }));
+    fixture.shut_down();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+// --- issue #625: the Return survives a mid-turn paste-detecting TUI ---
+
+/// Bracketed-paste framing, as a terminal writes it.
+const PASTE_START: &[u8] = b"\x1b[200~";
+const PASTE_END: &[u8] = b"\x1b[201~";
+
+/// A message long enough to be a message. Kept well under a PTY input
+/// queue (1 KiB on the tighter of the platforms this runs on) so the
+/// fixture's single `read()` really does get the whole thing — the test
+/// is about where the Return lands, not about short reads.
+const LONG_MESSAGE: &str = "Update from the owner (relayed by a bot): main is blocked. \
+Your PR must target the v2 branch, NOT main. If you already opened it against main, \
+retarget it, and do not stop at opening the PR: say exactly why in the issue comment.";
+
+/// How a paste-aware TUI reads what arrives on its stdin.
+///
+/// This is a model, and it is stated rather than assumed: bytes framed
+/// between `ESC [ 200 ~` and `ESC [ 201 ~` are text, never keys; outside a
+/// frame, a burst bigger than a few keystrokes is taken for a paste (the
+/// heuristic every TUI that lacks framing has to fall back on, and the one
+/// #625 tripped over) and its bytes are text too; anything else is
+/// keystrokes, and `CR` is the key that submits.
+///
+/// It is fed the bytes a REAL fixture reported reading, one call per real
+/// `read()`, so what it judges is an observation, not a simulation.
+#[derive(Debug, Default)]
+struct PasteAwareTui {
+    composer: String,
+    submitted: Vec<String>,
+}
+
+/// Longest burst still read as typing rather than as a paste.
+const KEYSTROKE_BURST_MAX: usize = 8;
+
+impl PasteAwareTui {
+    /// One `read()` worth of bytes.
+    fn read_burst(&mut self, burst: &[u8]) {
+        let mut rest = burst;
+        while !rest.is_empty() {
+            match find(rest, PASTE_START) {
+                Some(0) => {
+                    let body = &rest[PASTE_START.len()..];
+                    let end = find(body, PASTE_END).unwrap_or(body.len());
+                    self.insert(&body[..end]);
+                    rest = &body[(end + PASTE_END.len()).min(body.len())..];
+                }
+                Some(at) => {
+                    self.plain(&rest[..at]);
+                    rest = &rest[at..];
+                }
+                None => {
+                    self.plain(rest);
+                    rest = &[];
+                }
+            }
+        }
+    }
+
+    fn plain(&mut self, bytes: &[u8]) {
+        if bytes.len() > KEYSTROKE_BURST_MAX {
+            // Too much at once to be typing: a paste, Return and all.
+            self.insert(bytes);
+            return;
+        }
+        for byte in bytes {
+            match byte {
+                b'\r' => {
+                    let turn = std::mem::take(&mut self.composer);
+                    self.submitted.push(turn);
+                }
+                _ => self.insert(&[*byte]),
+            }
+        }
+    }
+
+    fn insert(&mut self, bytes: &[u8]) {
+        self.composer
+            .push_str(&String::from_utf8_lossy(bytes).replace('\r', "\n"));
+    }
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn from_hex(hex: &str) -> Vec<u8> {
+    assert!(hex.len().is_multiple_of(2), "odd hex dump: {hex:?}");
+    (0..hex.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).expect("hex byte"))
+        .collect()
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// The dump between two markers.
+fn between(text: &str, start: &str, end: &str) -> String {
+    text.rsplit(start)
+        .next()
+        .unwrap_or_else(|| panic!("no {start:?} in {text:?}"))
+        .split(end)
+        .next()
+        .unwrap_or_else(|| panic!("no {end:?} after {start:?} in {text:?}"))
+        .to_string()
+}
+
+/// The model has to fail on the broken shape, or it proves nothing about
+/// the fixed one. This is the byte stream #625 described: body and Return
+/// fused, delivered in one read to a TUI that was too busy to be blocked
+/// in `read()`.
+#[test]
+fn the_tui_model_does_not_submit_the_fused_delivery_that_was_reported() {
+    let mut tui = PasteAwareTui::default();
+    tui.read_burst(format!("{LONG_MESSAGE}\r").as_bytes());
+    assert!(
+        tui.submitted.is_empty(),
+        "the pre-fix delivery must NOT submit, or this model cannot detect \
+         the bug: {:?}",
+        tui.submitted
+    );
+    assert!(
+        tui.composer.starts_with("Update from the owner"),
+        "...and the message must be sitting in the composer, which is what \
+         the issue reported: {:?}",
+        tui.composer
+    );
+
+    // Short input is still typing: the heuristic must not eat every Return.
+    let mut typed = PasteAwareTui::default();
+    typed.read_burst(b"y\r");
+    assert_eq!(typed.submitted, vec!["y".to_string()]);
+}
+
+/// The headline regression. A long, single-line message sent to a
+/// bracketed-paste TUI that is mid-turn: the bytes are captured from a
+/// real PTY, from a real `read()` that really did get them all at once,
+/// and then judged by the model above.
+#[test]
+fn a_long_message_submits_on_a_busy_paste_detecting_tui() {
+    let fixture = Fixture::start("dg-busy-");
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (session, incarnation) = fixture.script_session(
+            fixture.busy_paste_tui.clone(),
+            // Long enough that the send lands while the fixture is still
+            // not reading. If it ever does not, the one-read assertion
+            // below fails loudly rather than passing for the wrong reason.
+            &["5"],
+            "READY:",
+        );
+        let sent = ok(
+            &fixture.data_dir,
+            &[
+                "terminal",
+                "send",
+                "--session",
+                &session,
+                "--incarnation",
+                &incarnation,
+                "--text",
+                &format!("{LONG_MESSAGE}\n"),
+            ],
+        );
+        // `acceptedBytes` is still the caller's payload: framing is the
+        // transport's business and is not billed to the caller.
+        assert_eq!(
+            sent["result"]["acceptedBytes"],
+            (LONG_MESSAGE.len() + 1) as u64,
+            "{sent:#}"
+        );
+        assert_eq!(sent["result"]["submittedEnter"], true, "{sent:#}");
+        assert_eq!(sent["result"]["enterDelivery"], "keypress", "{sent:#}");
+        assert_eq!(sent["result"]["bracketedPaste"], true, "{sent:#}");
+
+        let text = wait_for_marker(&fixture.data_dir, &session, &incarnation, ":DONE");
+        let burst = from_hex(&between(&text, "READY:", ":DONE"));
+
+        // What one read actually delivered: the body inside a paste frame,
+        // and the Return AFTER the marker that closes it.
+        let expected = [PASTE_START, LONG_MESSAGE.as_bytes(), PASTE_END, b"\r"].concat();
+        assert_eq!(
+            to_hex(&burst),
+            to_hex(&expected),
+            "one read delivered {:?}",
+            String::from_utf8_lossy(&burst)
+        );
+
+        // And that is enough for the TUI to submit, from one read, busy.
+        let mut tui = PasteAwareTui::default();
+        tui.read_burst(&burst);
+        assert_eq!(
+            tui.submitted,
+            vec![LONG_MESSAGE.to_string()],
+            "composer left holding {:?}",
+            tui.composer
+        );
+
+        fixture.close(&session, &incarnation);
+    }));
+    fixture.shut_down();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// The other half of the delivery: with no bracketed paste to frame, the
+/// Return still has to be its own write. A reader blocked in `read()`
+/// proves it — the body comes back from one read and the Return from the
+/// next. Fused, the second read would never return and `:END` would never
+/// be printed.
+#[test]
+fn the_return_arrives_in_a_read_of_its_own() {
+    let fixture = Fixture::start("dg-two-");
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (session, incarnation) =
+            fixture.script_session(fixture.two_reads.clone(), &[], "READY:A:");
+        const BODY: &str = "please rebase onto v2 and rerun the gates";
+        let sent = ok(
+            &fixture.data_dir,
+            &[
+                "terminal",
+                "send",
+                "--session",
+                &session,
+                "--incarnation",
+                &incarnation,
+                "--text",
+                &format!("{BODY}\n"),
+            ],
+        );
+        assert_eq!(sent["result"]["enterDelivery"], "keypress", "{sent:#}");
+        // This far end never asked for bracketed paste, so it must not be
+        // handed paste markers it would show as literal text.
+        assert_eq!(sent["result"]["bracketedPaste"], false, "{sent:#}");
+
+        let text = wait_for_marker(&fixture.data_dir, &session, &incarnation, ":END");
+        let first = from_hex(&between(&text, "READY:A:", ":B:"));
+        let second = from_hex(&between(&text, ":B:", ":END"));
+        assert_eq!(
+            String::from_utf8_lossy(&first),
+            BODY,
+            "the first read must be the body alone"
+        );
+        assert_eq!(to_hex(&second), "0d", "the second read must be the Return");
+
+        fixture.close(&session, &incarnation);
+    }));
+    fixture.shut_down();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// One row of the framing policy: what a session that asked for bracketed
+/// paste is handed, and why.
+struct FrameCase {
+    what: &'static str,
+    modes: &'static str,
+    text: &'static str,
+    literal: bool,
+    framed: bool,
+    hex: &'static str,
+}
+
+/// Framing bytes a far end never asked for — or that would turn a
+/// keystroke into text — would be a worse bug than the one being fixed.
+/// This is the whole gate, in both directions.
+#[test]
+fn bracketed_framing_is_applied_only_where_it_is_safe_and_needed() {
+    const ON: &str = r"\033[?2004h";
+    const OFF_AGAIN: &str = r"\033[?2004h\033[?2004l";
+    const CASES: &[FrameCase] = &[
+        FrameCase {
+            what: "a message-sized body to a TUI that asked for paste",
+            modes: ON,
+            text: "rebase onto v2 please\n",
+            literal: false,
+            framed: true,
+            hex: "1b5b3230307e7265626173652\
+                  06f6e746f20763220706c656173651b5b3230317e0d",
+        },
+        FrameCase {
+            what: "a single-key answer stays a keystroke",
+            modes: ON,
+            text: "y\n",
+            literal: false,
+            framed: false,
+            hex: "790d",
+        },
+        FrameCase {
+            what: "a short multi-line body is still a message",
+            modes: ON,
+            text: "a\nb\n",
+            literal: false,
+            framed: true,
+            hex: "1b5b3230307e610a621b5b3230317e0d",
+        },
+        FrameCase {
+            what: "an ESC in the body would break the frame",
+            modes: ON,
+            text: "abcdefghijklmnop\u{1b}q\n",
+            literal: false,
+            framed: false,
+            hex: "6162636465666768696a6b6c6d6e6f701b710d",
+        },
+        FrameCase {
+            what: "a control byte in the body is a key, not text",
+            modes: ON,
+            text: "abcdefghijklmnop\u{3}\n",
+            literal: false,
+            framed: false,
+            hex: "6162636465666768696a6b6c6d6e6f70030d",
+        },
+        FrameCase {
+            what: "an interior carriage return keeps its documented meaning",
+            modes: ON,
+            text: "abcdefghijklmnop\rqrstuvwx\n",
+            literal: false,
+            framed: false,
+            hex: "6162636465666768696a6b6c6d6e6f700d717273747576777\
+                  80d",
+        },
+        FrameCase {
+            what: "no Return to disambiguate, so nothing to frame",
+            modes: ON,
+            text: "rebase onto v2 please",
+            literal: false,
+            framed: false,
+            hex: "7265626173\
+                  65206f6e746f20763220706c65617365",
+        },
+        FrameCase {
+            what: "--literal is byte-exact, always",
+            modes: ON,
+            text: "rebase onto v2 please\n",
+            literal: true,
+            framed: false,
+            hex: "7265626173\
+                  65206f6e746f20763220706c656173650a",
+        },
+        FrameCase {
+            what: "a TUI that never asked for paste is never framed",
+            modes: "",
+            text: "rebase onto v2 please\n",
+            literal: false,
+            framed: false,
+            hex: "726562617365206f6e746f20763220706c656173650d",
+        },
+        FrameCase {
+            what: "a TUI that turned paste back off is not framed either",
+            modes: OFF_AGAIN,
+            text: "rebase onto v2 please\n",
+            literal: false,
+            framed: false,
+            hex: "726562617365206f6e746f20763220706c656173650d",
+        },
+    ];
+
+    let fixture = Fixture::start("dg-frame-");
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for case in CASES {
+            let hex: String = case.hex.split_whitespace().collect();
+            let (session, incarnation) = fixture.raw_session_with_modes(hex.len() / 2, case.modes);
+            let mut args = vec![
+                "terminal",
+                "send",
+                "--session",
+                session.as_str(),
+                "--incarnation",
+                incarnation.as_str(),
+                "--text",
+                case.text,
+            ];
+            if case.literal {
+                args.push("--literal");
+            }
+            let sent = ok(&fixture.data_dir, &args);
+            assert_eq!(
+                sent["result"]["bracketedPaste"], case.framed,
+                "{}: {sent:#}",
+                case.what
+            );
+            let text = wait_for_marker(&fixture.data_dir, &session, &incarnation, ":DONE");
+            assert_eq!(first_dump(&text), hex, "{}: output {text:?}", case.what);
+            assert_still_live(&fixture.data_dir, &session, &incarnation, case.what);
+            let settled =
+                session_output_after(&fixture.data_dir, &session, &incarnation, ROW_SETTLE);
+            assert!(
+                !settled.contains(":EXTRA"),
+                "{}: more bytes reached the PTY than were asked for: {settled:?}",
+                case.what
+            );
+            fixture.close(&session, &incarnation);
+        }
+    }));
+    fixture.shut_down();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// Two agents nudging one session must not interleave, and the paced
+/// Return is the window that could let them. The daemon holds the writer
+/// lock across body and Return, so each message arrives whole; the reader
+/// sees two complete lines, never a fused one.
+#[test]
+fn concurrent_sends_do_not_interleave_across_the_paced_return() {
+    let fixture = Fixture::start("dg-race-");
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        const A: &str = "AAAAAAAAAAAAAAAAAAAAAAAA";
+        const B: &str = "BBBBBBBBBBBBBBBBBBBBBBBB";
+        let expected = A.len() + B.len() + 2;
+        let (session, incarnation) = fixture.raw_session(expected);
+        let mut senders = Vec::new();
+        for body in [A, B] {
+            let data_dir = fixture.data_dir.clone();
+            let session = session.clone();
+            let incarnation = incarnation.clone();
+            senders.push(std::thread::spawn(move || {
+                ok(
+                    &data_dir,
+                    &[
+                        "terminal",
+                        "send",
+                        "--session",
+                        &session,
+                        "--incarnation",
+                        &incarnation,
+                        "--text",
+                        &format!("{body}\n"),
+                    ],
+                );
+            }));
+        }
+        for sender in senders {
+            sender.join().expect("sender thread");
+        }
+        let text = wait_for_marker(&fixture.data_dir, &session, &incarnation, ":DONE");
+        let delivered = String::from_utf8(from_hex(&first_dump(&text))).expect("utf-8");
+        let mut lines: Vec<&str> = delivered.split('\r').filter(|s| !s.is_empty()).collect();
+        lines.sort_unstable();
+        assert_eq!(
+            lines,
+            vec![A, B],
+            "a message was split by the other one: {delivered:?}"
+        );
+        fixture.close(&session, &incarnation);
     }));
     fixture.shut_down();
     if let Err(panic) = outcome {

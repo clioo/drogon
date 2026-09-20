@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 use crate::agent_state::{self, Activity, AgentState};
 use crate::error;
 use crate::ring::RingBuffer;
+use crate::terminal_modes::{BRACKETED_PASTE_END, BRACKETED_PASTE_START, BracketedPasteScanner};
 
 #[path = "session_admission.rs"]
 pub(crate) mod session_admission;
@@ -184,6 +185,17 @@ pub(crate) struct SessionHandle {
     /// so hook wait signals are ignored for it (see `hooks.rs`) and its
     /// exit advances the linked run rows (see `run_completion.rs`).
     headless: AtomicBool,
+    /// Issue #625: whether the program on the far end has DECSET 2004
+    /// (bracketed paste) on right now, as observed in its OWN output by
+    /// the reader thread. A paste-aware TUI is the only far end a framed
+    /// write is safe for, so this gate decides whether `write_parts`
+    /// frames a body before the Return that submits it.
+    bracketed_paste: AtomicBool,
+    /// The incremental scanner behind `bracketed_paste`. Held separately
+    /// because it carries a partial sequence across chunk boundaries;
+    /// only the reader thread touches it, and readers of the flag use the
+    /// lock-free `AtomicBool` instead.
+    paste_mode_scanner: Mutex<BracketedPasteScanner>,
     db: Arc<Mutex<Connection>>,
 }
 
@@ -238,8 +250,28 @@ impl SessionHandle {
             explicit_wait_clear: AtomicBool::new(false),
             turn_fact: AtomicU8::new(TURN_INACTIVE),
             headless: AtomicBool::new(false),
+            bracketed_paste: AtomicBool::new(false),
+            paste_mode_scanner: Mutex::new(BracketedPasteScanner::default()),
             db,
         })
+    }
+
+    /// Feeds one PTY output chunk to the terminal-mode observer. Called
+    /// by the reader thread only, in stream order.
+    pub(crate) fn observe_output_modes(&self, chunk: &[u8]) {
+        let mut scanner = self.paste_mode_scanner.lock().unwrap();
+        scanner.feed(chunk);
+        let enabled = scanner.enabled();
+        drop(scanner);
+        // Only a change touches the atomic: steady output stays quiet.
+        if self.bracketed_paste.load(Ordering::Acquire) != enabled {
+            self.bracketed_paste.store(enabled, Ordering::Release);
+        }
+    }
+
+    /// Whether the far end currently has bracketed paste on (issue #625).
+    pub(crate) fn bracketed_paste_enabled(&self) -> bool {
+        self.bracketed_paste.load(Ordering::Acquire)
     }
 
     pub(crate) fn set_status_hooks_enabled(&self, enabled: bool) -> Result<(), RpcError> {
@@ -767,6 +799,14 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    // Issue #625: the far end announces bracketed paste in
+                    // its own output, so observing it costs one scan of a
+                    // chunk we already hold. BEFORE the ring push, so a
+                    // caller that can read a session's `ESC [ ? 2004 h`
+                    // has necessarily already seen the flag flip — a
+                    // caller must never be able to observe the announcement
+                    // and then get an unframed write.
+                    handle.observe_output_modes(&buf[..n]);
                     handle.ring.lock().unwrap().push(&buf[..n]);
                     let now = Instant::now();
                     let marked = if last_activity_marked
@@ -1201,12 +1241,95 @@ pub(crate) fn read_long_poll(
     }
 }
 
-pub(crate) fn write(handle: &SessionHandle, data: &[u8]) -> Result<usize, RpcError> {
+/// Gap between the body and the Return that submits it (issue #625). Long
+/// enough that a far end which IS blocked in `read()` gets two reads (so a
+/// TUI with no bracketed paste still sees a discrete keypress), short
+/// enough that a relay nudging several sessions does not feel it. A far
+/// end that is mid-turn and not reading will still coalesce them, which is
+/// what the bracketed-paste framing is for.
+const ENTER_SETTLE: Duration = Duration::from_millis(40);
+
+/// Smallest body that is treated as a message rather than as keystrokes.
+/// Below it, framing would turn a single-key answer (`y`, `2`) into a
+/// paste a select prompt ignores — a worse bug than the one being fixed —
+/// and a body that short trips no paste heuristic anyway.
+const PASTE_FRAME_MIN_BYTES: usize = 16;
+
+/// What one `session.write` actually put on the PTY.
+pub(crate) struct WriteOutcome {
+    /// Bytes of the CALLER's payload accepted. Framing markers are the
+    /// transport's and are deliberately not counted: `acceptedBytes` has
+    /// always meant "what you asked for got through".
+    pub(crate) accepted: usize,
+    /// `keypress` when the Return went out in its own write after the body
+    /// was flushed, `raw` when the payload was written verbatim (no
+    /// `submitEnter`, so any Return inside it is just a byte in the burst).
+    pub(crate) enter_delivery: &'static str,
+    /// Whether the body was wrapped in bracketed-paste markers.
+    pub(crate) bracketed: bool,
+}
+
+/// Whether wrapping `body` in paste markers is both safe and useful.
+///
+/// Safe: the far end asked for bracketed paste, and the body carries no C0
+/// control byte that a paste frame would either swallow (a real keystroke
+/// like `ETX`) or be broken by (`ESC`). Sanitizing those bytes instead
+/// would corrupt what the caller asked to deliver, so a body containing
+/// them is written raw and keeps exactly today's meaning — including the
+/// documented interior carriage return, which stays a Return.
+///
+/// Useful: only a body big enough to read as a paste needs the frame.
+fn should_frame(body: &[u8], bracketed_mode: bool) -> bool {
+    if !bracketed_mode || body.is_empty() {
+        return false;
+    }
+    if body.len() < PASTE_FRAME_MIN_BYTES && !body.contains(&b'\n') {
+        return false;
+    }
+    !body
+        .iter()
+        .any(|byte| (*byte < 0x20 && *byte != b'\n' && *byte != b'\t') || *byte == 0x7f)
+}
+
+/// Delivers one `session.write`.
+///
+/// With `submit_enter`, `data` must end in the carriage return that
+/// submits it, and that Return is delivered the way a keyboard delivers
+/// one: after the body has been flushed, in a write of its own, and — when
+/// the far end has bracketed paste on — after the marker that closes the
+/// paste. That is issue #625: a paste-detecting TUI which is mid-turn is
+/// not blocked in `read()`, so a fused body-plus-Return burst arrives in
+/// ONE read, the heuristic calls the whole thing a paste, and the Return
+/// never submits. The message sits in the composer while the caller is
+/// told it was sent.
+///
+/// The whole sequence runs under a single acquisition of the writer lock,
+/// which is why it lives here and not in the CLI: two agents nudging the
+/// same session cannot interleave a body between another send's body and
+/// its Return.
+pub(crate) fn write_parts(
+    handle: &SessionHandle,
+    data: &[u8],
+    submit_enter: bool,
+) -> Result<WriteOutcome, RpcError> {
     if try_reap(handle).is_some() {
         return Err(error::unverifiable(
             "session already exited; cannot accept more input",
         ));
     }
+    let body = if submit_enter {
+        match data.split_last() {
+            Some((b'\r', body)) => body,
+            _ => {
+                return Err(error::invalid_argument(
+                    "submitEnter needs dataBase64 to end with the carriage return it submits",
+                ));
+            }
+        }
+    } else {
+        data
+    };
+    let frame = submit_enter && should_frame(body, handle.bracketed_paste_enabled());
     // Writer lock only: a long/blocking write must not serialize master
     // operations (`resize`) or native release behind it.
     let mut writer = handle.writer.lock().unwrap();
@@ -1217,11 +1340,40 @@ pub(crate) fn write(handle: &SessionHandle, data: &[u8]) -> Result<usize, RpcErr
             "session already exited; cannot accept more input",
         ));
     };
-    writer
-        .write_all(data)
-        .map_err(|e| error::io_error(format!("pty write failed: {e}")))?;
+    fn put(writer: &mut (impl Write + ?Sized), bytes: &[u8]) -> Result<(), RpcError> {
+        writer
+            .write_all(bytes)
+            .map_err(|e| error::io_error(format!("pty write failed: {e}")))
+    }
+    if !submit_enter {
+        put(writer, data)?;
+        let _ = writer.flush();
+        return Ok(WriteOutcome {
+            accepted: data.len(),
+            enter_delivery: "raw",
+            bracketed: false,
+        });
+    }
+    if !body.is_empty() {
+        if frame {
+            put(writer, BRACKETED_PASTE_START)?;
+            put(writer, body)?;
+            put(writer, BRACKETED_PASTE_END)?;
+        } else {
+            put(writer, body)?;
+        }
+        let _ = writer.flush();
+        // Still holding the writer lock: the gap is part of one send, not
+        // a window another send can type into.
+        std::thread::sleep(ENTER_SETTLE);
+    }
+    put(writer, b"\r")?;
     let _ = writer.flush();
-    Ok(data.len())
+    Ok(WriteOutcome {
+        accepted: data.len(),
+        enter_delivery: "keypress",
+        bracketed: frame,
+    })
 }
 
 /// Returns the session's truthful post-resize verdict rather than a
@@ -2165,7 +2317,7 @@ mod wait_signal_activity_tests {
         // Kernel echo of the user's own keystroke (the tty is in canonical
         // mode; `sleep` never reads it) neither clears the wait nor
         // manufactures working — it is not hook evidence.
-        crate::session::write(&handle, b"x").unwrap();
+        crate::session::write_parts(&handle, b"x", false).unwrap();
         assert_eq!(snapshot(&handle)["agentState"], "needs_input");
     }
 
@@ -2185,7 +2337,7 @@ mod wait_signal_activity_tests {
         assert_eq!(handle.hook_turn_fact(), agent_state::HookTurn::Ended);
         assert_eq!(snapshot(&handle)["agentState"], "idle");
         // The user's echo at the idle prompt is not hook evidence.
-        crate::session::write(&handle, b"x").unwrap();
+        crate::session::write_parts(&handle, b"x", false).unwrap();
         assert_eq!(snapshot(&handle)["agentState"], "idle");
         // A new turn reopens the hook lifecycle.
         handle.clear_hook_event();
