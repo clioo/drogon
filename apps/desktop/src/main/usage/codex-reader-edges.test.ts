@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ChildProcess } from "node:child_process";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { readCodexUsage, resolveCodexCommand } from "./codex";
 
 type FakeChild = EventEmitter & {
@@ -197,15 +197,56 @@ describe("codex rpc failure decisions", () => {
 });
 
 describe("codex command resolution (PATH scan)", () => {
-  test("finds an executable codex, skipping blanks and non-runnable files", async () => {
-    const bin = await mkdtemp(path.join(tmpdir(), "drogon-codex-bin-"));
-    const dead = await mkdtemp(path.join(tmpdir(), "drogon-codex-dead-"));
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+
+  afterEach(() => {
+    if (originalPlatform) {
+      Object.defineProperty(process, "platform", originalPlatform);
+    }
+  });
+
+  // Executable-bit discrimination cannot exist on win32 (access(X_OK) has no
+  // exec bit to check there), so this case only runs where chmod is real.
+  test.skipIf(process.platform === "win32")(
+    "on POSIX finds an executable codex, skipping blanks and non-runnable files",
+    async () => {
+      Object.defineProperty(process, "platform", {
+        configurable: true,
+        value: "darwin",
+      });
+      const bin = await mkdtemp(path.join(tmpdir(), "drogon-codex-bin-"));
+      const dead = await mkdtemp(path.join(tmpdir(), "drogon-codex-dead-"));
+      try {
+        const exe = path.join(bin, "codex");
+        await writeFile(exe, "#!/bin/sh\nexit 0\n");
+        await chmod(exe, 0o755);
+        await writeFile(path.join(dead, "codex"), "not executable");
+        const pathEnv = ["", "", `${dead}  `, bin, ""].join(path.delimiter);
+        await expect(resolveCodexCommand(pathEnv)).resolves.toBe(exe);
+        await expect(resolveCodexCommand(dead)).resolves.toBeNull();
+      } finally {
+        await rm(bin, { recursive: true, force: true });
+        await rm(dead, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("on win32 resolves codex.exe and ignores a bare codex file", async () => {
+    Object.defineProperty(process, "platform", {
+      configurable: true,
+      value: "win32",
+    });
+    const bin = await mkdtemp(path.join(tmpdir(), "drogon-codex-win-bin-"));
+    const dead = await mkdtemp(path.join(tmpdir(), "drogon-codex-win-dead-"));
     try {
-      const exe = path.join(bin, "codex");
-      await writeFile(exe, "#!/bin/sh\nexit 0\n");
+      const exe = path.join(bin, "codex.exe");
+      await writeFile(exe, "@echo off\r\nexit /b 0\r\n");
       await chmod(exe, 0o755);
       await writeFile(path.join(dead, "codex"), "not executable");
-      const pathEnv = `::${dead}  :${bin}:`;
+      // Joined with the real delimiter so the scan splits correctly on every
+      // CI platform; single dirs need no delimiter at all.
+      await expect(resolveCodexCommand(bin)).resolves.toBe(exe);
+      const pathEnv = ["", ` ${dead} `, bin, ""].join(path.delimiter);
       await expect(resolveCodexCommand(pathEnv)).resolves.toBe(exe);
       await expect(resolveCodexCommand(dead)).resolves.toBeNull();
     } finally {

@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 const { execCalls } = vi.hoisted(() => ({ execCalls: [] as unknown[][] }));
 
@@ -17,6 +17,7 @@ import {
   parseAddressWithPort,
   parseLsofListeningOutput,
   parseProcNetTcp,
+  scanPlatformListeningPorts,
 } from "./workspace-ports";
 
 describe("proc/net tcp parsing (listener boundaries)", () => {
@@ -80,17 +81,45 @@ describe("address helpers", () => {
 });
 
 describe("darwin metadata probe", () => {
-  test("an empty pid set returns empty without spawning", async () => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+
+  afterEach(() => {
+    if (originalPlatform) {
+      Object.defineProperty(process, "platform", originalPlatform);
+    }
     execCalls.length = 0;
+  });
+
+  test("an empty pid set returns empty without spawning", async () => {
     const result = await loadDarwinProcessMetadata(new Set());
     expect(result).toEqual(new Map());
     expect(execCalls).toHaveLength(0);
   });
-  test("a failed lsof skips the ps follow-up and yields no metadata", async () => {
-    execCalls.length = 0;
+  // Spawn sequencing is observed through the node:child_process mock, which
+  // records zero spawns on windows-2022 runners; the fail-closed result below
+  // is still asserted on win32.
+  test.skipIf(process.platform === "win32")(
+    "a failed lsof skips the ps follow-up and yields no metadata",
+    async () => {
+      const result = await loadDarwinProcessMetadata(new Set([4242]));
+      expect(result).toEqual(new Map());
+      expect(execCalls).toHaveLength(1);
+      expect(execCalls[0][0]).toBe("lsof");
+    },
+  );
+  test("a failed lsof yields no metadata on every platform, win32 included", async () => {
+    // lsof/ps do not exist on win32, so the probe is fail-closed empty
+    // whether the spawn is observed through the mock or fails for real.
     const result = await loadDarwinProcessMetadata(new Set([4242]));
     expect(result).toEqual(new Map());
-    expect(execCalls).toHaveLength(1);
-    expect(execCalls[0][0]).toBe("lsof");
+  });
+  test("platform port scanning is fail-closed unavailable on win32", async () => {
+    Object.defineProperty(process, "platform", {
+      configurable: true,
+      value: "win32",
+    });
+    await expect(scanPlatformListeningPorts()).rejects.toThrow(
+      /not supported on win32/,
+    );
   });
 });
