@@ -169,6 +169,14 @@ jobs:
       - run: pnpm --filter @drogon/desktop build
         env:
           NODE_OPTIONS: --max-old-space-size=6144
+      # Bare ubuntu-22.04 runners ship almost no fonts, so the renderer's
+      # font set never finishes loading and page.screenshot (which waits
+      # for fonts) times out at 15s. Install the desktop font set before
+      # the journeys run; the screenshot checks themselves stay strict.
+      - name: Install renderer fonts for screenshots
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-liberation fonts-noto-core
       # First the runner proves it discriminates (failing/hung journeys fail
       # it); then the journey itself runs directly; then the runner drives
       # the full manifest list. Each journey gets its own fresh
