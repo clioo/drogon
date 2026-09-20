@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useSortable } from "@dnd-kit/sortable";
-import { Pin, X } from "lucide-react";
+import { ChevronRight, Pin, X } from "lucide-react";
 import {
   ACTIVE_TAB_INDICATOR_CLASSES,
   getDropIndicatorClasses,
@@ -47,6 +47,8 @@ export function SortableTab({
   retry,
   isActive,
   isPinned,
+  lineage = null,
+  lineageDepth = 0,
   hasTabsToRight,
   hasTabsToLeft,
   tabCount,
@@ -73,6 +75,19 @@ export function SortableTab({
   retry: ReactNode;
   isActive: boolean;
   isPinned: boolean;
+  /**
+   * Issue #606: this tab leads a subagent group. The chevron folds the
+   * whole group into this tab — the same disclosure the worktree card
+   * puts on a lineage parent row — and `childCount` is every descendant
+   * it takes with it. Null on a tab that leads nothing.
+   */
+  lineage?: {
+    childCount: number;
+    expanded: boolean;
+    onToggle: () => void;
+  } | null;
+  /** Nesting depth under a leader; 0 for a leader or a lone session. */
+  lineageDepth?: number;
   hasTabsToRight: boolean;
   hasTabsToLeft: boolean;
   tabCount: number;
@@ -134,6 +149,38 @@ export function SortableTab({
 
   // While editing, drop drag listeners so typing can't start a drag.
   const dragListeners = isEditing ? undefined : listeners;
+  const isLineageChild = lineageDepth > 0;
+  const childAgentLabel = lineage?.childCount === 1 ? "agent" : "agents";
+  const disclosure = lineage ? (
+    <button
+      type="button"
+      className="mr-1 flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      data-tab-lineage-toggle="true"
+      aria-label={`${lineage.expanded ? "Hide" : "Show"} ${lineage.childCount} child ${childAgentLabel}`}
+      aria-expanded={lineage.expanded}
+      // Why: the strip root arms drag on pointerdown and switches tabs on
+      // click — the chevron has to keep both local, or folding a group
+      // would also select its leader by accident.
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        lineage.onToggle();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+      }}
+    >
+      <ChevronRight
+        className={
+          "size-3 transition-transform duration-150" +
+          (lineage.expanded ? " rotate-90" : "")
+        }
+        aria-hidden="true"
+      />
+    </button>
+  ) : null;
   const policy = buildTabMenuPolicy({
     kind: "session",
     isPinned,
@@ -156,13 +203,18 @@ export function SortableTab({
       <div
         ref={setNodeRef}
         {...dragListeners}
-        className={`group relative flex items-center h-full px-1.5 text-xs cursor-pointer select-none outline-none focus:outline-none focus-visible:outline-none ${getTabStripBorderClasses(hasTabsToRight)} ${getDropIndicatorClasses(dropIndicator ?? null)} ${getTabRootStateClasses(isActive)}`}
+        className={`group relative flex items-center h-full px-1.5 text-xs cursor-pointer select-none outline-none focus:outline-none focus-visible:outline-none ${getTabStripBorderClasses(hasTabsToRight)} ${getDropIndicatorClasses(dropIndicator ?? null)} ${getTabRootStateClasses(isActive)}${lineage ? " tab-lineage-parent" : ""}${isLineageChild ? " tab-lineage-child" : ""}`}
         role="tab"
         id={`session-tab-${id}`}
         data-tab-id={id}
         data-testid="sortable-tab"
         data-pinned={isPinned ? "true" : "false"}
         data-active={isActive ? "true" : "false"}
+        data-lineage-parent={lineage ? "true" : undefined}
+        data-lineage-child={isLineageChild ? "true" : undefined}
+        data-lineage-collapsed={
+          lineage && !lineage.expanded ? "true" : undefined
+        }
         aria-selected={isActive}
         aria-controls="active-session-panel"
         aria-label={ariaLabel}
@@ -216,6 +268,7 @@ export function SortableTab({
         {isActive && (
           <span className={ACTIVE_TAB_INDICATOR_CLASSES} aria-hidden />
         )}
+        {disclosure}
         {icon}
         {isPinned && !isEditing && (
           <Pin
@@ -265,6 +318,16 @@ export function SortableTab({
           />
         ) : (
           <span className={`${TAB_LABEL_WIDTH_CLASSES} mr-1`}>{title}</span>
+        )}
+        {lineage && !lineage.expanded && !isEditing && (
+          // The fork's collapsed "+N" count, on a tab instead of a row:
+          // the group is still there, folded into its leader.
+          <span
+            className="mr-1 shrink-0 text-[10px] tabular-nums text-muted-foreground"
+            data-lineage-child-count="true"
+          >
+            +{lineage.childCount}
+          </span>
         )}
         {!isEditing && retry}
         {!isEditing && !isPinned && (

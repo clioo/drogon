@@ -78,6 +78,13 @@ export type TabStripState = {
    * still rides `order` under [`MENTU_TAB_ID`].
    */
   mentu: boolean;
+  /**
+   * Leader session ids whose subagent group is folded shut in the strip
+   * (issue #606, additive). Durable per workspace so a fold survives a
+   * reload, a workspace switch and a strip rebuild instead of resetting;
+   * absent/empty on older envelopes.
+   */
+  collapsedLineage: string[];
 };
 
 export const EMPTY_TAB_STRIP_STATE: TabStripState = {
@@ -88,6 +95,7 @@ export const EMPTY_TAB_STRIP_STATE: TabStripState = {
   editors: [],
   browsers: [],
   mentu: false,
+  collapsedLineage: [],
 };
 
 /** Storage key pattern mirrors the right-sidebar keys (`drogon:<area>:<name>`); one envelope per workspace. */
@@ -307,6 +315,7 @@ function emptyTabStripState(): TabStripState {
     editors: [],
     browsers: [],
     mentu: false,
+    collapsedLineage: [],
   };
 }
 
@@ -336,6 +345,10 @@ export function parseTabStripState(raw: string | null | undefined): TabStripStat
     // Additive Mentu-as-tab key: only a literal `true` counts, so a
     // corrupt or partial envelope can never fabricate a tab.
     const mentu = state.mentu === true;
+    // Additive issue #606 key: folded subagent groups. Bounded by the same
+    // id sanitizer as the other lists, so a tampered envelope can only ever
+    // fold tabs, never mint or rename one.
+    const collapsedLineage = sanitizeIdList(state.collapsedLineage);
     return {
       order,
       pinned,
@@ -344,6 +357,7 @@ export function parseTabStripState(raw: string | null | undefined): TabStripStat
       editors,
       browsers,
       mentu,
+      collapsedLineage,
     };
   } catch {
     return emptyTabStripState();
