@@ -22,18 +22,18 @@ export type SessionLineageNode = {
   session: { id: string; parentSessionId?: string | null };
 };
 
-export type SessionLineageTree<Node extends SessionLineageNode> = {
-  rootRows: Node[];
-  childrenByParentSessionId: Map<string, Node[]>;
+export type SessionLineageTree<RowNode extends SessionLineageNode> = {
+  rootRows: RowNode[];
+  childrenByParentSessionId: Map<string, RowNode[]>;
   childSessionIds: Set<string>;
 };
 
 export type WorktreeAgentRowTree = SessionLineageTree<WorktreeAgentRow>;
 
 /** The recorded parent when it names another row in the same card. */
-export function resolveRowParentSessionId<Node extends SessionLineageNode>(
-  row: Node,
-  rowsBySessionId: ReadonlyMap<string, Node>,
+export function resolveRowParentSessionId<RowNode extends SessionLineageNode>(
+  row: RowNode,
+  rowsBySessionId: ReadonlyMap<string, RowNode>,
 ): string | undefined {
   const parentSessionId = row.session.parentSessionId ?? null;
   if (
@@ -54,16 +54,16 @@ export function resolveRowParentSessionId<Node extends SessionLineageNode>(
  * and rows unreachable from any root are normalized back to roots (their
  * children re-attach to the root list) — both fork-verbatim.
  */
-export function buildWorktreeAgentRowTree<Node extends SessionLineageNode>(
-  rows: readonly Node[],
-): SessionLineageTree<Node> {
-  const rowsBySessionId = new Map<string, Node>();
+export function buildWorktreeAgentRowTree<RowNode extends SessionLineageNode>(
+  rows: readonly RowNode[],
+): SessionLineageTree<RowNode> {
+  const rowsBySessionId = new Map<string, RowNode>();
   for (const row of rows) {
     if (!rowsBySessionId.has(row.session.id)) {
       rowsBySessionId.set(row.session.id, row);
     }
   }
-  const childrenByParentSessionId = new Map<string, Node[]>();
+  const childrenByParentSessionId = new Map<string, RowNode[]>();
   const childSessionIds = new Set<string>();
 
   for (const row of rows) {
@@ -93,7 +93,7 @@ export function buildWorktreeAgentRowTree<Node extends SessionLineageNode>(
 
   const reachableSessionIds = new Set<string>();
   const markReachable = (
-    row: Node,
+    row: RowNode,
     ancestorSessionIds: ReadonlySet<string> = new Set(),
   ): void => {
     if (

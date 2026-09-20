@@ -7,9 +7,11 @@ import { describe, expect, test } from "vitest";
 import type { Session } from "../../../../shared/session-contract";
 import { buildWorktreeAgentRows } from "./worktree-agent-rows";
 import {
+  buildSessionLineageTree,
   buildWorktreeAgentRowTree,
   resolveRowParentSessionId,
 } from "./worktree-agent-lineage";
+import lineageSource from "./worktree-agent-lineage.ts?raw";
 
 function session(id: string, parentSessionId?: string): Session {
   return {
@@ -120,5 +122,97 @@ describe("buildWorktreeAgentRowTree", () => {
     const rows = rowsOf(session("a"));
     const byId = new Map(rows.map((r) => [r.session.id, r]));
     expect(resolveRowParentSessionId(rows[0], byId)).toBeUndefined();
+  });
+});
+
+/* Issue #606: the tab strip needs this same tree, but its nodes are bare
+   `{ session }` projections, not worktree card rows. The tree was made
+   generic over what it actually reads rather than copied, so these pin that
+   the shape-first export IS this function and that a minimal node works. */
+describe("buildSessionLineageTree (the strip's reuse, #606)", () => {
+  const node = (id: string, parentSessionId: string | null) => ({
+    session: { id, parentSessionId },
+  });
+
+  test("is the very same function the worktree card folds with", () => {
+    expect(buildSessionLineageTree).toBe(buildWorktreeAgentRowTree);
+  });
+
+  test("groups bare {session} nodes, with no card row fields at all", () => {
+    const tree = buildSessionLineageTree([
+      node("lead", null),
+      node("kid", "lead"),
+      node("solo", null),
+    ]);
+    expect(tree.rootRows.map((row) => row.session.id)).toEqual(["lead", "solo"]);
+    expect(
+      tree.childrenByParentSessionId.get("lead")?.map((row) => row.session.id),
+    ).toEqual(["kid"]);
+    expect([...tree.childSessionIds]).toEqual(["kid"]);
+  });
+
+  test("hands the caller back its own node objects, not copies", () => {
+    // The strip maps results straight back to ids; a rebuilt node would
+    // silently drop whatever a caller hung off its own shape.
+    const kid = node("kid", "lead");
+    const tree = buildSessionLineageTree([node("lead", null), kid]);
+    expect(tree.childrenByParentSessionId.get("lead")?.[0]).toBe(kid);
+  });
+
+  test("keeps the dangling-parent rule for a leader that is not present", () => {
+    const tree = buildSessionLineageTree([node("orphan", "gone")]);
+    expect(tree.rootRows.map((row) => row.session.id)).toEqual(["orphan"]);
+    expect(tree.childSessionIds.size).toBe(0);
+  });
+
+  test("treats an absent parentSessionId field as no parent", () => {
+    const tree = buildSessionLineageTree([{ session: { id: "lone" } }]);
+    expect(tree.rootRows.map((row) => row.session.id)).toEqual(["lone"]);
+  });
+
+  test("resolveRowParentSessionId reads a bare node too", () => {
+    const lead = node("lead", null);
+    const kid = node("kid", "lead");
+    const byId = new Map([
+      ["lead", lead],
+      ["kid", kid],
+    ]);
+    expect(resolveRowParentSessionId(kid, byId)).toBe("lead");
+    expect(resolveRowParentSessionId(lead, byId)).toBeUndefined();
+    // A self-parent is not a parent.
+    const selfish = node("selfish", "selfish");
+    expect(
+      resolveRowParentSessionId(selfish, new Map([["selfish", selfish]])),
+    ).toBeUndefined();
+  });
+});
+
+describe("the lineage tree is declared generically, not card-shaped (#606)", () => {
+  // The strip reuses this tree with bare `{ session }` nodes. At runtime a
+  // generic and a card-typed signature are the same function, so only the
+  // source can pin that the reuse is type-legal rather than a cast.
+  test("both entry points are generic over what they actually read", () => {
+    expect(lineageSource).toContain("export type SessionLineageNode = {");
+    expect(lineageSource).toContain(
+      "session: { id: string; parentSessionId?: string | null };",
+    );
+    expect(lineageSource).toContain(
+      "export function resolveRowParentSessionId<RowNode extends SessionLineageNode>(",
+    );
+    expect(lineageSource).toContain(
+      "export function buildWorktreeAgentRowTree<RowNode extends SessionLineageNode>(",
+    );
+    // The card's own name still resolves to the same tree.
+    expect(lineageSource).toContain(
+      "export type WorktreeAgentRowTree = SessionLineageTree<WorktreeAgentRow>;",
+    );
+  });
+
+  test("the walk inside the tree is generic too, not pinned to card rows", () => {
+    // `markReachable` closes over the tree's own rows. Left annotated as a
+    // WorktreeAgentRow it compiles for the card and silently rejects the
+    // strip's bare nodes, so the reuse would only be a cast.
+    expect(lineageSource).toContain("    row: RowNode,");
+    expect(lineageSource).not.toContain("row: WorktreeAgentRow,");
   });
 });

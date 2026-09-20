@@ -186,8 +186,10 @@ describe("pinned groups (adversarial review of #613)", () => {
   // end up seated inside the pinned run.
   it("carries a pinned leader's whole group to the front", () => {
     const lineage = buildTabStripLineage({
-      order: ["lead", "solo", "kid"],
-      sessions: sessions(["lead", null], ["solo", null], ["kid", "lead"]),
+      // The leader starts BEHIND the unpinned session, so grouping alone
+      // cannot produce this order — only the pin partition can.
+      order: ["solo", "lead", "kid"],
+      sessions: sessions(["solo", null], ["lead", null], ["kid", "lead"]),
       pinnedIds: ["lead"],
     });
     expect(lineage.order).toEqual(["lead", "kid", "solo"]);
@@ -333,6 +335,28 @@ describe("foldAwareBulkCloseTargets (adversarial review of #613)", () => {
         mode: "to-right",
       }),
     ).toEqual(["kid-1", "kid-2", "solo"]);
+  });
+
+  it("refuses to close a pinned subagent that a fold hid", () => {
+    // The pin is a promise; folding the group must not quietly void it.
+    const foldedWithPinnedChild = buildTabStripLineage({
+      order: ["lead", "kid-1", "kid-2", "solo"],
+      sessions: sessions(
+        ["lead", null],
+        ["kid-1", "lead"],
+        ["kid-2", "lead"],
+        ["solo", null],
+      ),
+      collapsedLeaderIds: ["lead"],
+    });
+    expect(
+      foldAwareBulkCloseTargets({
+        lineage: foldedWithPinnedChild,
+        pinnedIds: ["kid-1"],
+        anchorId: "solo",
+        mode: "others",
+      }),
+    ).toEqual(["lead", "kid-2"]);
   });
 
   it("still refuses to close a pinned tab", () => {

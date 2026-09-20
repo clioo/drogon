@@ -271,9 +271,10 @@ export function foldAwareBulkCloseTargets({
   anchorId: string;
   mode: "others" | "to-right" | "to-left";
 }): string[] {
+  const pinned = new Set(pinnedIds);
   const visible = bulkCloseTargets(
     lineage.visibleOrder,
-    pinnedIds,
+    pinned,
     anchorId,
     mode,
   );
@@ -281,8 +282,14 @@ export function foldAwareBulkCloseTargets({
     id,
     // Only the tabs THIS leader is hiding: a nested fold under a visible
     // leader is carried by that leader's own entry in `visible`.
+    //
+    // Why the pin check repeats here: bulkCloseTargets can only filter pins
+    // it can see, and a folded tab is not in `visibleOrder`. Without this, a
+    // subagent the user pinned and then folded away would be closed by a
+    // bulk action — the one thing a pin is a promise against.
     ...(lineage.descendantsByLeaderId.get(id) ?? []).filter(
-      (descendantId) => lineage.hiddenBy.get(descendantId) === id,
+      (descendantId) =>
+        lineage.hiddenBy.get(descendantId) === id && !pinned.has(descendantId),
     ),
   ]);
 }

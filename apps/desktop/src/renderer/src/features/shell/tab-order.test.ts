@@ -15,6 +15,7 @@ import {
   tabStripStorageKey,
   togglePinnedOrder,
 } from "./tab-order";
+import tabOrderSource from "./tab-order.ts?raw";
 
 function memStorage(initial: Record<string, string> = {}): Storage {
   const map = new Map(Object.entries(initial));
@@ -255,6 +256,32 @@ describe("folded subagent groups (#606)", () => {
     expect(loadTabStripState(storage, "ws-2").collapsedLineage).toEqual([]);
   });
 
+  it("ships the folded-leader list on the empty state itself", () => {
+    // The default has to carry the key: App spreads EMPTY_TAB_STRIP_STATE and
+    // reads `.collapsedLineage` straight back, so a missing default makes
+    // every fold read `undefined` instead of "nothing folded".
+    expect(EMPTY_TAB_STRIP_STATE.collapsedLineage).toEqual([]);
+    const fields: Array<keyof typeof EMPTY_TAB_STRIP_STATE> = [
+      "order",
+      "pinned",
+      "titles",
+      "splits",
+      "editors",
+      "browsers",
+      "mentu",
+      "collapsedLineage",
+    ];
+    expect(Object.keys(EMPTY_TAB_STRIP_STATE).sort()).toEqual(
+      [...fields].sort(),
+    );
+    // A fresh parse is a fresh array, never the shared default.
+    const parsed = parseTabStripState("not json");
+    expect(parsed.collapsedLineage).toEqual([]);
+    expect(parsed.collapsedLineage).not.toBe(EMPTY_TAB_STRIP_STATE.collapsedLineage);
+    parsed.collapsedLineage.push("mutated");
+    expect(EMPTY_TAB_STRIP_STATE.collapsedLineage).toEqual([]);
+  });
+
   it("hydrates pre-#606 envelopes to nothing folded", () => {
     expect(
       parseTabStripState(
@@ -456,5 +483,17 @@ describe("Mentu tab membership", () => {
     expect(
       bulkCloseTargets(order, [MENTU_TAB_ID], "a", "others"),
     ).toEqual(["b"]);
+  });
+});
+
+describe("TabStripState declares the folded-leader key (#606)", () => {
+  // Erased at runtime, so only the source can pin it — and it is the whole
+  // reason a fold survives a reload rather than living in a render.
+  it("carries collapsedLineage as a persisted string list", () => {
+    const stateType = tabOrderSource.slice(
+      tabOrderSource.indexOf("export type TabStripState = {"),
+      tabOrderSource.indexOf("export const EMPTY_TAB_STRIP_STATE"),
+    );
+    expect(stateType).toContain("collapsedLineage: string[];");
   });
 });

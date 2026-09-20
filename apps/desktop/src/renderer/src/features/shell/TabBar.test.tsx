@@ -724,7 +724,10 @@ describe("TabBar subagent groups (#606)", () => {
     });
     // Pinning is a group decision: a pinned subagent rides with its leader
     // instead of being torn to the front on its own, which would leave the
-    // group split across the pinned boundary.
+    // group split across the pinned boundary. This pins the rendered
+    // outcome; grouping is what produces it here (the strip pre-partitions
+    // pins before the lineage sees them), so the pin-partition guards live
+    // in tab-lineage.test.ts where the input is not pre-partitioned.
     expect(tabIds()).toEqual(["lead", "kid-1", "kid-2", "solo"]);
     expect(
       screen.getAllByRole("tab")[1].getAttribute("data-pinned"),
@@ -741,5 +744,36 @@ describe("TabBar subagent groups (#606)", () => {
       screen.queryByRole("button", { name: /child agents?$/ }),
     ).toBeNull();
     expect(tabIds()).toEqual(["lead", "kid-1", "kid-2", "solo"]);
+  });
+});
+
+// Two parts of the strip's group surface are real but not observable from a
+// rendered tree: the props TabBar declares (types are erased before a test
+// ever runs) and which ids it hands dnd-kit to sort. Both are pinned by
+// reading the source, like App.subagent-tab-groups.test.ts does for App.
+// `?raw` and not node:fs: this suite runs in jsdom, where import.meta.url is
+// not a file URL.
+import tabBarSource from "./TabBar.tsx?raw";
+
+describe("TabBar declares its subagent-group surface (#606)", () => {
+  it("accepts the folded leaders and a way to fold one", () => {
+    // Optional on purpose: a caller that passes neither gets the old flat
+    // strip, which is what keeps the chevron out of tests that never opted in.
+    expect(tabBarSource).toContain("collapsedLineageIds?: readonly string[]");
+    expect(tabBarSource).toContain(
+      "onToggleLineage?: (sessionId: string) => void",
+    );
+    expect(tabBarSource).toContain("collapsedLineageIds = []");
+  });
+
+  it("only ever asks dnd-kit to sort the tabs that are on screen", () => {
+    // Handing it the folded ids too would let a drag target a tab that is
+    // not rendered, and the drop indicator would land on nothing.
+    const context = tabBarSource.slice(
+      tabBarSource.indexOf("<SortableContext"),
+      tabBarSource.indexOf(">", tabBarSource.indexOf("<SortableContext")) + 1,
+    );
+    expect(context).toContain("items={lineage.visibleOrder}");
+    expect(context).not.toContain("items={ordered}");
   });
 });
