@@ -1217,10 +1217,16 @@ fn editing_the_bot_identity_refreshes_the_files_the_next_session_reads() {
 fn reopened_bot_session_resumes_the_harness_conversation() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _saved_path = SavedEnv::capture("PATH");
+    let _saved_pi_dir = SavedEnv::capture("PI_CODING_AGENT_DIR");
     let fx = Fixture::new();
     let bin = tempfile::tempdir().unwrap();
     write_pi_fixture_staying_alive(bin.path());
     prepend_fixture_bin(bin.path());
+    // A private Pi agent root: the daemon inspects Pi's own session store
+    // before it asks Pi to continue, and a test must never read or write the
+    // real `~/.pi/agent`.
+    let pi_root = tempfile::tempdir().unwrap();
+    unsafe { std::env::set_var("PI_CODING_AGENT_DIR", pi_root.path()) };
 
     // First, a fresh session: no `--continue`, no prior conversation yet.
     let first = ok(
@@ -1250,6 +1256,28 @@ fn reopened_bot_session_resumes_the_harness_conversation() {
         !first_output.contains("PRIOR:"),
         "the first session has no prior conversation: {first_output:?}"
     );
+    // Plant the session file Pi itself would have left for this home: the
+    // daemon only passes `--continue` when Pi's own store holds one for the
+    // directory it is about to run in (an empty store degrades to a stated
+    // fresh start -- see `a_pi_reopen_with_an_empty_store_degrades_to_a_normal_start`).
+    let home = first_output
+        .lines()
+        .find_map(|line| line.strip_prefix("CWD="))
+        .expect("the fixture prints its cwd")
+        .trim()
+        .to_string();
+    let store = pi_root
+        .path()
+        .join("sessions")
+        .join(drogon_harness::pi_project_dir_name(std::path::Path::new(
+            &home,
+        )));
+    std::fs::create_dir_all(&store).unwrap();
+    std::fs::write(
+        store.join("2026-09-20T22-36-05-857Z_01a0c0f6-5b60-72e7-8dc5-a9ed89ce5409.jsonl"),
+        "{}\n",
+    )
+    .unwrap();
     ok(
         &fx.engine,
         "session.stop",
@@ -1292,6 +1320,64 @@ fn reopened_bot_session_resumes_the_harness_conversation() {
         "session.stop",
         "req-stop-2",
         json!({"sessionId": second_id, "incarnation": second_inc}),
+    );
+}
+
+/// The Pi half of the resume-degrade safety: `pi --continue` is
+/// `SessionManager.continueRecent(cwd)`, and with nothing to continue Pi does
+/// NOT refuse -- it opens a brand new session, silently, while the Bot record
+/// claims a reopen. Pi's store is therefore inspected like Claude's, and an
+/// empty one degrades to a normal start the receipt can state honestly.
+#[test]
+fn a_pi_reopen_with_an_empty_store_degrades_to_a_normal_start() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _saved_path = SavedEnv::capture("PATH");
+    let _saved_pi_dir = SavedEnv::capture("PI_CODING_AGENT_DIR");
+    let fx = Fixture::new();
+    let bin = tempfile::tempdir().unwrap();
+    write_pi_fixture_staying_alive(bin.path());
+    prepend_fixture_bin(bin.path());
+    // An empty Pi agent root: no `sessions/<home>` entry for the Bot home.
+    let pi_root = tempfile::tempdir().unwrap();
+    unsafe { std::env::set_var("PI_CODING_AGENT_DIR", pi_root.path()) };
+
+    let mut params = fx.open_session_params();
+    params["resume"] = json!(true);
+    let opened = ok(&fx.engine, "bot.run", "req-open-pi-degrade", params);
+    assert_eq!(opened["outcome"], "dispatched", "{opened:?}");
+    let session_id = opened["session"]["sessionId"].as_str().unwrap().to_string();
+    let incarnation = opened["session"]["incarnation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (output, verdict) = read_until(
+        &fx.engine,
+        &session_id,
+        &incarnation,
+        |text| text.contains("CHILD_SESSION="),
+        Duration::from_secs(20),
+    );
+    assert_eq!(
+        verdict, "live",
+        "the session must boot fresh instead of Pi inventing a new \
+         conversation under a resume: {output:?}"
+    );
+    assert!(
+        output.contains("CWD="),
+        "the harness must have started: {output:?}"
+    );
+    assert!(
+        !output.contains("ARG:--continue") && !output.contains("ARG:--session"),
+        "with nothing in Pi's store the resume must be dropped, never handed \
+         to a CLI that would open a new session instead: {output:?}"
+    );
+
+    ok(
+        &fx.engine,
+        "session.stop",
+        "req-stop-pi-degrade",
+        json!({"sessionId": session_id, "incarnation": incarnation}),
     );
 }
 

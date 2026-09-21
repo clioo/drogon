@@ -30,10 +30,13 @@ import { startExitObserver } from "./live-child-crash-fixture.mjs";
 // `fileURLToPath`, not `URL.pathname`: a checkout under a path with a space
 // (Drogon's own `~/Library/Application Support/Drogon/workspaces/...`) yields
 // a percent-encoded pathname that python3 cannot open, and the observer then
-// exits 2 before it ever registers.
-const OBSERVER_SCRIPT = fileURLToPath(
-  new URL("./live-child-exit-observer.py", import.meta.url),
-);
+// exits 2 before it ever registers. Exported so the pin test can prove the
+// resolution without a packaged app.
+export function observerScriptPath(moduleUrl) {
+  return fileURLToPath(new URL("./live-child-exit-observer.py", moduleUrl));
+}
+
+const OBSERVER_SCRIPT = observerScriptPath(import.meta.url);
 
 function sha256File(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
