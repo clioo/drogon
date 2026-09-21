@@ -271,9 +271,9 @@ mod tests {
     fn pi_project_dir_name_matches_the_installed_layout() {
         assert_eq!(
             pi_project_dir_name(Path::new(
-                "/Users/carlos/Library/Application Support/Drogon/workspaces/Drogon/issue-619-2"
+                "/Users/example/Library/Application Support/Drogon/workspaces/Drogon/issue-619-2"
             )),
-            "--Users-carlos-Library-Application Support-Drogon-workspaces-Drogon-issue-619-2--"
+            "--Users-example-Library-Application Support-Drogon-workspaces-Drogon-issue-619-2--"
         );
         assert_eq!(pi_project_dir_name(Path::new("/tmp/x")), "--tmp-x--");
     }
