@@ -1,24 +1,32 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
    src/renderer/src/components/sidebar/worktree-card-compact-agent-row.tsx
-   (CompactAgentRow: state dot, harness icon, primary/secondary text,
-   relative time, focused-pane highlight, activation click with drag and
-   key propagation guards; issue #359 adds the fork's child-agent
-   disclosure from the same file: the chevron button with its
-   Show/Hide-N-child-agents label, the +N count while collapsed, the
-   reserved disclosure gutter on leaf root rows, and the
-   worktree-agent-lineage-parent/child-row classes).
+   (CompactAgentRow: identity glyph, primary/secondary text, relative time,
+   focused-pane highlight, activation click with drag and key propagation
+   guards; issue #359 adds the fork's child-agent disclosure from the same
+   file: the chevron button with its Show/Hide-N-child-agents label, the +N
+   count while collapsed, the reserved disclosure gutter on leaf root rows,
+   and the worktree-agent-lineage-parent/child-row classes).
+   Owner's sidebar design (2026-09-21) reorders the row to read like the
+   owner's guide: `[chevron] [harness glyph] [name] [MAIN] … [state dot +
+   label] [age]`. The state text is always present — the owner's decision is
+   that a main row's state matters as much as a subagent's — and it is the
+   freshness report ("No update in 34m") while the session is not reporting,
+   so the row never states a condition the daemon did not report. The MAIN
+   badge marks a root row that actually owns subagents (the nesting's parent
+   end), never a lone session.
    Adapter: Orca rows read hook-reported agent entries (model chip, tool
-   preview, last assistant message, cache timer, subagent disclosure);
-   this repo's contract carries none of those, so the row shows the tab
-   title, the freshness/harness secondary from worktree-agent-rows.ts and
-   the compact age. The fork's div becomes a button for leaf rows (valid
-   nesting beside the card's select button, free keyboard support); a row
-   with children keeps the fork's div + nested disclosure-button shape —
-   interactive content may not descend from a button, and the source row
-   is exactly this div. The harness icon reuses this repo's
-   HarnessMenuIcon and plain shells get the shell glyph. Not ported:
-   model chip, cache timer, send-target mode — no backing data in the
-   session contract. */
+   preview, last assistant message, cache timer, subagent disclosure); this
+   repo's contract carries none of those, so the row shows the tab title
+   (which reads the resolved harness, issue #622), the freshness/harness
+   secondary from worktree-agent-rows.ts and the compact age. The fork's
+   div becomes a button for leaf rows (valid nesting beside the card's
+   select button, free keyboard support); a row with children keeps the
+   fork's div + nested disclosure-button shape — interactive content may
+   not descend from a button, and the source row is exactly this div. Not
+   ported: model chip, cache timer, send-target mode — no backing data in
+   the session contract. The visible texts are aria-hidden on purpose: the
+   row's own aria-label (and each state glyph's label) is the announcement,
+   so a screen reader never hears the state twice. */
 import { memo, useCallback } from "react";
 import { ChevronRight, Terminal } from "lucide-react";
 import { AgentStateIcon } from "./AgentStateIcon";
@@ -55,6 +63,8 @@ export type WorktreeAgentRowProps = {
   onToggleChildren?: () => void;
   reserveDisclosureGutter?: boolean;
   isChildRow?: boolean;
+  /** Owner's design: the badge a root row that owns subagents carries. */
+  isMainRow?: boolean;
 };
 
 /**
@@ -77,9 +87,11 @@ export function areWorktreeAgentRowPropsEqual(
     previous.childrenExpanded === next.childrenExpanded &&
     previous.reserveDisclosureGutter === next.reserveDisclosureGutter &&
     previous.isChildRow === next.isChildRow &&
+    previous.isMainRow === next.isMainRow &&
     previous.row.state === next.row.state &&
     previous.row.title === next.row.title &&
     previous.row.secondary === next.row.secondary &&
+    previous.row.stateLabel === next.row.stateLabel &&
     previous.row.relativeTime === next.row.relativeTime &&
     previous.row.focused === next.row.focused &&
     previous.row.session.id === next.row.session.id &&
@@ -102,6 +114,7 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
   onToggleChildren,
   reserveDisclosureGutter = false,
   isChildRow = false,
+  isMainRow = false,
 }: WorktreeAgentRowProps) {
   const handleActivate = useCallback(
     (event: React.MouseEvent) => {
@@ -123,12 +136,21 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
     [onToggleChildren],
   );
   const primary = row.title || agentStateLabel(row.state);
-  const rowTitle = row.secondary ? `${primary} - ${row.secondary}` : primary;
+  // Why: while a session is not reporting, its secondary slot repeats the
+  // freshness report the trailing state text already carries — one honest
+  // line, not two.
+  const secondary =
+    row.state === "unknown" && row.secondary === row.stateLabel
+      ? ""
+      : row.secondary;
+  const rowTitle = [primary, secondary, row.stateLabel]
+    .filter(Boolean)
+    .join(" - ");
   const focused = row.focused;
   const childAgentLabel = childCount === 1 ? "agent" : "agents";
   const lineageClasses =
     // Why: the fork's lineage chrome — the parent reads as a tree node,
-    // the child as a member of the boxed group below it.
+    // the child as a member of the group below it.
     (hasChildDisclosure ? " worktree-agent-lineage-parent-row" : "") +
     (isChildRow ? " worktree-agent-lineage-child-row" : "");
 
@@ -161,27 +183,20 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
   // nothing is resolved.
   const resolvedHarnessId = resolveRowHarnessId(row.session);
   const identity = (
-    <>
-      {/* The source's inline rows pass stateDotSize="sm" (a 10px box) so
-          the dot isn't mistaken for the adjacent identity glyph; the glyph
-          set is the reference's AgentStateDot (`variant="row"`) — a filled
-          emerald check-circle for a concluded turn. */}
-      <AgentStateIcon state={row.state} size={10} variant="row" />
-      <span
-        className="inline-flex shrink-0"
-        title={formatRowHarnessLabel(resolvedHarnessId)}
-      >
-        {resolvedHarnessId ? (
-          <HarnessMenuIcon
-            harnessId={resolvedHarnessId}
-            displayName={formatRowHarnessLabel(resolvedHarnessId)}
-            size={13}
-          />
-        ) : (
-          <Terminal size={13} className="shrink-0" aria-hidden="true" />
-        )}
-      </span>
-    </>
+    <span
+      className="shell-worktree-agent-glyph inline-flex shrink-0"
+      title={formatRowHarnessLabel(resolvedHarnessId)}
+    >
+      {resolvedHarnessId ? (
+        <HarnessMenuIcon
+          harnessId={resolvedHarnessId}
+          displayName={formatRowHarnessLabel(resolvedHarnessId)}
+          size={13}
+        />
+      ) : (
+        <Terminal size={13} className="shrink-0" aria-hidden="true" />
+      )}
+    </span>
   );
 
   const text = (
@@ -191,12 +206,12 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
       <span className={focused ? "text-foreground" : "text-muted-foreground/90"}>
         {primary}
       </span>
-      {row.secondary && (
+      {secondary && (
         <span
           className={focused ? "text-foreground/70" : "text-muted-foreground/65"}
         >
           {" "}
-          - {row.secondary}
+          - {secondary}
         </span>
       )}
     </span>
@@ -204,11 +219,32 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
 
   const tail = (
     <>
+      {/* Why: the badge sits OUTSIDE the truncating name column — a long
+          title truncates, the fact that this row is the tree's main agent
+          must not disappear with it. */}
+      {isMainRow && (
+        <span className="shell-worktree-agent-main-badge" aria-hidden="true">
+          MAIN
+        </span>
+      )}
       {hasChildDisclosure && !childrenExpanded && (
         <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
           +{childCount}
         </span>
       )}
+      {/* Owner's design: every row states what its session is doing. The
+          glyph carries the state's accessible label (the same one the tab
+          badge uses); the text beside it is aria-hidden, so the state is
+          announced once. */}
+      <span
+        className="shell-worktree-agent-state shrink-0"
+        data-worktree-agent-state={row.state}
+      >
+        <AgentStateIcon state={row.state} size={10} variant="row" />
+        <span className="shell-worktree-agent-state-label" aria-hidden="true">
+          {row.stateLabel}
+        </span>
+      </span>
       <AgentCacheTimer session={row.session} />
       {row.relativeTime && (
         <span
@@ -229,7 +265,7 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
     // Why: the fork's row with children is a div carrying a real nested
     // disclosure button; a <button> may not contain interactive content,
     // so the parent-row shape follows the source verbatim (leaf rows
-    // above keep this repo's button adapter).
+    // below keep this repo's button adapter).
     return (
       <div
         className={

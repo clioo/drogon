@@ -1621,31 +1621,60 @@ footer[data-testid="status-bar"] {
   gap: 2px;
   margin-top: 4px;
 }
-/* Status lane (the fork's WorktreeCardStatusSlot column, items-start
-   pt-[2px] centered): the activity glyph and the working agent's avatar
-   live left of the content, its tooltip names the state. */
+/* Status lane (the fork's WorktreeCardStatusSlot column, owner's
+   vocabulary 2026-09-21): the workspace STATUS ring first (same icon and
+   colour the status carries on the board), then the one live activity glyph
+   that must never hide behind text — the working spinner, or the amber bell
+   while an agent waits for the user. */
 .shell-worktree-card-status-lane {
   display: flex;
   flex-shrink: 0;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 4px;
   padding-top: 2px;
+  min-height: 22px;
 }
-/* The agent avatar beside the status dot: the fork's summary-cluster chip
-   (worktree-card-compact-agents.tsx SummaryIdentityIcon — a 16px circle on
-   the sidebar surface with the harness glyph inside). */
-.shell-worktree-card-agent-avatar {
+/* The status ring: the glyph is sized by its own svg, the box only holds it
+   on the ring's optical centre so a 20px ring lines up with the 13px
+   activity glyph beside it. */
+.shell-worktree-card-status-ring {
   display: inline-flex;
-  width: 16px;
-  height: 16px;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  border: 1px solid
-    color-mix(in srgb, var(--worktree-sidebar-border) 70%, transparent);
-  border-radius: 999px;
-  background: var(--worktree-sidebar);
+  line-height: 0;
+}
+/* The card's fold chevron (owner's design): the leading affordance that
+   folds the whole agent list. Silence the card's own background/selection
+   so the 16px hit target reads as a control, not as card chrome. */
+.shell-worktree-card-fold {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-self: flex-start;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  border-radius: calc(var(--radius) * 0.4);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.shell-worktree-card-fold:hover:not(:disabled) {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.dark .shell-worktree-card-fold:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--worktree-sidebar-accent) 55%, transparent);
+}
+.shell-worktree-card-fold:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ring) 60%, transparent);
+}
+.shell-worktree-card-fold:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 /* Right-side card affordances (fork MetaIconBadge shell): terminal marker
    and branch marker, ahead of the kebab. */
@@ -1667,6 +1696,19 @@ footer[data-testid="status-bar"] {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+/* The activity sentence (owner's design): one uppercase line under the card
+   title, the reference's DetailHeader recipe (11px semibold, 0.05em
+   tracking, uppercase) so it reads as the product's own metadata voice. */
+.shell-worktree-card-sentence {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
 }
 .shell-worktree-card-name {
   flex: 1;
@@ -1746,6 +1788,46 @@ footer[data-testid="status-bar"] {
 .worktree-agent-row-hover:disabled {
   cursor: default;
 }
+/* Owner's design (2026-09-21): the row's trailing state — the shared dot
+   glyph (which carries the state's accessible label) plus the text that says
+   it in words. Present on every row, main rows included. */
+.shell-worktree-agent-state {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+.shell-worktree-agent-state-label {
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+/* A root row that owns subagents carries the badge; the guide's MAIN pill is
+   a quiet outline, never a solid chip, so it sits beside the row's name
+   without competing with the status ring above it. */
+.shell-worktree-agent-main-badge {
+  display: inline-block;
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 20%, transparent);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  vertical-align: middle;
+  color: var(--muted-foreground);
+}
+.dark .shell-worktree-agent-main-badge {
+  border-color: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 24%,
+    transparent
+  );
+}
 /* Subagent nesting box (issue #359, ported from the fork's
    [data-compact-agent-list] overrides in the reference main.css): children
    render in an indented group under the parent row; the parent row carries
@@ -1758,8 +1840,62 @@ footer[data-testid="status-bar"] {
   box-shadow: none;
 }
 
-[data-compact-agent-list="true"] .worktree-agent-lineage-child-row::before {
-  content: none;
+/* The lineage's connector lines (owner's design 2026-09-21): the tree draws
+   itself the way the guide does — a vertical guide along the left of the
+   group, and an elbow into every node. Each treeitem owns its own vertical
+   segment so the last one stops at its elbow (a real tree end) instead of
+   running past the final row. The line token is shared with the sidebar
+   stripes so it reads at the same weight in both themes. */
+[data-compact-agent-list="true"] {
+  --worktree-agent-tree-line: color-mix(
+    in srgb,
+    var(--foreground) 16%,
+    transparent
+  );
+}
+
+.dark [data-compact-agent-list="true"] {
+  --worktree-agent-tree-line: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 14%,
+    var(--worktree-sidebar-border)
+  );
+}
+
+[data-compact-agent-list="true"] > [role="treeitem"],
+.worktree-agent-lineage-children > [role="treeitem"] {
+  position: relative;
+}
+
+[data-compact-agent-list="true"] > [role="treeitem"]::before,
+.worktree-agent-lineage-children > [role="treeitem"]::before {
+  content: "";
+  position: absolute;
+  left: -0.55rem;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--worktree-agent-tree-line);
+  pointer-events: none;
+}
+
+[data-compact-agent-list="true"] > [role="treeitem"]::after,
+.worktree-agent-lineage-children > [role="treeitem"]::after {
+  content: "";
+  position: absolute;
+  left: -0.55rem;
+  top: 50%;
+  width: 0.4rem;
+  height: 1px;
+  background: var(--worktree-agent-tree-line);
+  pointer-events: none;
+}
+
+/* The last node's guide stops at its own elbow: the tree ends there. */
+[data-compact-agent-list="true"] > [role="treeitem"]:last-child::before,
+.worktree-agent-lineage-children
+  > [role="treeitem"]:last-child::before {
+  bottom: 50%;
 }
 
 [data-compact-agent-list="true"] .worktree-agent-lineage-parent-row:hover:not(:disabled),
@@ -1773,17 +1909,14 @@ footer[data-testid="status-bar"] {
 }
 
 .worktree-agent-lineage-children {
-  margin-left: 0.75rem;
+  /* One level of indent per depth: wide enough to read the elbow, tight
+     enough that a depth-3 row's name still has room beside its state. */
+  margin-left: 0.5rem;
   padding-left: 0.25rem;
-  border-left: 1px solid color-mix(in srgb, var(--foreground) 16%, transparent);
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding-top: 2px;
-}
-
-.dark .worktree-agent-lineage-children {
-  border-left-color: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .dark [data-compact-agent-list="true"] .worktree-agent-lineage-parent-row,
@@ -1798,14 +1931,6 @@ footer[data-testid="status-bar"] {
 
 .dark [data-compact-agent-list="true"] .worktree-agent-row-hover[data-focused-agent-pane="true"] {
   background: color-mix(in srgb, var(--accent) 70%, transparent);
-}
-
-[data-compact-agent-list="true"] .worktree-agent-lineage-children {
-  border-left-color: color-mix(in srgb, var(--foreground) 16%, transparent);
-}
-
-.dark [data-compact-agent-list="true"] .worktree-agent-lineage-children {
-  border-left-color: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 /* Issue #606: the same lineage, one row wide. The sidebar boxes children

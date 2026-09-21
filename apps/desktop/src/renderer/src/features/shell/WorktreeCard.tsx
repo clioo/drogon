@@ -13,12 +13,11 @@
    source does not render (base-ref line, note line, "No sessions yet")
    are folded into the accessible label instead of drawn. */
 import { Fragment, useState, useSyncExternalStore } from "react";
-import { MoreHorizontal, StickyNote } from "lucide-react";
+import { ChevronRight, MoreHorizontal, StickyNote } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { GraphBridge } from "../../../../shared/graph-contract";
 import type { Session, Worktree } from "../../../../shared/session-contract";
 import { AgentStateIcon } from "./AgentStateIcon";
-import { HarnessMenuIcon } from "./TabCreateMenuIcons";
 import { WorktreeCardAffordances } from "./WorktreeCardAffordances";
 import { worktreeCardBranchLabel } from "./worktree-card-branch-identity";
 import {
@@ -33,12 +32,17 @@ import type { WorktreeBulkMenuTarget } from "./worktree-bulk-actions";
 import { WorktreeTitleInlineRename } from "./WorktreeTitleInlineRename";
 import { WorktreeCardMetaBadges } from "./WorktreeCardMetaBadges";
 import { WorktreeCardLinkedMetadata } from "./WorktreeCardLinkedMetadata";
+import { WorktreeCardPrStateIcon } from "./WorktreeCardPrStateIcon";
+import { WorkspaceStatusRing } from "./WorkspaceStatusRing";
 import { WorktreeWorkflow } from "./WorktreeWorkflow";
 import {
-  cardIdentitySession,
   formatWorktreeCardSummaryLine,
   summarizeCardAgentStates,
 } from "./worktree-card-agent-summary";
+import {
+  worktreeActivityGlyph,
+  worktreeActivitySentence,
+} from "./worktree-card-activity";
 import { useWorktreeAgentExpansionState } from "./worktree-card-agents-expansion-state";
 import {
   CompactAgentExpansion,
@@ -46,11 +50,7 @@ import {
 } from "./worktree-card-compact-agents";
 import type { WorktreeCardPrDisplay } from "./worktree-card-pr-display";
 import { useWorktreeGitStatus } from "./use-worktree-git-status";
-import {
-  buildWorktreeAgentRows,
-  formatRowHarnessLabel,
-  resolveRowHarnessId,
-} from "./worktree-agent-rows";
+import { buildWorktreeAgentRows, formatRowHarnessLabel, resolveRowHarnessId } from "./worktree-agent-rows";
 import type { WorktreeAgentRow as WorktreeAgentRowData } from "./worktree-agent-rows";
 import { WorktreeAgentRow } from "./WorktreeAgentRow";
 import { useGeneratedAgentTitles } from "../settings/agent-generated-titles";
@@ -59,6 +59,23 @@ import type { TabStripState } from "./tab-order";
 import type { CardProperty } from "./workspace-options-state";
 import type { WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
 import type { WorkspaceStatusDefinition } from "../../../../shared/persistence-contracts/worktree-types";
+
+/**
+ * How many rows a card may show before the "N agents" pill takes over.
+ * Owner's design (2026-09-21): the tree is what the card is for, so the
+ * pill is no longer the default for a two-agent card — it only keeps a
+ * genuinely long fan-out from eating the sidebar, and never when the user
+ * chose the "full" display mode.
+ */
+export const COMPACT_AGENT_PILL_MIN_ROWS = 6;
+
+/**
+ * Why: the card surface arms pointer-drag reorder and selects on click —
+ * the fold chevron must keep both local, like the nested rows do.
+ */
+function stopCardDragPropagation(event: React.SyntheticEvent): void {
+  event.stopPropagation();
+}
 
 type AgentBranchContext = {
   row: WorktreeAgentRowData;
@@ -120,6 +137,9 @@ function renderAgentBranch(
       reserveDisclosureGutter={
         isRootRow && context.anyRootHasChildren && !hasChildAgents
       }
+      // Owner's design: a root row that owns subagents is the tree's parent
+      // end — the one row that reads MAIN.
+      isMainRow={isRootRow && hasChildAgents}
       // Issue #622: every descendant at depth >= 1 gets the lineage child
       // chrome, not only depth 1.
       isChildRow={depth >= 1}
@@ -300,8 +320,10 @@ export function WorktreeCard({
   const {
     collapsedLineageParents,
     compactRootListExpanded,
+    cardFolded,
     toggleLineageParent,
     toggleCompactRootList,
+    toggleCardFolded,
   } = useWorktreeAgentExpansionState(worktree.id);
   // Why: root leaf siblings reserve a leading spacer when any root has a
   // chevron, keeping the state-dot column aligned (fork's
@@ -320,13 +342,19 @@ export function WorktreeCard({
   };
   const summary = summarizeCardSessions(rowSessions);
   const agentSummary = summarizeCardAgentStates(rowSessions);
-  // The agent identity drawn beside the status dot (the fork's summary-pill
-  // pairing of an AgentStateDot with the AgentIcon of the agents in that
-  // same state group); null when no session has a resolved harness.
-  const identitySession = cardIdentitySession(rowSessions);
-  const identityHarnessId = identitySession
-    ? resolveRowHarnessId(identitySession)
-    : null;
+  // Owner's design (2026-09-21): the card says in words what the lane and the
+  // rows say in glyphs — one uppercase sentence under the title, plus the one
+  // live glyph (spinner while working, bell while waiting) that must never be
+  // hidden behind text. The ring beside them belongs to the workspace status.
+  const activitySentence = worktreeActivitySentence(rowSessions);
+  const activityGlyph = worktreeActivityGlyph(rowSessions);
+  // The "N agents" pill is no longer the default for a small tree: the rows
+  // are the card's point (see COMPACT_AGENT_PILL_MIN_ROWS)."
+  const compactPillSubjectCount =
+    childrenByParentSessionId.size > 0 ? rootRows.length : rows.length;
+  const showCompactPill =
+    agentActivityDisplayMode === "compact" &&
+    compactPillSubjectCount >= COMPACT_AGENT_PILL_MIN_ROWS;
   // Row activation selects the workspace first, then the session tab: the
   // workspace switch clears the active tab, so the tab selection must win
   // last in the same batch (mirrors the notification focus handler).
@@ -367,6 +395,12 @@ export function WorktreeCard({
       (showPr && pr) ||
       (showProperties.issue !== false && issueNumber !== null),
   );
+  // The card's own fold (owner's design): the chevron beside the ring folds
+  // the whole agent list; the sentence stays, so a folded card still says
+  // what its agents are doing.
+  const showAgentRows =
+    showProperties["inline-agents"] !== false && rows.length > 0;
+  const showAgentTree = showAgentRows && !cardFolded;
   return (
     <WorktreeContextMenu
       worktree={worktree}
@@ -398,30 +432,52 @@ export function WorktreeCard({
         onClickCapture={onCardClickCapture}
         aria-label={`${name}${summary.unread ? ", needs input" : ""}${summaryLine ? `, ${summaryLine}` : ""}${note ? `, Note: ${note}` : ""}`}
       >
-        {/* Status lane (the source's WorktreeCardStatusSlot column): the
-            activity glyph lives left of the content, its tooltip names the
-            state; unread (needs_input) shows the amber bell glyph like the
-            source's filled bell. */}
+        {/* The card's own fold (owner's design, 2026-09-21): the leading
+            chevron folds the whole agent list, mirroring the guide. The
+            sentence stays visible, so a folded card still says what its
+            agents are doing; folding a single agent's branch is the row's
+            own chevron's job, never this one's. */}
+        <button
+          type="button"
+          className="shell-worktree-card-fold"
+          data-worktree-card-fold={cardFolded ? "folded" : "expanded"}
+          aria-label={`${cardFolded ? "Show" : "Hide"} agents in ${name}`}
+          aria-expanded={!cardFolded}
+          disabled={disabled}
+          onClick={(event) => {
+            // The card surface selects on click: folding is not selecting.
+            event.preventDefault();
+            event.stopPropagation();
+            toggleCardFolded();
+          }}
+          onMouseDown={stopCardDragPropagation}
+          onPointerDown={stopCardDragPropagation}
+        >
+          <ChevronRight
+            className={
+              "size-3.5 transition-transform duration-150" +
+              (!cardFolded ? " rotate-90" : "")
+            }
+            aria-hidden="true"
+          />
+        </button>
+        {/* Status lane (the source's WorktreeCardStatusSlot column, owner's
+            vocabulary): the workspace STATUS ring first — the same icon and
+            colour the status carries in the board — then the one live
+            activity glyph that must never be hidden behind text: the
+            working spinner, or the amber bell while an agent waits for the
+            user. */}
         <div
           className="shell-worktree-card-status-lane"
           data-worktree-card-status-slot=""
         >
-          {/* The card lane's own glyph set (the fork's StatusIndicator plus
-              the unread bell): an emerald filled dot for a live-but-quiet
-              worktree, the amber bell while the agent needs the user. */}
-          <AgentStateIcon state={summary.state} size={12} variant="card" />
-          {identityHarnessId ? (
-            <span
-              className="shell-worktree-card-agent-avatar"
-              data-worktree-card-agent-avatar=""
-              title={formatRowHarnessLabel(identityHarnessId)}
-            >
-              <HarnessMenuIcon
-                harnessId={identityHarnessId}
-                displayName={formatRowHarnessLabel(identityHarnessId)}
-                size={13}
-              />
-            </span>
+          <WorkspaceStatusRing statuses={statuses} statusId={worktree.workspaceStatus} />
+          {activityGlyph ? (
+            <AgentStateIcon
+              state={activityGlyph === "working" ? "working" : "needs_input"}
+              size={13}
+              variant="card"
+            />
           ) : null}
         </div>
         {/* Main column: the card is a flex row (select content beside the
@@ -465,18 +521,32 @@ export function WorktreeCard({
                 showUnreadEmphasis={summary.unread}
                 className="text-[13px] leading-5"
               />
+              {/* Owner's design: the card's own review marker, ahead of the
+                  kebab — one glyph whose colour is the review's state. It
+                  replaces the old "PR #123" chip; the accessible label is
+                  the chip's own string, so nothing the card announced
+                  before is lost. */}
+              {showPr ? <WorktreeCardPrStateIcon pr={pr} /> : null}
+            </span>
+            {/* The card's activity sentence (owner's design): the uppercase
+                line under the title. It is aria-hidden because the card's
+                aria-label already carries the same sentence through
+                `formatWorktreeCardSummaryLine`. */}
+            <span className="shell-worktree-card-sentence" aria-hidden="true">
+              {activitySentence}
             </span>
             <WorktreeCardMetaBadges
               // The fork's classic meta row shows the branch identity
               // whenever the worktree has one (worktree-card-presentation's
               // showBranch); only the ahead/behind chips stay tied to this
-              // repo's Branch property.
+              // repo's Branch property. The PR chip moved to the header's
+              // state icon, so this row never repeats it.
               branch={branchLabel}
               ahead={showBranch ? (gitStatus?.branch.ahead ?? null) : null}
               behind={showBranch ? (gitStatus?.branch.behind ?? null) : null}
               upstream={showBranch ? (gitStatus?.branch.upstream ?? null) : null}
               issueNumber={showProperties.issue === false ? null : issueNumber}
-              pr={showPr ? pr : null}
+              pr={null}
             />
             {/* The comment property's visible note line: this repo's own
                 pinned property surface (probe-workspace-properties.mjs
@@ -497,10 +567,12 @@ export function WorktreeCard({
             one row per session, outside the select button so rows stay real
             buttons. Issue #359: rows with a recorded parent session render
             as a fork lineage branch — a disclosure chevron on the parent
-            row and a boxed, indented children group beneath it. Compact
-            mode (the default) folds multiple root rows into the source's
-            "N agents" summary pill (CompactAgentSummaryButton). */}
-          {showProperties["inline-agents"] !== false && rows.length > 0 ? (
+            row and an indented children group beneath it, joined by the
+            tree's own connector lines. Owner's design (2026-09-21): the
+            tree is what the card is for, so it renders inline; the "N
+            agents" pill only takes over a genuinely long fan-out
+            (COMPACT_AGENT_PILL_MIN_ROWS). */}
+          {showAgentTree ? (
             <div
               className={cn(
                 "shell-worktree-card-rows flex flex-col gap-0.5",
@@ -515,10 +587,7 @@ export function WorktreeCard({
               // stays.
               aria-label={`${name} sessions`}
             >
-              {agentActivityDisplayMode === "compact" &&
-              (childrenByParentSessionId.size > 0
-                ? rootRows.length
-                : rows.length) > 1 ? (
+              {showCompactPill ? (
                 <div
                   className={cn(
                     "compact-agent-summary-panel",

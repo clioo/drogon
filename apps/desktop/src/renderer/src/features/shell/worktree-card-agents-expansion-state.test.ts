@@ -123,6 +123,7 @@ describe("useWorktreeAgentExpansionState", () => {
     seedWorktreeAgentExpansionStateForTests("wt-p", {
       collapsedLineageParents: new Set(["dead-1", "live-1"]),
       compactRootListExpanded: false,
+      cardFolded: false,
     });
     // A read alone never prunes, so a collapsed parent whose children
     // merely exited keeps its fold across list refreshes.
@@ -152,6 +153,7 @@ describe("useWorktreeAgentExpansionState", () => {
       seedWorktreeAgentExpansionStateForTests(`wt-${index}`, {
         collapsedLineageParents: new Set(["s"]),
         compactRootListExpanded: false,
+        cardFolded: false,
       });
     }
     expect(getWorktreeAgentExpansionCountForTests()).toBe(
@@ -162,5 +164,62 @@ describe("useWorktreeAgentExpansionState", () => {
       useWorktreeAgentExpansionState("wt-0"),
     );
     expect(evicted.result.current.collapsedLineageParents.size).toBe(0);
+  });
+});
+
+describe("the card's own fold (owner's design, 2026-09-21)", () => {
+  test("a folded card stays folded through a reload and never folds a sibling", () => {
+    fresh();
+    const first = renderHook(() => useWorktreeAgentExpansionState("wt-fold-1"));
+    act(() => first.result.current.toggleCardFolded());
+    expect(first.result.current.cardFolded).toBe(true);
+    first.unmount();
+    resetWorktreeAgentExpansionMemoryForTests();
+    const reloaded = renderHook(() => useWorktreeAgentExpansionState("wt-fold-1"));
+    expect(reloaded.result.current.cardFolded).toBe(true);
+    const sibling = renderHook(() => useWorktreeAgentExpansionState("wt-fold-2"));
+    expect(sibling.result.current.cardFolded).toBe(false);
+  });
+
+  test("unfolding writes the fold away instead of leaving a stale id", () => {
+    fresh();
+    const hook = renderHook(() => useWorktreeAgentExpansionState("wt-fold-3"));
+    act(() => hook.result.current.toggleCardFolded());
+    act(() => hook.result.current.toggleCardFolded());
+    expect(hook.result.current.cardFolded).toBe(false);
+    resetWorktreeAgentExpansionMemoryForTests();
+    const reloaded = renderHook(() => useWorktreeAgentExpansionState("wt-fold-3"));
+    expect(reloaded.result.current.cardFolded).toBe(false);
+  });
+
+  test("a folded card keeps its own lineage folds: the two folds are independent", () => {
+    fresh();
+    const hook = renderHook(() => useWorktreeAgentExpansionState("wt-fold-4"));
+    act(() => hook.result.current.toggleLineageParent("child-1"));
+    act(() => hook.result.current.toggleCardFolded());
+    resetWorktreeAgentExpansionMemoryForTests();
+    const reloaded = renderHook(() => useWorktreeAgentExpansionState("wt-fold-4"));
+    expect(reloaded.result.current.cardFolded).toBe(true);
+    expect([...reloaded.result.current.collapsedLineageParents]).toEqual([
+      "child-1",
+    ]);
+  });
+
+  test("corrupt or hostile folded-card storage degrades to nothing folded", () => {
+    fresh();
+    window.localStorage.setItem("drogon:shell:folded-worktree-cards", "{not json");
+    const brokenJson = renderHook(() => useWorktreeAgentExpansionState("wt-fold-5"));
+    expect(brokenJson.result.current.cardFolded).toBe(false);
+    resetWorktreeAgentExpansionMemoryForTests();
+    // A non-string entry never folds anything, and never throws.
+    window.localStorage.setItem(
+      "drogon:shell:folded-worktree-cards",
+      JSON.stringify([42, null, "wt-fold-6"]),
+    );
+    const mixed = renderHook(() => useWorktreeAgentExpansionState("wt-fold-6"));
+    expect(mixed.result.current.cardFolded).toBe(true);
+    resetWorktreeAgentExpansionMemoryForTests();
+    const notListed = renderHook(() => useWorktreeAgentExpansionState("other"));
+    expect(notListed.result.current.cardFolded).toBe(false);
   });
 });

@@ -35,6 +35,7 @@ const row = (overrides: Partial<WorktreeAgentRowData> = {}): WorktreeAgentRowDat
   state: "working",
   title: "Terminal 1",
   secondary: "Shell",
+  stateLabel: "Working",
   relativeTime: "now",
   focused: false,
   ...overrides,
