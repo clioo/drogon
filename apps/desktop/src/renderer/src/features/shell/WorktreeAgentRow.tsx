@@ -143,6 +143,11 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
     row.state === "unknown" && row.secondary === row.stateLabel
       ? ""
       : row.secondary;
+  // Why: the trailing state text IS the freshness report for a session that
+  // is not reporting ("No update in 17h"), so the row's own age column would
+  // print that duration a second time. A row that knows its state keeps the
+  // age: "Idle 5m" is two different facts.
+  const showAge = row.state !== "unknown" && row.relativeTime !== "";
   const rowTitle = [primary, secondary, row.stateLabel]
     .filter(Boolean)
     .join(" - ");
@@ -246,8 +251,9 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
         </span>
       </span>
       <AgentCacheTimer session={row.session} />
-      {row.relativeTime && (
+      {showAge && (
         <span
+          data-worktree-agent-age=""
           className={
             "shrink-0 text-[10px] tabular-nums " +
             // Why: the muted timestamp drops out against the

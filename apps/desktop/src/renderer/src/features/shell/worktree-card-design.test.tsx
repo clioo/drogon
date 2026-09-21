@@ -296,7 +296,7 @@ describe("agent tree labels", () => {
     ).not.toBeNull();
   });
 
-  test("a session that never reported says how long the silence has run", () => {
+  test("a session that never reported says how long the silence has run, exactly once", () => {
     const { container } = renderCard({
       sessions: [
         session({
@@ -306,10 +306,38 @@ describe("agent tree labels", () => {
         }),
       ],
     });
-    const label = container.querySelector(
-      ".shell-worktree-agent-state-label",
-    )?.textContent;
+    const row = container.querySelector(
+      '[data-worktree-agent-row="quiet"]',
+    ) as HTMLElement;
+    const label = row.querySelector(".shell-worktree-agent-state-label")
+      ?.textContent;
     expect(label).toMatch(/^No update in /);
+    // The freshness report is the row's state text; the age column must not
+    // print the same duration a second time.
+    expect(row.textContent?.match(/No update in /g)?.length).toBe(1);
+    expect(row.querySelector("[data-worktree-agent-age]")).toBeNull();
+  });
+
+  test("a row that knows its state keeps both the state and the age", () => {
+    const { container } = renderCard({
+      sessions: [
+        session({
+          id: "working",
+          agentState: "working",
+          agentStateAt: "2026-09-08T11:59:00.000Z",
+        }),
+      ],
+    });
+    const row = container.querySelector(
+      '[data-worktree-agent-row="working"]',
+    ) as HTMLElement;
+    expect(row.querySelector(".shell-worktree-agent-state-label")?.textContent).toBe(
+      "Working",
+    );
+    // "Working" and when it last reported are two different facts.
+    expect(
+      row.querySelector("[data-worktree-agent-age]")?.textContent,
+    ).toMatch(/^\d+[mhd]$/);
   });
 });
 
