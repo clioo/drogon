@@ -6,7 +6,12 @@
    The URL-source single-row override collapses to the GitHub URL case. */
 
 import type { GitHubIssueOrPRLink } from "./smart-workspace-github-links";
-import type { TaskIssue, TaskPullRequest } from "../../../../shared/tasks-contract";
+import {
+  issueToWorkItem,
+  pullToWorkItem,
+  toGitHubWorkItem,
+  type GitHubWorkItem,
+} from "./smart-workspace-source-model";
 
 export type SmartNameMode =
   | "smart"
@@ -14,13 +19,10 @@ export type SmartNameMode =
   | "branches"
   | "text";
 
-export type GitHubWorkItem = {
-  type: "issue" | "pr";
-  number: number;
-  title: string;
-  url: string;
-  updatedAt: string;
-};
+// The work item and its daemon adapters live in their own module; they stay
+// this module's public surface, so its consumers keep importing them here.
+export { issueToWorkItem, pullToWorkItem, toGitHubWorkItem };
+export type { GitHubWorkItem };
 
 export type BranchSearchRow = {
   refName: string;
@@ -222,35 +224,4 @@ export function buildSmartWorkspaceSourceRows({
   return nextRows.slice(0, resultLimit + 1);
 }
 
-/** Adapter: a tasks issue/PR row becomes the field's GitHub work item. */
-export function toGitHubWorkItem(
-  raw: { type: "issue" | "pr"; number: number; title: string; url: string; updatedAt: string },
-): GitHubWorkItem {
-  return {
-    type: raw.type,
-    number: raw.number,
-    title: raw.title,
-    url: raw.url,
-    updatedAt: raw.updatedAt,
-  };
-}
 
-export function issueToWorkItem(issue: TaskIssue): GitHubWorkItem {
-  return toGitHubWorkItem({
-    type: "issue",
-    number: issue.number,
-    title: issue.title,
-    url: issue.url,
-    updatedAt: issue.updatedAt,
-  });
-}
-
-export function pullToWorkItem(pull: TaskPullRequest): GitHubWorkItem {
-  return toGitHubWorkItem({
-    type: "pr",
-    number: pull.number,
-    title: pull.title,
-    url: pull.url,
-    updatedAt: pull.updatedAt,
-  });
-}

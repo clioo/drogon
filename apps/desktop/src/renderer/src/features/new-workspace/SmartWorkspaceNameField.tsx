@@ -11,13 +11,18 @@
    ARIA follow the source surfaces. */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertCircle,
   CaseSensitive,
+  CheckCircle2,
+  CircleDot,
+  Clock3,
   ExternalLink,
   GitBranch,
   GitBranchPlus,
   GitPullRequest,
-  CircleDot,
+  GitPullRequestDraft,
   LoaderCircle,
+  Minus,
   Search,
   Sparkles,
   X,
@@ -42,6 +47,15 @@ import {
   type SmartWorkspaceSourceRow,
 } from "./smart-workspace-source-rows";
 import { parseGitHubIssueOrPRLink } from "./smart-workspace-github-links";
+import {
+  getSmartWorkspaceChecksPresentation,
+  getSmartWorkspaceGithubRowLabel,
+  getSmartWorkspaceOpenLinkLabel,
+  getSmartWorkspacePrIconTone,
+  getSmartWorkspacePrStateLabel,
+  isSmartWorkspaceDraftPr,
+  type SmartWorkspaceChecksPresentation,
+} from "./smart-workspace-source-row-status";
 import {
   RESULT_LIMIT,
   SEARCH_DEBOUNCE_MS,
@@ -512,6 +526,26 @@ export function SmartWorkspaceNameField({
                   }
                   if (
                     event.key === "Enter" &&
+                    event.altKey &&
+                    !event.metaKey &&
+                    !event.ctrlKey &&
+                    !event.shiftKey &&
+                    open
+                  ) {
+                    // The pill's own Alt+Enter shortcut, applied to the
+                    // highlighted row: open its GitHub page without turning
+                    // it into the workspace's source.
+                    const row = rows.find(
+                      (entry) => entry.value === resolvedCommandValue,
+                    );
+                    if (row?.kind === "github") {
+                      event.preventDefault();
+                      openExternalUrl(row.item.url);
+                      return;
+                    }
+                  }
+                  if (
+                    event.key === "Enter" &&
                     !event.metaKey &&
                     !event.ctrlKey &&
                     !event.shiftKey &&
@@ -666,9 +700,29 @@ function SmartWorkspaceSourceResults({
                 value={row.value}
                 onSelect={() => onSelect(row)}
                 className={getRowItemClassName(row)}
+                // Why: the option's own text stops at `#123 <title>`; the
+                // state and the check verdict are named here so they are not
+                // carried by colour alone.
+                aria-label={
+                  row.kind === "github"
+                    ? getSmartWorkspaceGithubRowLabel(row.item)
+                    : undefined
+                }
+                title={
+                  row.kind === "github" && row.item.type === "pr"
+                    ? getSmartWorkspacePrStateLabel(row.item)
+                    : undefined
+                }
+                data-smart-workspace-source-kind={row.kind}
+                data-smart-workspace-source-state={
+                  row.kind === "github" ? row.item.state : undefined
+                }
               >
                 <RowIcon row={row} />
                 <RowLabel row={row} />
+                {row.kind === "github" ? (
+                  <GithubRowTrailing item={row.item} />
+                ) : null}
               </CommandItem>
             ))}
           </CommandGroup>
@@ -691,24 +745,113 @@ function getRowItemClassName(
   return cn(
     ROW_ITEM_CLASS_NAME,
     options?.pinnedAction && isTypedTextSourceRow(row) && "bg-muted/35",
+    // Why: a GitHub row's trailing controls (the checks pill and the open-link
+    // affordance) key off this row's own hover/selection, not the list's.
+    row.kind === "github" && "group/row",
+  );
+}
+
+/**
+ * The GitHub row's right edge: the check verdict the daemon rolled up (the
+ * Tasks list's own pill label and tone) and the affordance that opens the
+ * row's GitHub page. Both live inside the cmdk option, so the button stops
+ * its click from also selecting the row as the workspace's source.
+ */
+function GithubRowTrailing({
+  item,
+}: {
+  item: GitHubWorkItem;
+}): React.JSX.Element {
+  const checks = getSmartWorkspaceChecksPresentation(item.checks);
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1.5">
+      {checks ? <GithubChecksPill checks={checks} /> : null}
+      <Tooltip.Provider delayDuration={300}>
+        <Tooltip.Root>
+          <Tooltip.Trigger asChild>
+            <button
+              type="button"
+              tabIndex={-1}
+              data-smart-workspace-open-link="true"
+              aria-label={getSmartWorkspaceOpenLinkLabel(item)}
+              onClick={(event) => {
+                // Why: cmdk selects the option on click; opening the link
+                // must not also commit the row.
+                event.stopPropagation();
+                openExternalUrl(item.url);
+              }}
+              // Why: pointer-events gate, not just opacity -- an invisible
+              // button must never swallow a click meant for the row.
+              className="pointer-events-none rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-data-[selected=true]/row:pointer-events-auto group-data-[selected=true]/row:opacity-100"
+            >
+              <ExternalLink className="size-3.5" aria-hidden="true" />
+            </button>
+          </Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Content side="top" sideOffset={6} className="tooltip">
+              Open in browser
+            </Tooltip.Content>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+    </span>
+  );
+}
+
+function GithubChecksPill({
+  checks,
+}: {
+  checks: SmartWorkspaceChecksPresentation;
+}): React.JSX.Element {
+  const Icon =
+    checks.icon === "success"
+      ? CheckCircle2
+      : checks.icon === "failure"
+        ? AlertCircle
+        : checks.icon === "pending"
+          ? Clock3
+          : Minus;
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none",
+        checks.tone,
+      )}
+      data-smart-workspace-checks={checks.icon}
+    >
+      <Icon className="size-3" aria-hidden="true" />
+      <span>{checks.label}</span>
+    </span>
   );
 }
 
 function RowIcon({ row }: { row: SmartWorkspaceSourceRow }): React.JSX.Element {
   if (row.kind === "use-name") {
-    return <CaseSensitive className="size-3.5 shrink-0 text-muted-foreground" />;
+    return <CaseSensitive className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />;
   }
   if (row.kind === "create-branch") {
-    return <GitBranchPlus className="size-3.5 shrink-0 text-muted-foreground" />;
+    return <GitBranchPlus className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />;
   }
   if (row.kind === "github") {
-    return row.item.type === "pr" ? (
-      <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
-    ) : (
-      <CircleDot className="size-3.5 shrink-0 text-muted-foreground" />
+    if (row.item.type !== "pr") {
+      return <CircleDot className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />;
+    }
+    // A PR row states its lifecycle: the shipped PR tones on the mark, and
+    // the draft glyph for a draft -- never colour alone.
+    const PrIcon = isSmartWorkspaceDraftPr(row.item)
+      ? GitPullRequestDraft
+      : GitPullRequest;
+    return (
+      <PrIcon
+        className={cn(
+          "size-3.5 shrink-0",
+          getSmartWorkspacePrIconTone(row.item),
+        )}
+        aria-hidden="true"
+      />
     );
   }
-  return <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />;
+  return <GitBranch className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />;
 }
 
 function SelectionIcon({
