@@ -1466,37 +1466,81 @@ export function TerminalPane({
           // anything, until a short page says the live edge is reached (or
           // the page guard trips on a session that out-writes the seek).
           seekPages += 1;
-          replayTail.push(bytes, value.truncated);
+          // The page keeps the grid report that answered it: a replay that
+          // spans a resize has to feed each page at its own cuts (#605).
+          replayTail.push({
+            bytes,
+            startCursor: value.startCursor,
+            nextCursor: value.nextCursor,
+            cols: value.session.cols,
+            rows: value.session.rows,
+            gridCursor: value.session.gridCursor,
+            gridChanges: value.gridChanges,
+            truncated: value.truncated,
+          });
           cursor = value.nextCursor;
           if (shouldKeepSeeking(bytes.length, seekPages)) {
             timeout = setTimeout(read, 0);
             return;
           }
           seeking = false;
-          // The retained tail ends at the live edge, so the grid the daemon
-          // reports now is the one its newest bytes — the agent's live input
-          // zone — were composed for. Adopt it before replaying rather than
-          // re-wrapping them at whatever grid this pane happens to hold
-          // (#605); older rows in the tail are scrollback the agent will
-          // never address again.
-          applyTerminalGrid({
-            cols: value.session.cols,
-            rows: value.session.rows,
-          });
           const dropped = replayTail.dropped;
-          const tailChunks = replayTail.drain();
+          const tailPages = replayTail.drain();
+          // The retained tail can span a grid change: a resize the agent
+          // painted through while this pane was unmounted, or between two
+          // runs of the desktop. Replaying all of it at the grid the daemon
+          // reports now re-wraps every byte composed at an older width — the
+          // agent's cursor-relative erase then lands short of the rows its
+          // previous frame really occupies on that width, and the superseded
+          // frame is stranded for the rest of the session, in the input zone
+          // where the reporter saw it. So a retained page that names its cuts
+          // is planned at each one, exactly like a live page.
+          //
+          // Nothing named inside the first retained page leaves no cut to plan
+          // against: either the daemon reports no `gridChanges` at all (one
+          // older than #605), or the ring's eviction already dropped every cut
+          // at or before that page. The fallback is the previous behavior —
+          // adopt the grid the daemon reports at the live edge, the one the
+          // newest bytes, including the agent's live input zone, were composed
+          // for. It is applied before anything is queued on the write chain,
+          // so it cannot jump a page.
+          const firstCutKnown = (tailPages[0]?.gridChanges?.length ?? 0) > 0;
+          if (!firstCutKnown) {
+            applyTerminalGrid({
+              cols: value.session.cols,
+              rows: value.session.rows,
+            });
+          }
           if (dropped)
             terminal.write("\r\n[Earlier output is no longer retained]\r\n");
-          for (const chunk of tailChunks) {
+          for (const page of tailPages) {
             // Track DECA 2004 (bracketed paste) transitions in the PTY
             // output so the paste policy brackets/decrypts exactly when the
             // app asked.
-            const decodedOutput = outputDecoder.decode(chunk, { stream: true });
+            const decodedOutput = outputDecoder.decode(page.bytes, {
+              stream: true,
+            });
             kittyModes.scanReplay(decodedOutput);
             observeTerminalBracketedPasteModeOutput(terminal, decodedOutput);
-            await new Promise<void>((resolve) =>
-              terminal.write(chunk, resolve),
-            );
+            // The page carries both halves of the plan: the ring range its
+            // bytes cover and the grid reported when it was answered. Feed it
+            // exactly the way a live page is fed — write up to each cut,
+            // change xterm's grid there, write the rest, on the ordered write
+            // chain, awaiting the last step so a rejected write surfaces once.
+            const steps = planGridCutWrites(page, page, queuedGrid);
+            for (let index = 0; index < steps.length; index += 1) {
+              const step = steps[index];
+              if (step.kind === "grid") {
+                queuedGrid = step.grid;
+                void orderedWrite
+                  .run(() => applyTerminalGrid(step.grid))
+                  .catch(() => {});
+              } else if (index === steps.length - 1) {
+                await orderedWrite(step.bytes);
+              } else {
+                void orderedWrite(step.bytes).catch(() => {});
+              }
+            }
             if (disposed) return;
           }
           caughtUp.current = bytes.length < TERMINAL_READ_PAGE_BYTES;

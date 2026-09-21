@@ -320,4 +320,52 @@ describe("TerminalPane grid handover (#605)", () => {
     );
     expect(terminal.cols).toBe(PANE_COLS);
   });
+
+  it("replays a retained tail at the grids its bytes were composed at", async () => {
+    // The mount seek replays the retained tail — the pane was unmounted, the
+    // desktop restarted, or the tab came back — and that tail can span a
+    // resize the agent painted through. Replaying all of it at the grid the
+    // daemon reports now re-wraps the bytes composed at the older width; the
+    // agent's cursor-relative erase then lands short of the rows its previous
+    // frame really occupies on that width, and the superseded frame is
+    // stranded for the rest of the session (#605), at the bottom of the pane
+    // where the input zone is.
+    //
+    // One page carries the whole event, so this exercises the replay's own
+    // path: a short page ends the seek, and everything in it is replayed from
+    // the retained tail rather than fed by the live read loop.
+    let text = "transcript uno\r\ntranscript dos\r\n";
+    let previous: string[] = [];
+    for (const n of [0, 1, 2]) {
+      text += repaint(frame(n), previous, PTY_COLS);
+      previous = frame(n);
+    }
+    const cut = encoder.encode(text).length;
+    for (const n of [3, 4, 5]) {
+      text += repaint(frame(n), previous, PANE_COLS);
+      previous = frame(n);
+    }
+    pages = [
+      {
+        bytes: encoder.encode(text),
+        cols: PANE_COLS,
+        gridCursor: cut,
+        gridChanges: [
+          { cursor: 0, cols: PTY_COLS, rows: ROWS },
+          { cursor: cut, cols: PANE_COLS, rows: ROWS },
+        ],
+      },
+    ];
+    mount(session({ cols: PANE_COLS, gridCursor: cut }));
+    const terminal = liveTerminal();
+    await settle(
+      terminal,
+      () =>
+        terminal.cols === PANE_COLS &&
+        visibleLines(terminal).some((line) => line.includes("> draft 5 ")),
+    );
+    expect(terminal.cols).toBe(PANE_COLS);
+    expect(strandedDrafts(terminal, 5)).toEqual([]);
+    expect(visibleLines(terminal)[0]).toContain("transcript uno");
+  });
 });
