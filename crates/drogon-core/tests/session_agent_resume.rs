@@ -935,3 +935,222 @@ fn an_id_only_locator_is_reported_unverified_not_restored() {
         },
     );
 }
+
+/// Pi's own store decides whether `pi --continue` has anything to continue.
+///
+/// This is the owner's report ("le daba resume y me creaba una sesion
+/// nueva"): `pi --continue` is `SessionManager.continueRecent(cwd)`, and with
+/// nothing to continue Pi does NOT refuse -- it opens a brand new session
+/// silently. Modeling Pi's store turns that silence into a positive absence,
+/// so the launch degrades to a fresh start and SAYS so (`agentResume:
+/// "fresh"` -> the pane's "previous session unavailable, started fresh"
+/// banner) instead of presenting an empty conversation as a resume.
+#[test]
+fn a_pi_resume_with_nothing_to_continue_degrades_to_a_stated_fresh_start() {
+    let fixture_dir = fake_harness_dir("pi");
+    let agent_root = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    with_env(
+        &[
+            ("PATH", Some(fixture_dir.as_path())),
+            ("PI_CODING_AGENT_DIR", Some(agent_root.path())),
+        ],
+        || {
+            let restore_path = with_fixture_path(&fixture_dir);
+            let data_dir = tempfile::tempdir().unwrap();
+            let (workspace_id, session_id) = {
+                let engine = Engine::open(data_dir.path()).unwrap();
+                let workspace_id = registered(&engine, project.path());
+                let launched = ok(
+                    &engine,
+                    &unique("harness-start"),
+                    "harness.start",
+                    json!({
+                        "workspaceId": workspace_id,
+                        "harnessId": "pi",
+                        "permissionMode": "inherit",
+                    }),
+                );
+                (workspace_id, launched["id"].as_str().unwrap().to_string())
+            };
+            // The daemon restarts over the same data dir: the row is
+            // recovered as `unverifiable` (a sleeping pane) with no recorded
+            // identity, which is exactly the shape the pane offers Resume for.
+            let engine = Engine::open(data_dir.path()).unwrap();
+            assert_eq!(record_of(&engine, &session_id)["verdict"], "unverifiable");
+
+            let declined = ok(
+                &engine,
+                &unique("resume"),
+                "harness.start",
+                json!({
+                    "workspaceId": workspace_id,
+                    "harnessId": "pi",
+                    "permissionMode": "inherit",
+                    "resume": true,
+                    "resumeSessionId": session_id,
+                }),
+            );
+            assert_eq!(
+                declined["agentResume"], "fresh",
+                "an empty Pi store is a positive 'nothing to continue': {declined:?}"
+            );
+            assert!(
+                !declined["args"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|arg| arg == "--continue" || arg == "--session"),
+                "a declined resume must not ask Pi for a conversation it would \
+                 invent: {declined:?}"
+            );
+
+            // The counterpart: with a session in Pi's store for this very
+            // working directory, the same request keeps the CLI's own
+            // most-recent entrypoint and reports `continued`. The store is
+            // written under the CANONICAL spelling of the workspace (what Pi
+            // itself sees: macOS `/var/...` is really `/private/var/...`).
+            let canonical_project = std::fs::canonicalize(project.path())
+                .unwrap_or_else(|_| project.path().to_path_buf());
+            let store = agent_root
+                .path()
+                .join("sessions")
+                .join(drogon_harness::pi_project_dir_name(&canonical_project));
+            std::fs::create_dir_all(&store).unwrap();
+            std::fs::write(
+                store.join("2026-09-20T22-36-05-857Z_01a0c0f6-5b60-72e7-8dc5-a9ed89ce5409.jsonl"),
+                "{}\n",
+            )
+            .unwrap();
+            let continued = ok(
+                &engine,
+                &unique("resume"),
+                "harness.start",
+                json!({
+                    "workspaceId": workspace_id,
+                    "harnessId": "pi",
+                    "permissionMode": "inherit",
+                    "resume": true,
+                    "resumeSessionId": session_id,
+                }),
+            );
+            assert_eq!(continued["agentResume"], "continued", "{continued:?}");
+            assert!(
+                continued["args"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|arg| arg == "--continue"),
+                "the CLI's own most-recent entrypoint is the best available \
+                 answer once the store holds one: {continued:?}"
+            );
+            for row in listed(&engine) {
+                ok(
+                    &engine,
+                    &unique("stop"),
+                    "session.stop",
+                    json!({"sessionId": row["id"], "incarnation": row["incarnation"]}),
+                );
+            }
+            restore_path();
+        },
+    );
+}
+
+/// Pi's hook payload names its own conversation (`session_id` +
+/// `session_file`, which the extension reads off `ctx.sessionManager`), and
+/// the daemon must record it for a Pi event exactly like Claude's. A reopen
+/// then names THAT conversation -- `pi --session <file>` -- instead of
+/// degrading to `--continue`. Without the identity the pane's Resume could
+/// only ever reopen "whatever was most recent", which is the bug the owner
+/// reported.
+#[test]
+fn a_pi_session_that_reported_its_file_resumes_by_that_file() {
+    let fixture_dir = fake_harness_dir("pi");
+    let agent_root = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    with_env(
+        &[
+            ("PATH", Some(fixture_dir.as_path())),
+            ("PI_CODING_AGENT_DIR", Some(agent_root.path())),
+        ],
+        || {
+            let restore_path = with_fixture_path(&fixture_dir);
+            let data_dir = tempfile::tempdir().unwrap();
+            let session_file = agent_root.path().join(
+                "sessions/--Users-x-ws--/2026-09-20T22-36-05-857Z_01a0c0f6-5b60-72e7-8dc5-a9ed89ce5409.jsonl",
+            );
+            std::fs::create_dir_all(session_file.parent().unwrap()).unwrap();
+            std::fs::write(&session_file, "{}\n").unwrap();
+            let session_file_str = session_file.to_string_lossy().to_string();
+            let provider_id = "01a0c0f6-5b60-72e7-8dc5-a9ed89ce5409";
+            let (workspace_id, session_id) = {
+                let engine = Engine::open(data_dir.path()).unwrap();
+                let workspace_id = registered(&engine, project.path());
+                let launched = ok(
+                    &engine,
+                    &unique("harness-start"),
+                    "harness.start",
+                    json!({
+                        "workspaceId": workspace_id,
+                        "harnessId": "pi",
+                        "permissionMode": "inherit",
+                    }),
+                );
+                // Exactly the payload the pi extension now writes: Pi's own
+                // `session_id`/`session_file` on a pi event.
+                ok(
+                    &engine,
+                    &unique("hook"),
+                    "session.hook_event",
+                    json!({
+                        "sessionId": launched["id"],
+                        "incarnation": launched["incarnation"],
+                        "event": "AgentStart",
+                        "agentSessionId": provider_id,
+                        "agentSessionTranscriptPath": session_file_str,
+                    }),
+                );
+                (workspace_id, launched["id"].as_str().unwrap().to_string())
+            };
+            let engine = Engine::open(data_dir.path()).unwrap();
+            let recovered = record_of(&engine, &session_id);
+            assert_eq!(recovered["agentSessionId"], provider_id);
+            assert_eq!(recovered["agentSessionTranscriptPath"], session_file_str);
+
+            let resumed = ok(
+                &engine,
+                &unique("resume"),
+                "harness.start",
+                json!({
+                    "workspaceId": workspace_id,
+                    "harnessId": "pi",
+                    "permissionMode": "inherit",
+                    "resume": true,
+                    "resumeSessionId": session_id,
+                }),
+            );
+            assert_eq!(resumed["agentResume"], "resumed", "{resumed:?}");
+            let args = resumed["args"].as_array().unwrap();
+            let position = args
+                .iter()
+                .position(|arg| arg == "--session")
+                .unwrap_or_else(|| panic!("no --session in {resumed:?}"));
+            assert_eq!(args[position + 1], session_file_str);
+            assert!(
+                !args.iter().any(|arg| arg == "--continue"),
+                "a named resume must not fall back to the directory's most \
+                 recent conversation: {resumed:?}"
+            );
+            for row in listed(&engine) {
+                ok(
+                    &engine,
+                    &unique("stop"),
+                    "session.stop",
+                    json!({"sessionId": row["id"], "incarnation": row["incarnation"]}),
+                );
+            }
+            restore_path();
+        },
+    );
+}

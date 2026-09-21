@@ -18,9 +18,15 @@
 //!
 //! Deliberately not ported: OMP/Prime runtime detection
 //! (`agent-status-runtime-detection-source.ts` — this repo targets plain
-//! `pi` only), session-metadata/resume-file capture (session identity here
-//! travels over `DROGON_SESSION_ID`/`DROGON_HOOK_INCARNATION`, not a
-//! resumable pi session file), and message-preview capture.
+//! `pi` only) and message-preview capture. The reference's session-metadata
+//! capture IS ported, as the conversation locator: `session_start` hands this
+//! extension Pi's own `sessionManager`, and every report carries
+//! `session_id`/`session_file` so the daemon can record which conversation
+//! the session is (a Resume then reopens THAT one — `pi --session <id|file>`
+//! — instead of asking Pi for its most recent session in the directory, which
+//! starts a NEW one when the store has nothing to continue). The
+//! `DROGON_SESSION_ID`/`DROGON_HOOK_INCARNATION` environment identity still
+//! names the CALLBACK, not the conversation.
 
 use std::path::{Path, PathBuf};
 
@@ -71,6 +77,25 @@ pub(crate) fn extension_source() -> String {
 // `drogon-cli internal hook-event` instead of the source's HTTP loopback
 // hooks server; see harness_hooks::pi for what else is not ported.
 
+// The conversation locator Pi itself owns, captured at session_start and
+// attached to every report: the daemon stores it on this session's row, and
+// that is what makes a later Resume open THIS conversation
+// (`pi --session <id|file>`) instead of silently starting a new one.
+var identity = {{}}
+
+function captureIdentity(ctx) {{
+  try {{
+    var manager = ctx && ctx.sessionManager
+    if (!manager) return
+    var id = typeof manager.getSessionId === "function" ? manager.getSessionId() : undefined
+    var file = typeof manager.getSessionFile === "function" ? manager.getSessionFile() : undefined
+    if (typeof id === "string" && id) identity.session_id = id
+    if (typeof file === "string" && file) identity.session_file = file
+  }} catch (err) {{
+    // Why: the locator only feeds the reopen path; never fail the run over it.
+  }}
+}}
+
 function report(eventName, prompt, usage) {{
   var cli = process.env.DROGON_HOOK_CLI || "drogon-cli"
   var sessionId = process.env.DROGON_SESSION_ID || ""
@@ -86,7 +111,12 @@ function report(eventName, prompt, usage) {{
       )
       if (child.stdin) {{
         child.stdin.on("error", function () {{}})
-        child.stdin.end(JSON.stringify({{ prompt: typeof prompt === "string" ? prompt.slice(0, 512) : undefined, piUsage: usage }}))
+        child.stdin.end(JSON.stringify({{
+          prompt: typeof prompt === "string" ? prompt.slice(0, 512) : undefined,
+          piUsage: usage,
+          session_id: identity.session_id,
+          session_file: identity.session_file
+        }}))
       }}
     }} catch (err) {{ resolve() }}
   }})
@@ -103,6 +133,15 @@ try {{
 }}
 
 export default function (pi) {{
+  // Pi hands over its sessionManager here and nowhere else, so this is where
+  // the conversation locator is captured; the event itself lands the row on
+  // the idle session boundary (a just-launched TUI is not working). Reported
+  // BEFORE the usage-only return below: a coordination worker's launch still
+  // needs its conversation recorded even though it reports no turn signals.
+  pi.on("session_start", function (event, ctx) {{
+    captureIdentity(ctx)
+    return report("{session_start}")
+  }})
   pi.on("message_end", async function (event) {{
     var message = event && event.message
     if (!message || message.role !== "assistant" || !message.usage) return
@@ -141,6 +180,7 @@ export default function (pi) {{
         tool_approval_requested = ev::TOOL_APPROVAL_REQUESTED,
         tool_approval_resolved = ev::TOOL_APPROVAL_RESOLVED,
         agent_end = ev::AGENT_END,
+        session_start = ev::SESSION_START,
     )
 }
 
@@ -168,6 +208,7 @@ mod tests {
         assert!(source.contains("internal hook-event"));
         assert!(source.contains("export default function (pi)"));
         for name in [
+            ev::SESSION_START,
             ev::AGENT_START,
             ev::TOOL_START,
             ev::TOOL_APPROVAL_REQUESTED,
@@ -181,6 +222,46 @@ mod tests {
         assert!(source.contains("DROGON_SESSION_ID"));
         assert!(source.contains("DROGON_HOOK_INCARNATION"));
         assert!(source.contains("DROGON_HOOK_MARKER"));
+    }
+
+    /// The conversation locator is the whole point of the extension's second
+    /// job: Pi's own session id/file, captured where Pi hands them over and
+    /// attached to every payload the daemon reads (the CLI maps
+    /// `session_id` -> `agentSessionId`, `session_file` -> transcript path).
+    #[test]
+    fn extension_source_reports_the_pi_conversation_locator() {
+        let source = extension_source();
+        assert!(source.contains("pi.on(\"session_start\""));
+        assert!(source.contains("captureIdentity(ctx)"));
+        assert!(source.contains("ctx.sessionManager"));
+        assert!(source.contains("getSessionId"));
+        assert!(source.contains("getSessionFile"));
+        // The keys the hook transport reads, on the same payload as the
+        // status signal (never a second transport).
+        assert!(source.contains("session_id: identity.session_id"));
+        assert!(source.contains("session_file: identity.session_file"));
+        assert_eq!(source.matches("child.stdin.end(").count(), 1);
+    }
+
+    /// The session boundary report is registered ahead of the usage-only
+    /// return, so a coordination worker's conversation is recorded too: that
+    /// launch mode deliberately reports no turn/wait signals, but its
+    /// conversation is exactly what a human (or the coordinator) wants back
+    /// after the service restarts.
+    #[test]
+    fn extension_source_reports_the_session_boundary_before_the_usage_only_return() {
+        let source = extension_source();
+        let boundary = source
+            .find("pi.on(\"session_start\"")
+            .expect("the session boundary must be registered");
+        let usage_only = source
+            .find("DROGON_HOOK_USAGE_ONLY")
+            .expect("the usage-only switch must exist");
+        assert!(
+            boundary < usage_only,
+            "the locator capture must precede the usage-only return"
+        );
+        assert!(source.contains(&format!("return report(\"{}\")", ev::SESSION_START)));
     }
 
     #[test]

@@ -42,3 +42,16 @@ describe("TerminalPane grid ownership (#605)", () => {
     expect(paneSource).toMatch(/orderedWrite\.run\(\(\) => applyTerminalGrid\(/);
   });
 });
+
+// The pane is the only place that knows how well a resume can name the
+// conversation (the record's reported identity), so the recovery overlay's
+// copy can stay honest: without this the pane would promise "the same
+// conversation" for a harness that never reported one. Asserted at the
+// source level because the copy itself is covered by
+// terminal-process-exit.test.tsx and jsdom cannot see which overlay branch
+// the pane chose.
+describe("TerminalPane resume offer wiring", () => {
+  it("hands the sleeping projection's resume kind to the overlay", () => {
+    expect(paneSource).toMatch(/resumeKind: sleeping\?\.resumeKind/);
+  });
+});

@@ -184,11 +184,11 @@ import {
 } from "./features/shell/harness-launch-retry";
 import { CommandPaletteHost } from "./components/command-palette";
 import { supportsHarnessLaunch } from "./harness-capability";
-import { projectTerminalRestartLaunch } from "./features/terminal/terminal-restart-launch";
 import {
-  restoredBannerReason,
-  sleepingSessionFor,
-} from "./features/terminal/sleeping-session";
+  projectTerminalRestartLaunch,
+  projectTerminalRestartResume,
+} from "./features/terminal/terminal-restart-launch";
+import { restoredBannerReason } from "./features/terminal/sleeping-session";
 import type { SessionRestoredBannerReason } from "./features/terminal/SessionRestoredBanner";
 import {
   TERMINAL_CLEAR_EVENT,
@@ -4532,13 +4532,13 @@ export function App() {
       };
       const launch = projectTerminalRestartLaunch(prior, detail.workspaceId);
       // Resume by identity: a SLEEPING session (the daemon holds no child for
-      // it) is reopened through the harness's own resume verb naming the
-      // conversation that harness reported. A non-sleeping restart keeps
-      // today's behaviour exactly (no resume flag, no claim of a restore).
-      const sleeping = prior ? sleepingSessionFor(prior) : null;
-      const resumeInput = sleeping
-        ? { resume: true, resumeSessionId: sleeping.sessionId }
-        : {};
+      // it) and a positively EXITED harness session whose pane offered
+      // "Resume session" are reopened through the harness's own resume verb
+      // naming the conversation that harness reported -- the same projection
+      // the overlay rendered, so the button and the launch cannot disagree.
+      // Every other restart keeps today's behaviour exactly (no resume flag,
+      // no claim of a restore).
+      const resumeInput = projectTerminalRestartResume(prior);
       // R16-AJ2 follow-up (issue #221): the record alone carries only the
       // harness id; a remembered launch input replays provider/model/prompt
       // verbatim, so Restart/Retry relaunch the same agent command like the

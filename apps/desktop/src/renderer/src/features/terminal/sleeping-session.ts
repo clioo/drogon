@@ -64,22 +64,20 @@ export function harnessCanResume(
 /**
  * Whether the reported identity is enough to name ONE conversation.
  *
- * Pi is the exception that makes this more than a null check: `pi --session`
- * takes the session FILE it wrote, not the id, so an id without a transcript
- * path cannot name anything (the reference's `getAgentResumeArgv` returns
- * `null` for exactly this case). Every other resumable harness resumes by id.
+ * Pi used to be the exception that made this more than a null check: the
+ * reference's `getAgentResumeArgv` assumed `pi --session` takes only the
+ * session FILE it wrote. The installed CLI takes "a specific session file or
+ * partial UUID" (`pi --help`) and prints `pi --session <sessionId>` as its
+ * own resume hint on exit, so a reported id names the same conversation for
+ * every resumable harness; the transcript file is still preferred by the
+ * launch planner when the hook reported both.
  */
 export function namesOneConversation(input: {
   harnessId: string;
   agentSessionId: string | null | undefined;
   agentSessionTranscriptPath?: string | null;
 }): boolean {
-  const id = input.agentSessionId?.trim();
-  if (!id) return false;
-  if (input.harnessId === "pi") {
-    return Boolean(input.agentSessionTranscriptPath?.trim());
-  }
-  return true;
+  return Boolean(input.agentSessionId?.trim());
 }
 
 /** The session-record subset the sleeping projection reads. The two identity
@@ -94,14 +92,21 @@ export type SleepingSessionRecord = Pick<
 };
 
 /**
- * The sleeping projection of a session, or `null` when it is not sleeping.
- * Pure: the caller renders whatever this returns, never its own guess.
+ * The resume projection of a session record: which harness conversation a
+ * reopen would ask for, and how well it can name it. Verdict-agnostic on
+ * purpose -- a sleeping (`unverifiable`) session and a positively `exited`
+ * one both have a conversation behind them, and both offer the same reopen
+ * (`resumableSessionFor`); only the sleeping case additionally means "the
+ * daemon holds no child", which is why `sleepingSessionFor` still gates on
+ * the verdict. The exited case is the owner's own report: its overlay used
+ * to offer only "Restart", which relaunches the harness with no resume flag
+ * at all -- a new conversation, in a product whose contract is "abrirme la
+ * misma sesion en la que estaba trabajando". Pure: the caller renders
+ * whatever this returns, never its own guess.
  */
-export function sleepingSessionFor(
+export function resumableSessionFor(
   session: SleepingSessionRecord,
 ): SleepingSession | null {
-  // An exited session is positively gone; the recovery overlay owns it.
-  if (session.verdict !== "unverifiable") return null;
   const harnessId = session.harnessId ?? null;
   // A plain shell has no conversation to resume: its "reopen" is a new shell.
   if (!harnessId || !harnessCanResume(harnessId)) return null;
@@ -122,6 +127,18 @@ export function sleepingSessionFor(
     agentSessionTranscriptPath,
     resumeKind,
   };
+}
+
+/**
+ * The sleeping projection of a session, or `null` when it is not sleeping.
+ * Pure: the caller renders whatever this returns, never its own guess.
+ */
+export function sleepingSessionFor(
+  session: SleepingSessionRecord,
+): SleepingSession | null {
+  // An exited session is positively gone; the recovery overlay owns it.
+  if (session.verdict !== "unverifiable") return null;
+  return resumableSessionFor(session);
 }
 
 /**

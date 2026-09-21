@@ -4,7 +4,10 @@
 // record projection the App restart handler consumes.
 import { describe, expect, it } from "vitest";
 
-import { projectTerminalRestartLaunch } from "./terminal-restart-launch";
+import {
+  projectTerminalRestartLaunch,
+  projectTerminalRestartResume,
+} from "./terminal-restart-launch";
 
 describe("terminal restart launch projection", () => {
   it("re-launches a harness session through harness.start with the record's harness id", () => {
@@ -60,5 +63,52 @@ describe("terminal restart launch projection", () => {
       "ws-detail",
     );
     expect(launch.workspaceId).toBe("ws-record");
+  });
+});
+
+// The overlay's primary action and the launch it performs are one decision:
+// the resume input is derived from the SAME projections the pane rendered.
+describe("terminal restart resume projection", () => {
+  const record = (overrides: Record<string, unknown> = {}) => ({
+    id: "sess-1",
+    workspaceId: "ws-1",
+    verdict: "exited" as const,
+    exitCode: 1,
+    harnessId: "pi" as const,
+    agentSessionId: "01a0c0f6-5b60-72e7-8dc5-a9ed89ce5409",
+    agentSessionTranscriptPath: null as string | null,
+    args: ["--provider", "zai"],
+    ...overrides,
+  });
+
+  it("resumes a sleeping session's conversation", () => {
+    expect(
+      projectTerminalRestartResume(record({ verdict: "unverifiable" })),
+    ).toEqual({ resume: true, resumeSessionId: "sess-1" });
+  });
+
+  it("resumes an EXITED harness session, exactly like the overlay it rendered", () => {
+    expect(projectTerminalRestartResume(record())).toEqual({
+      resume: true,
+      resumeSessionId: "sess-1",
+    });
+  });
+
+  it("keeps a plain relaunch for a shell, an unknown harness and a headless turn", () => {
+    expect(projectTerminalRestartResume(record({ harnessId: null }))).toEqual({});
+    expect(projectTerminalRestartResume(record({ harnessId: "aider" }))).toEqual(
+      {},
+    );
+    // A headless one-shot run is restarted, never resumed interactively.
+    expect(
+      projectTerminalRestartResume(record({ args: ["-p", "do the thing"] })),
+    ).toEqual({});
+  });
+
+  it("never asks to resume a session that is still live, or no record at all", () => {
+    expect(projectTerminalRestartResume(record({ verdict: "live" }))).toEqual(
+      {},
+    );
+    expect(projectTerminalRestartResume(undefined)).toEqual({});
   });
 });

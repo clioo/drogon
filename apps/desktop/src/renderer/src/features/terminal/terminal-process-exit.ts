@@ -3,6 +3,12 @@
 // plus the PaneProcessExit shape from pty-connection-types.ts, narrowed to
 // the MVP subset (single pane per tab; the Git Bash capacity reason is kept
 // verbatim so the overlay copy stays exact).
+import {
+  resumableSessionFor,
+  type SleepingResumeKind,
+} from "./sleeping-session";
+import type { HarnessId } from "../../../../shared/session-contract";
+
 export type TerminalProcessExitReason =
   | "process-failed"
   | "process-completed"
@@ -19,15 +25,54 @@ export type TerminalProcessExitReason =
   // (`claude --resume <id>`) through the harness's own verb instead of
   // relaunching a blank tab; the copy never asserts an exit.
   | "session-sleeping"
+  // A positively exited harness session whose conversation the harness can
+  // reopen: the process is gone, but the work is not — the primary action
+  // resumes the conversation instead of relaunching a fresh one.
+  | "session-resumable"
   // A headless one-shot turn (a Bot's prompt, a Work Graph role) that ended
   // with exit 0: that IS the turn finishing, not a shell dying. Nothing waits
   // for input, and relaunching it would run the prompt again.
   | "turn-completed";
 
+/**
+ * The reasons whose primary action is a RESUME (the harness's own verb,
+ * naming a conversation) rather than a plain relaunch. One list, so the
+ * button's label, the copy and the launch App performs cannot disagree --
+ * Drogon addition: an exited HARNESS session has a conversation behind it,
+ * and "Restart" would relaunch the harness with no resume flag, i.e. a NEW
+ * conversation in the pane the user was working in (the owner contract:
+ * "abrirme la misma sesion").
+ */
+export const RESUME_REASONS: readonly TerminalProcessExitReason[] = [
+  "session-sleeping",
+  "session-resumable",
+];
+
 export type TerminalProcessExit = {
   exitCode: number | null;
   reason: TerminalProcessExitReason;
+  /**
+   * How well the reopen can name the conversation (`named`: the harness
+   * reported exactly which one; `continue`: only its own most-recent
+   * entrypoint is available). Only meaningful for the resume reasons, and
+   * the copy is the only place it shows: the pane never promises the same
+   * conversation when the harness cannot name one.
+   */
+  resumeKind?: SleepingResumeKind;
 };
+
+/**
+ * The resume kind this exit offers, or `null` when its primary action is a
+ * plain relaunch. The label, the copy and App's launch input all read this
+ * one answer.
+ */
+export function terminalProcessExitResumeKind(
+  exit: TerminalProcessExit,
+): SleepingResumeKind | null {
+  return RESUME_REASONS.includes(exit.reason)
+    ? (exit.resumeKind ?? "continue")
+    : null;
+}
 
 /**
  * Projects a Drogon session onto the overlay input. Returns null while the
@@ -35,21 +80,50 @@ export type TerminalProcessExit = {
  * shows the exit overlay.
  */
 export function projectTerminalProcessExit(session: {
+  id?: string;
+  workspaceId?: string;
   verdict: "live" | "unverifiable" | "exited";
-  exitCode: number | null;
+  exitCode?: number | null;
   args?: string[];
-  harnessId?: string | null;
+  harnessId?: HarnessId | null;
   causedByEventId?: string | null;
+  agentSessionId?: string | null;
+  agentSessionTranscriptPath?: string | null;
 }): TerminalProcessExit | null {
+  const exitCode = session.exitCode ?? null;
   // Unlike Orca's PTY lifecycle, Drogon restores durable completed rows.
   // They still need Restart/Close; hiding their overlay strands a dead pane.
   if (session.verdict !== "exited") return null;
-  if (session.exitCode === 0 && isHeadlessTurn(session)) {
+  if (exitCode === 0 && isHeadlessTurn(session)) {
     return { exitCode: 0, reason: "turn-completed" };
   }
+  // A harness session that reported a conversation can be RESUMED, not just
+  // restarted: the pane's primary action names the same conversation through
+  // the harness's own verb. A plain shell (no harness), a harness with no
+  // resume verb, and a headless run (whose own flow owns its recovery, and
+  // whose Restart re-runs the prompt) keep the restart semantics exactly as
+  // they were.
+  const resumable =
+    !isHeadlessTurn(session) && session.id && session.workspaceId
+      ? resumableSessionFor({
+          id: session.id,
+          workspaceId: session.workspaceId,
+          verdict: session.verdict,
+          harnessId: session.harnessId,
+          agentSessionId: session.agentSessionId,
+          agentSessionTranscriptPath: session.agentSessionTranscriptPath,
+        })
+      : null;
+  if (resumable) {
+    return {
+      exitCode,
+      reason: "session-resumable",
+      resumeKind: resumable.resumeKind,
+    };
+  }
   return {
-    exitCode: session.exitCode,
-    reason: session.exitCode === 0 ? "process-completed" : "process-failed",
+    exitCode,
+    reason: exitCode === 0 ? "process-completed" : "process-failed",
   };
 }
 
@@ -105,7 +179,22 @@ export function describeTerminalProcessExit(exit: TerminalProcessExit): {
     return {
       title: "This session is sleeping",
       detail:
-        "Drogon holds no process for this session, but its conversation is still there. Resume opens the same conversation with the harness's own resume command, or close the tab.",
+        exit.resumeKind === "named"
+          ? "Drogon holds no process for this session, but its conversation is still there. Resume opens the same conversation with the harness's own resume command, or close the tab."
+          : "Drogon holds no process for this session, but its harness can reopen a conversation. Resume reopens the most recent conversation in this folder, or close the tab.",
+    };
+  }
+  if (exit.reason === "session-resumable") {
+    // Honesty: the exit IS real (unlike sleeping), so the exit code stays;
+    // what changes is the offer -- the conversation is still there, and
+    // Resume names it rather than relaunching a blank one. A harness that
+    // reported no identity cannot be claimed to reopen the same one.
+    return {
+      title: "Terminal exited",
+      detail:
+        exit.resumeKind === "named"
+          ? `The shell process ended with exit code ${String(exit.exitCode)}. Its output is preserved. Resume opens the same conversation with the harness's own resume command, or close the tab.`
+          : `The shell process ended with exit code ${String(exit.exitCode)}. Its output is preserved. Resume reopens the most recent conversation in this folder, or close the tab.`,
     };
   }
   if (exit.reason === "turn-completed") {
@@ -124,10 +213,23 @@ export function describeTerminalProcessExit(exit: TerminalProcessExit): {
 /**
  * The overlay's primary action label. A sleeping session is resumed, not
  * restarted: the same conversation comes back, so calling the button
- * "Restart" would read as "start a new one".
+ * "Restart" would read as "start a new one". An exited harness session with
+ * a conversation behind it is the same offer -- the process is gone, the
+ * work is not.
  */
 export function terminalProcessExitActionLabel(
   exit: TerminalProcessExit,
 ): string {
-  return exit.reason === "session-sleeping" ? "Resume session" : "Restart";
+  return terminalProcessExitResumeKind(exit) !== null
+    ? "Resume session"
+    : "Restart";
+}
+
+/** Whether the overlay's primary action is a resume (rather than a plain
+ *  relaunch). The App's restart handler reads this so the button it rendered
+ *  is the action it performs -- one projection, no drift. */
+export function terminalProcessExitOffersResume(
+  exit: TerminalProcessExit,
+): boolean {
+  return terminalProcessExitResumeKind(exit) !== null;
 }

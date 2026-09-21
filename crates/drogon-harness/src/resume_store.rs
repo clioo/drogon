@@ -13,6 +13,13 @@
 // must degrade the resume to a normal start whenever the harness's own
 // store positively says there is nothing to resume.
 //
+// Pi is worse than a refusal and is the reason this module is not
+// Claude-only: `pi --continue` is `SessionManager.continueRecent(cwd)`, and
+// with nothing to continue it does not fail -- it opens a BRAND NEW session,
+// silently. A pane that asked to resume would show an empty conversation and
+// claim nothing. Modeling Pi's store turns that silence into the same
+// positive absence the planner already knows how to state out loud.
+//
 // The contract is deliberately three-valued: a layout this module does not
 // model returns `None` and keeps the caller's resume request, never a
 // guessed answer. Only a positive absence (`Some(false)`) degrades.
@@ -33,6 +40,28 @@ pub fn claude_project_dir_name(cwd: &Path) -> String {
         .collect()
 }
 
+/// The directory name Pi derives from a session's working directory: the
+/// leading separator is dropped, every remaining `/`, `\` or `:` becomes
+/// `-`, and the result is wrapped in `--` (Pi's `getDefaultSessionDirPath`).
+/// Spaces are kept: measured against the installed build's own
+/// `~/.pi/agent/sessions/--Users-x-Application Support-…--` layout.
+pub fn pi_project_dir_name(cwd: &Path) -> String {
+    let text = cwd.to_string_lossy();
+    let mut name = String::from("--");
+    for (index, character) in text.chars().enumerate() {
+        if index == 0 && matches!(character, '/' | '\\') {
+            continue;
+        }
+        name.push(if matches!(character, '/' | '\\' | ':') {
+            '-'
+        } else {
+            character
+        });
+    }
+    name.push_str("--");
+    name
+}
+
 fn has_jsonl_transcript(dir: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return false;
@@ -45,15 +74,56 @@ fn has_jsonl_transcript(dir: &Path) -> bool {
     })
 }
 
+/// Whether `probe` finds a conversation for `cwd`, or for the canonical
+/// spelling of it.
+///
+/// The daemon stores a workspace path exactly as it was registered, while a
+/// CLI resolves its own working directory through the OS: on macOS
+/// `/var/folders/...` is really `/private/var/folders/...`, and the harness's
+/// store is keyed by what the CLI saw. Both spellings name the same project,
+/// so a hit under either one is a positive answer; only a miss in BOTH is an
+/// absence (and a miss is what makes the planner degrade the resume).
+fn conversation_exists_for_either_spelling(cwd: &Path, probe: impl Fn(&Path) -> bool) -> bool {
+    if probe(cwd) {
+        return true;
+    }
+    match std::fs::canonicalize(cwd) {
+        Ok(canonical) if canonical != cwd => probe(&canonical),
+        _ => false,
+    }
+}
+
 /// Whether Claude Code has a conversation it would resume for `cwd` under
 /// the given config root (`$CLAUDE_CONFIG_DIR`, else `~/.claude`). A missing
 /// root or project directory is a positive "nothing to resume".
 pub fn claude_conversation_exists(config_root: &Path, cwd: &Path) -> bool {
-    has_jsonl_transcript(
-        &config_root
-            .join("projects")
-            .join(claude_project_dir_name(cwd)),
-    )
+    conversation_exists_for_either_spelling(cwd, |cwd| {
+        has_jsonl_transcript(
+            &config_root
+                .join("projects")
+                .join(claude_project_dir_name(cwd)),
+        )
+    })
+}
+
+/// Whether Pi has a conversation `pi --continue` would reopen for `cwd`
+/// under the given agent root (`$PI_CODING_AGENT_DIR`, else
+/// `~/.pi/agent`). A missing root or project directory is a positive
+/// "nothing to continue" -- the case where Pi would otherwise open a new
+/// session without saying so.
+pub fn pi_conversation_exists(agent_root: &Path, cwd: &Path) -> bool {
+    conversation_exists_for_either_spelling(cwd, |cwd| {
+        has_jsonl_transcript(&agent_root.join("sessions").join(pi_project_dir_name(cwd)))
+    })
+}
+
+/// Caller-resolved store roots, so tests can point each harness at a private
+/// directory. `None` falls back to the process environment (`$CLAUDE_CONFIG_DIR`
+/// / `$HOME/.claude`, `$PI_CODING_AGENT_DIR` / `$HOME/.pi/agent`).
+#[derive(Clone, Copy, Default)]
+pub struct ResumeStoreRoots<'a> {
+    pub claude_config: Option<&'a Path>,
+    pub pi_agent: Option<&'a Path>,
 }
 
 /// Three-valued answer to "would this harness's continue entrypoint find a
@@ -64,26 +134,44 @@ pub fn claude_conversation_exists(config_root: &Path, cwd: &Path) -> bool {
 ///   `cwd`; the caller must start fresh, not request a resume.
 /// - `None`: this harness's on-disk transcript layout is not modeled here,
 ///   so the resume request is kept exactly as asked (honest, never guessed).
-///
-/// `claude_config_root` is the caller-resolved Claude Code config directory
-/// (so tests can point it at a private root); pass `None` to fall back to
-/// `$CLAUDE_CONFIG_DIR` / `$HOME/.claude` from this process's environment.
 pub fn resumable_conversation_exists(
     harness_id: HarnessId,
     cwd: &Path,
-    claude_config_root: Option<&Path>,
+    roots: ResumeStoreRoots<'_>,
 ) -> Option<bool> {
     match harness_id {
         HarnessId::Claude => {
-            let root = claude_config_root
+            let root = roots
+                .claude_config
                 .map(Path::to_path_buf)
                 .or_else(default_claude_config_root)?;
             // An unreadable/missing HOME is not proof of absence: keep the
             // caller's request rather than degrade on a missing environment.
             Some(claude_conversation_exists(&root, cwd))
         }
-        HarnessId::Pi | HarnessId::Opencode | HarnessId::Antigravity | HarnessId::Codex => None,
+        HarnessId::Pi => {
+            let root = roots
+                .pi_agent
+                .map(Path::to_path_buf)
+                .or_else(default_pi_agent_root)?;
+            Some(pi_conversation_exists(&root, cwd))
+        }
+        HarnessId::Opencode | HarnessId::Antigravity | HarnessId::Codex => None,
     }
+}
+
+/// `$PI_CODING_AGENT_DIR` when set and non-empty, else `$HOME/.pi/agent`.
+fn default_pi_agent_root() -> Option<PathBuf> {
+    if let Some(configured) = std::env::var_os("PI_CODING_AGENT_DIR")
+        && !configured.is_empty()
+    {
+        return Some(PathBuf::from(configured));
+    }
+    let home = std::env::var_os("HOME")?;
+    if home.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(home).join(".pi").join("agent"))
 }
 
 /// `$CLAUDE_CONFIG_DIR` when set and non-empty, else `$HOME/.claude`.
@@ -127,7 +215,10 @@ mod tests {
             resumable_conversation_exists(
                 HarnessId::Claude,
                 Path::new("/tmp/nowhere"),
-                Some(root.path())
+                ResumeStoreRoots {
+                    claude_config: Some(root.path()),
+                    ..ResumeStoreRoots::default()
+                }
             ),
             Some(false)
         );
@@ -144,7 +235,14 @@ mod tests {
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(project.join("notes.txt"), "not a transcript\n").unwrap();
         assert_eq!(
-            resumable_conversation_exists(HarnessId::Claude, cwd, Some(root.path())),
+            resumable_conversation_exists(
+                HarnessId::Claude,
+                cwd,
+                ResumeStoreRoots {
+                    claude_config: Some(root.path()),
+                    ..ResumeStoreRoots::default()
+                }
+            ),
             Some(false),
             "a non-transcript file must not be mistaken for a conversation"
         );
@@ -154,7 +252,110 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            resumable_conversation_exists(HarnessId::Claude, cwd, Some(root.path())),
+            resumable_conversation_exists(
+                HarnessId::Claude,
+                cwd,
+                ResumeStoreRoots {
+                    claude_config: Some(root.path()),
+                    ..ResumeStoreRoots::default()
+                }
+            ),
+            Some(true)
+        );
+    }
+
+    /// Pi's project directory name is NOT Claude's: spaces survive, the
+    /// leading separator is dropped and the whole name is wrapped in `--`.
+    /// Measured against the installed build's own session tree.
+    #[test]
+    fn pi_project_dir_name_matches_the_installed_layout() {
+        assert_eq!(
+            pi_project_dir_name(Path::new(
+                "/Users/example/Library/Application Support/Drogon/workspaces/Drogon/issue-619-2"
+            )),
+            "--Users-example-Library-Application Support-Drogon-workspaces-Drogon-issue-619-2--"
+        );
+        assert_eq!(pi_project_dir_name(Path::new("/tmp/x")), "--tmp-x--");
+    }
+
+    /// `pi --continue` opens a NEW session when its store has nothing to
+    /// continue (it does not refuse), so a positive absence is the only way
+    /// the planner can avoid claiming a resume that silently started over.
+    #[test]
+    fn pi_reports_a_positive_absence_when_nothing_can_be_continued() {
+        let root = tempfile::tempdir().unwrap();
+        let cwd = Path::new("/tmp/pi-project");
+        let roots = ResumeStoreRoots {
+            pi_agent: Some(root.path()),
+            ..ResumeStoreRoots::default()
+        };
+        assert_eq!(
+            resumable_conversation_exists(HarnessId::Pi, cwd, roots),
+            Some(false),
+            "a missing sessions dir is a positive 'nothing to continue'"
+        );
+
+        let project = root.path().join("sessions").join(pi_project_dir_name(cwd));
+        std::fs::create_dir_all(&project).unwrap();
+        assert_eq!(
+            resumable_conversation_exists(HarnessId::Pi, cwd, roots),
+            Some(false),
+            "an empty project dir still has nothing to continue"
+        );
+        std::fs::write(project.join("notes.txt"), "not a transcript\n").unwrap();
+        assert_eq!(
+            resumable_conversation_exists(HarnessId::Pi, cwd, roots),
+            Some(false)
+        );
+        std::fs::write(
+            project.join("2026-09-20T22-36-05-857Z_01a0c0f6-5b60-72e7-8dc5-a9ed89ce5409.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            resumable_conversation_exists(HarnessId::Pi, cwd, roots),
+            Some(true)
+        );
+        // Another project's sessions never count for this cwd.
+        assert_eq!(
+            resumable_conversation_exists(HarnessId::Pi, Path::new("/tmp/other"), roots),
+            Some(false)
+        );
+    }
+
+    /// The daemon keeps the workspace path as registered; a CLI keys its own
+    /// store by the directory the OS reports. On macOS those differ for
+    /// `/var/...` vs `/private/var/...`, and a probe that only tried one
+    /// spelling would decline a resume the harness could have served.
+    #[cfg(unix)]
+    #[test]
+    fn a_conversation_under_the_canonical_spelling_still_counts() {
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("real-project");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = root.path().join("linked-project");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let store = root
+            .path()
+            .join("sessions")
+            .join(pi_project_dir_name(&std::fs::canonicalize(&real).unwrap()));
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(store.join("conv.jsonl"), "{}\n").unwrap();
+
+        let roots = ResumeStoreRoots {
+            pi_agent: Some(root.path()),
+            ..ResumeStoreRoots::default()
+        };
+        // The symlinked spelling is what a registered workspace may hold; the
+        // store was written under the canonical one.
+        assert_eq!(
+            resumable_conversation_exists(HarnessId::Pi, &link, roots),
+            Some(true),
+            "a hit under the canonical spelling is still a conversation"
+        );
+        assert_eq!(
+            resumable_conversation_exists(HarnessId::Pi, &real, roots),
             Some(true)
         );
     }
@@ -163,13 +364,19 @@ mod tests {
     fn unmodeled_harness_layouts_keep_the_resume_request() {
         let root = tempfile::tempdir().unwrap();
         for harness_id in [
-            HarnessId::Pi,
             HarnessId::Opencode,
             HarnessId::Antigravity,
             HarnessId::Codex,
         ] {
             assert_eq!(
-                resumable_conversation_exists(harness_id, Path::new("/tmp/x"), Some(root.path())),
+                resumable_conversation_exists(
+                    harness_id,
+                    Path::new("/tmp/x"),
+                    ResumeStoreRoots {
+                        claude_config: Some(root.path()),
+                        pi_agent: Some(root.path()),
+                    }
+                ),
                 None,
                 "{harness_id:?} must keep the caller's resume request"
             );

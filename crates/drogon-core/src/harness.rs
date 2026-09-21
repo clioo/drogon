@@ -200,7 +200,10 @@ impl Engine {
         // - Non-explicit resume (no recorded locator): the CLI's own
         //   most-recent entrypoint is requested and the harness's own store
         //   decides (Defect 2 safety) -- a positive absence degrades to a
-        //   normal start.
+        //   normal start. This is the whole reason Pi's store is modeled
+        //   too: `pi --continue` does not refuse when it has nothing to
+        //   continue, it opens a NEW session, so without the check the pane
+        //   would show an empty conversation with no banner at all.
         // - Explicit locator: when the daemon resolved it from a durable
         //   row (`resumeSessionId`), the persisted transcript path (from
         //   the harness's own hook payload) is verified before anything may
@@ -249,7 +252,7 @@ impl Engine {
                 if drogon_harness::resumable_conversation_exists(
                     request.harness_id,
                     std::path::Path::new(&cwd),
-                    None,
+                    drogon_harness::ResumeStoreRoots::default(),
                 ) == Some(false)
                 {
                     request.resume = false;
