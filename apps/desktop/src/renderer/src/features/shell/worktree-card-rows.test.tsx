@@ -102,8 +102,11 @@ describe("WorktreeCard nested session rows", () => {
     );
     try {
       // Harness session row: the harness label is the primary title now
-      // (issue #622: the row reads what the session runs, not Terminal N).
-      expect(screen.getByRole("button", { name: "Claude" })).toBeTruthy();
+      // (issue #622: the row reads what the session runs, not Terminal N),
+      // and the owner's design appends the row's own state.
+      expect(
+        screen.getByRole("button", { name: "Claude - Working" }),
+      ).toBeTruthy();
       // Fallback row for the session that never reported: tab title plus
       // the fork's freshness copy, never a bare missing row.
       expect(
@@ -174,10 +177,11 @@ describe("WorktreeCard nested session rows", () => {
     );
     try {
       // No `Claude - zsh`, never `Claude - Claude`: the harness label is
-      // the whole row text for the observed session.
-      expect(screen.getByRole("button", { name: "Claude" })).toBeTruthy();
+      // the whole row text for the observed session, followed by the state
+      // the owner's design puts on every row (here: working).
+      expect(screen.getByRole("button", { name: "Claude - Working" })).toBeTruthy();
       expect(
-        screen.getByRole("button", { name: "Terminal 2 - zsh" }),
+        screen.getByRole("button", { name: "Terminal 2 - zsh - Working" }),
       ).toBeTruthy();
       const observedRow = container.querySelector(
         '[data-worktree-agent-row="s-1"]',
@@ -195,10 +199,15 @@ describe("WorktreeCard nested session rows", () => {
       expect(
         shellRow.querySelector('[title="Shell"] svg.lucide-terminal'),
       ).not.toBeNull();
-      // The card lane draws the harness avatar for the observed session.
+      // The card lane draws the workspace status ring (no status set here:
+      // the dashed neutral ring, never a status the owner did not choose).
+      expect(
+        container.querySelector('[role="img"][aria-label="No status"]'),
+      ).not.toBeNull();
+      // The live activity glyph beside it is the working spinner.
       expect(
         container.querySelector(
-          '[data-worktree-card-agent-avatar][title="Claude"]',
+          '[data-worktree-card-status-slot] [aria-label="Working"]',
         ),
       ).not.toBeNull();
     } finally {

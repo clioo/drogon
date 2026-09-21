@@ -23,7 +23,7 @@ import type {
   HarnessId,
   Session,
 } from "../../../../shared/session-contract";
-import { sessionDotState } from "./agent-state";
+import { agentStateLabel, sessionDotState } from "./agent-state";
 import { defaultTerminalTabTitle } from "./tab-title";
 import {
   partitionPinnedOrder,
@@ -170,6 +170,22 @@ export function compareWorktreeAgentRows(a: Session, b: Session): number {
   );
 }
 
+/**
+ * The row's trailing state text (owner's design, 2026-09-21): the state's
+ * own label, or — while the session is not reporting — how long the silence
+ * has run. `unknown` never borrows a state word the daemon did not report:
+ * the freshness report is the honest thing to say, and it is the same
+ * string the row's secondary slot would otherwise have repeated.
+ */
+export function resolveRowStateLabel(
+  session: Session,
+  state: AgentState,
+  now: number,
+): string {
+  if (state === "unknown") return agentNoUpdateLabel(rowEvidenceMs(session), now);
+  return agentStateLabel(state);
+}
+
 export type WorktreeAgentRow = {
   session: Session;
   /** Dot state via the shared `sessionDotState` derivation. */
@@ -178,6 +194,12 @@ export type WorktreeAgentRow = {
   title: string;
   /** Freshness report, message preview, or harness/command identity. */
   secondary: string;
+  /**
+   * Always-true trailing state text: the state label, or the freshness
+   * report while the session is not reporting. Present on every row (the
+   * owner's decision), main rows included.
+   */
+  stateLabel: string;
   /** Compact age (`22m`) of the last report, or "" when unknowable. */
   relativeTime: string;
   /** True when this row's tab is the active one (focused highlight). */
@@ -248,6 +270,7 @@ export function buildWorktreeAgentRows(
       state: sessionDotState(session),
       title,
       secondary: resolveRowSecondary(session, now, title),
+      stateLabel: resolveRowStateLabel(session, sessionDotState(session), now),
       relativeTime: evidenceMs > 0 ? formatShortTimeAgo(evidenceMs, now) : "",
       focused: session.id === inputs.activeSessionId,
     };

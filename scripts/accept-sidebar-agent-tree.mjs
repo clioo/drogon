@@ -558,6 +558,91 @@ export async function runSidebarAgentTreeAcceptance() {
     };
     expectTree(expandedRows, [[1, 0, l1id], [2, 1, l2id], [3, 2, l3id]], "three treeitem rows at levels 1, 2, 3");
     report.checks.push("sidebar-shows-a-three-level-tree");
+
+    // Owner's sidebar design (2026-09-21): the card's own sentence states
+    // what its agents are doing, the lane carries the workspace STATUS ring
+    // (not agent activity), and every row states its own condition — with
+    // the tree's parent end reading MAIN. Each check derives its expectation
+    // from the rendered rows, so a sentence can never disagree with the tree
+    // under it.
+    const readCardDesign = async () =>
+      page.evaluate((rootSessionId) => {
+        const card = document.querySelector("[data-worktree-card-id]");
+        const rows = [...document.querySelectorAll("[data-worktree-agent-row]")];
+        const stateOf = (row) => row.querySelector("[data-worktree-agent-state]")?.getAttribute("data-worktree-agent-state") ?? null;
+        const sentence = card?.querySelector(".shell-worktree-card-sentence")?.textContent?.trim() ?? null;
+        const fold = card?.querySelector(".shell-worktree-card-fold");
+        const statusRing = card?.querySelector('[data-worktree-card-status-slot] [role="img"]');
+        const badge = card?.querySelector(".shell-worktree-agent-main-badge");
+        return {
+          sentence,
+          states: rows.map(stateOf),
+          labels: rows.map((row) => row.querySelector(".shell-worktree-agent-state-label")?.textContent?.trim() ?? null),
+          rowIds: rows.map((row) => row.getAttribute("data-worktree-agent-row")),
+          mainBadgeRowId: badge?.closest("[data-worktree-agent-row]")?.getAttribute("data-worktree-agent-row") ?? null,
+          statusLabel: statusRing?.getAttribute("aria-label") ?? null,
+          statusTone: statusRing?.className ?? null,
+          statusDashed: Boolean(statusRing?.querySelector(".border-dashed")),
+          foldExpanded: fold?.getAttribute("aria-expanded") ?? null,
+          foldLabel: fold?.getAttribute("aria-label") ?? null,
+          rootSessionId,
+        };
+      }, l1id);
+    const design = await readCardDesign();
+    report.cardDesign = design;
+    assert.ok(design.sentence && design.sentence === design.sentence.toUpperCase(), `the card states its activity in an uppercase sentence (${design.sentence})`);
+    assert.ok(!design.sentence.includes("NO SESSION"), "a card with three sessions never claims none");
+    const expectedSentence = design.states.includes("needs_input")
+      ? design.states.filter((state) => state === "needs_input")
+      : design.states.includes("working")
+        ? design.states.filter((state) => state === "working")
+        : design.states.every((state) => state === "unknown")
+          ? design.states
+          : null;
+    if (expectedSentence !== null) {
+      const count = expectedSentence.length;
+      const noun = count === 1 ? "AGENT" : "AGENTS";
+      const expected = design.states.includes("needs_input")
+        ? `${count} ${noun} NEED${count === 1 ? "S" : ""} INPUT`
+        : design.states.includes("working")
+          ? `${count} ${noun} WORKING`
+          : `${count} ${noun} NOT REPORTING`;
+      assert.equal(design.sentence, expected, `the sentence counts the rows it describes (${design.sentence})`);
+    } else {
+      assert.equal(design.sentence, "NO ACTIVE AGENTS", "quiet rows read as no active agents");
+    }
+    report.checks.push("the-card-states-its-agent-activity-in-words");
+    // Every row states its own condition, main rows included: three rows,
+    // three labels, and the MAIN badge only on the row that owns children.
+    assert.equal(design.labels.length, 3, "every row carries a state label");
+    assert.ok(design.labels.every((label) => typeof label === "string" && label.length > 0), `each row names its state (${JSON.stringify(design.labels)})`);
+    assert.equal(design.mainBadgeRowId, l1id, "the root that owns subagents is the MAIN row");
+    report.checks.push("every-row-states-its-condition-and-the-root-reads-main");
+    // No status is set yet: the lane's ring says so instead of claiming one.
+    assert.equal(design.statusLabel, "No status", "an unset status draws the dashed neutral ring");
+    assert.equal(design.statusDashed, true, "the unset ring is the dashed one");
+    assert.equal(design.foldExpanded, "true", "the card starts expanded");
+    // The owner's decision, proven end to end: setting the worktree's
+    // workspace status re-colours the lane's ring with the status' own icon.
+    await cliJson(["rpc", "worktree.update", "--params", JSON.stringify({ worktreeId, workspaceStatus: "in-review" })], { env, cwd: fixture });
+    const withStatus = await until(async () => {
+      const next = await readCardDesign();
+      return next.statusLabel === "Status In review" ? next : false;
+    }, "setting the workspace status re-colours the card ring");
+    assert.equal(withStatus.statusDashed, false, "a real status draws the status glyph, not the dashed ring");
+    assert.ok(withStatus.statusTone.includes("text-[#16a34a]"), `the ring keeps the status' own colour (${withStatus.statusTone})`);
+    report.checks.push("the-card-ring-carries-the-workspace-status");
+    // The card's own chevron folds the whole tree and keeps the sentence.
+    await page.locator(".shell-worktree-card-fold").click();
+    await until(async () => (await readCardDesign()).rowIds.length === 0, "the card chevron folds the whole agent list");
+    const foldedCard = await readCardDesign();
+    assert.equal(foldedCard.foldExpanded, "false", "the chevron reports its collapsed state");
+    assert.ok(foldedCard.sentence && foldedCard.sentence.length > 0, "a folded card still states its activity");
+    await page.locator(".shell-worktree-card-fold").click();
+    await until(async () => (await readCardDesign()).rowIds.length === 3, "the card chevron restores the tree");
+    report.checks.push("the-card-chevron-folds-and-restores-the-whole-tree");
+    checkCancelled();
+
     const expandedShot = path.join(output, "tree-expanded.png");
     await page.screenshot({ path: expandedShot, animations: "disabled" });
     report.screenshots.push(expandedShot);

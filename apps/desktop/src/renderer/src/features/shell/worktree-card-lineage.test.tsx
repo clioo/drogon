@@ -334,6 +334,7 @@ describe("WorktreeCard subagent nesting box (issue #359)", () => {
     seedWorktreeAgentExpansionStateForTests("wt-prune-1", {
       collapsedLineageParents: new Set(["gone-1"]),
       compactRootListExpanded: false,
+      cardFolded: false,
     });
     const { view } = renderCard("wt-prune-1", orchestrationSet());
     // Collapse the live parent: the dead id is pruned, the live fold lands.
@@ -353,6 +354,7 @@ describe("WorktreeCard subagent nesting box (issue #359)", () => {
     seedWorktreeAgentExpansionStateForTests("wt-prune-2", {
       collapsedLineageParents: new Set(["gone-9"]),
       compactRootListExpanded: false,
+      cardFolded: false,
     });
     const { view } = renderCard(
       "wt-prune-2",
@@ -365,13 +367,19 @@ describe("WorktreeCard subagent nesting box (issue #359)", () => {
           parentSessionId: "o-1",
           createdAt: "2026-09-08T11:05:00.000Z",
         }),
-        session("s-2", { createdAt: "2026-09-08T11:30:00.000Z" }),
+        // The pill only takes over a long fan-out now (owner's design,
+        // 2026-09-21), so the fixture carries enough roots to reach it.
+        ...Array.from({ length: 5 }, (_, index) =>
+          session(`s-${index + 2}`, {
+            createdAt: `2026-09-08T11:${30 + index}:00.000Z`,
+          }),
+        ),
       ],
       "compact",
     );
     // The pill names the observed session's harness (the shared resolver),
     // not Shell.
-    const pill = view.getByRole("button", { name: /Expand 2 agents/ });
+    const pill = view.getByRole("button", { name: /Expand 6 agents/ });
     expect(pill.getAttribute("aria-label")).toContain("Claude idle");
     fireEvent.click(pill);
     const rows = view.container.querySelector(".shell-worktree-card-rows")!;

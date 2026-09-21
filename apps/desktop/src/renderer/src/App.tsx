@@ -276,6 +276,10 @@ import {
 } from "./features/shell/sidebar-bot-sessions";
 import { sidebarSessionView } from "./features/shell/sidebar-sessions";
 import {
+  createSidebarSessionCollector,
+  pollSidebarSessions,
+} from "./features/shell/sidebar-session-source";
+import {
   planBrowserRehydrate,
   windowBrowserBridge,
 } from "./features/browser/browser-bridge";
@@ -2459,6 +2463,14 @@ export function App() {
     statusEpoch,
     revision,
   ]);
+  // The sidebar's session source (owner's sidebar fix, 2026-09-21):
+  // host-wide while that read works, the workspaces the sidebar shows when
+  // it does not. Refs, not state: the collector is a poll accumulator and
+  // the id list is read at poll time, so neither may restart the effect
+  // below — and a workspace switch must never reset it.
+  const sidebarSessionsSource = useRef(createSidebarSessionCollector());
+  const sidebarWorkspaceIds = useRef<string[]>([]);
+  sidebarWorkspaceIds.current = workspaces.map((workspace) => workspace.id);
   // Bot-session persistence (task_926fddc5e769 follow-up): the host-wide
   // counterpart to the `selected`-scoped fetch above. Deliberately its OWN
   // effect (not folded into the one above) so a workspace switch never
@@ -2478,17 +2490,37 @@ export function App() {
     }
     let cancelled = false;
     let lastPollMs = 0;
+    // Owner's sidebar fix (2026-09-21): the host-wide list is ONE response
+    // frame, and `drogond` refuses any frame past `MAX_FRAME_BYTES` (1 MiB)
+    // — it closes the connection instead, so one oversized reply left every
+    // card except the selected one with no rows at all. The collector asks
+    // host-wide first and, when that read fails, reads the workspaces the
+    // sidebar actually shows in rotating batches, so the cards keep their
+    // agents either way. Unchanged replies still commit nothing.
     const poll = async () => {
       lastPollMs = Date.now();
-      const result = await window.drogon.sessions();
-      if (cancelled || !result.ok) return;
+      const view = await pollSidebarSessions({
+        collector: sidebarSessionsSource.current,
+        workspaceIds: sidebarWorkspaceIds.current,
+        fetchHostWide: async () => {
+          const result = await window.drogon.sessions();
+          return result.ok
+            ? { ok: true, sessions: result.result.sessions }
+            : { ok: false };
+        },
+        fetchScoped: async (workspaceId) => {
+          const result = await window.drogon.sessions(workspaceId);
+          return result.ok
+            ? { ok: true, sessions: result.result.sessions }
+            : { ok: false };
+        },
+      });
+      if (cancelled) return;
       // PERF-03: keep the previous array when the content is unchanged, so
       // the 3s tick commits nothing while idle. Merge semantics untouched:
       // any field-level difference still replaces the list.
       setAllBotSessions((previous) =>
-        sameSessions(previous, result.result.sessions)
-          ? previous
-          : result.result.sessions,
+        sameSessions(previous, view.sessions) ? previous : view.sessions,
       );
     };
     const tick = () => {
