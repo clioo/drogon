@@ -6,10 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import {
+  RESUME_REASONS,
   describeTerminalProcessExit,
   projectTerminalProcessExit,
   terminalProcessExitActionLabel,
   terminalProcessExitOffersResume,
+  terminalProcessExitResumeKind,
 } from "./terminal-process-exit";
 import { TerminalProcessExitOverlay } from "./TerminalProcessExitOverlay";
 
@@ -210,6 +212,29 @@ describe("describeTerminalProcessExit", () => {
     expect(
       terminalProcessExitOffersResume({ exitCode: 0, reason: "turn-completed" }),
     ).toBe(false);
+  });
+
+  // One list decides the label, the copy and App's launch input; the kind a
+  // resume reports decides whether the copy may promise the same
+  // conversation. Both are read straight off the exit projection.
+  it("names exactly the resume reasons and how well each can name a conversation", () => {
+    expect([...RESUME_REASONS]).toEqual(["session-sleeping", "session-resumable"]);
+    expect(
+      terminalProcessExitResumeKind({
+        exitCode: 1,
+        reason: "session-resumable",
+        resumeKind: "named",
+      }),
+    ).toBe("named");
+    expect(
+      terminalProcessExitResumeKind({ exitCode: 1, reason: "session-resumable" }),
+    ).toBe("continue");
+    expect(
+      terminalProcessExitResumeKind({ exitCode: 1, reason: "process-failed" }),
+    ).toBeNull();
+    expect(
+      terminalProcessExitResumeKind({ exitCode: 0, reason: "turn-completed" }),
+    ).toBeNull();
   });
 });
 

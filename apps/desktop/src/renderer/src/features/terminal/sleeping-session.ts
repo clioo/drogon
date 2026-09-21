@@ -23,14 +23,6 @@
 // - `none`: the harness has no resume mechanism at all; a reopen is a NEW
 //   session and the UI must say so.
 //
-// The same projection answers the OTHER pane that has a conversation behind
-// it: a positively `exited` harness session. Its overlay used to offer only
-// "Restart", which relaunches the harness with no resume flag at all -- a
-// new conversation, in a product whose owner contract is "abrirme la misma
-// sesion en la que estaba trabajando". `resumableSessionFor` is that answer
-// (verdict-agnostic), and the overlay's Resume uses it exactly like the
-// sleeping overlay does.
-//
 // Deliberately NOT ported from the source reference's sleeping-record model
 // (`src/renderer/src/lib/sleeping-agent-pane-ownership.ts`):
 // `isPassiveCompletedHibernationEvidence` excludes a finished, non-quit record
@@ -106,8 +98,11 @@ export type SleepingSessionRecord = Pick<
  * one both have a conversation behind them, and both offer the same reopen
  * (`resumableSessionFor`); only the sleeping case additionally means "the
  * daemon holds no child", which is why `sleepingSessionFor` still gates on
- * the verdict. Pure: the caller renders whatever this returns, never its own
- * guess.
+ * the verdict. The exited case is the owner's own report: its overlay used
+ * to offer only "Restart", which relaunches the harness with no resume flag
+ * at all -- a new conversation, in a product whose contract is "abrirme la
+ * misma sesion en la que estaba trabajando". Pure: the caller renders
+ * whatever this returns, never its own guess.
  */
 export function resumableSessionFor(
   session: SleepingSessionRecord,

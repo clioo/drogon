@@ -3,12 +3,6 @@
 // plus the PaneProcessExit shape from pty-connection-types.ts, narrowed to
 // the MVP subset (single pane per tab; the Git Bash capacity reason is kept
 // verbatim so the overlay copy stays exact).
-//
-// Drogon addition (`session-resumable`): an exited HARNESS session has a
-// conversation behind it, and the harness's own resume verb reopens it. The
-// pane must offer that instead of a plain Restart -- "Restart" relaunches the
-// harness with no resume flag, which is a NEW conversation in a pane the user
-// was working in (the owner contract: "abrirme la misma sesion").
 import {
   resumableSessionFor,
   type SleepingResumeKind,
@@ -40,6 +34,20 @@ export type TerminalProcessExitReason =
   // for input, and relaunching it would run the prompt again.
   | "turn-completed";
 
+/**
+ * The reasons whose primary action is a RESUME (the harness's own verb,
+ * naming a conversation) rather than a plain relaunch. One list, so the
+ * button's label, the copy and the launch App performs cannot disagree --
+ * Drogon addition: an exited HARNESS session has a conversation behind it,
+ * and "Restart" would relaunch the harness with no resume flag, i.e. a NEW
+ * conversation in the pane the user was working in (the owner contract:
+ * "abrirme la misma sesion").
+ */
+export const RESUME_REASONS: readonly TerminalProcessExitReason[] = [
+  "session-sleeping",
+  "session-resumable",
+];
+
 export type TerminalProcessExit = {
   exitCode: number | null;
   reason: TerminalProcessExitReason;
@@ -52,6 +60,19 @@ export type TerminalProcessExit = {
    */
   resumeKind?: SleepingResumeKind;
 };
+
+/**
+ * The resume kind this exit offers, or `null` when its primary action is a
+ * plain relaunch. The label, the copy and App's launch input all read this
+ * one answer.
+ */
+export function terminalProcessExitResumeKind(
+  exit: TerminalProcessExit,
+): SleepingResumeKind | null {
+  return RESUME_REASONS.includes(exit.reason)
+    ? (exit.resumeKind ?? "continue")
+    : null;
+}
 
 /**
  * Projects a Drogon session onto the overlay input. Returns null while the
@@ -199,7 +220,7 @@ export function describeTerminalProcessExit(exit: TerminalProcessExit): {
 export function terminalProcessExitActionLabel(
   exit: TerminalProcessExit,
 ): string {
-  return exit.reason === "session-sleeping" || exit.reason === "session-resumable"
+  return terminalProcessExitResumeKind(exit) !== null
     ? "Resume session"
     : "Restart";
 }
@@ -210,5 +231,5 @@ export function terminalProcessExitActionLabel(
 export function terminalProcessExitOffersResume(
   exit: TerminalProcessExit,
 ): boolean {
-  return exit.reason === "session-sleeping" || exit.reason === "session-resumable";
+  return terminalProcessExitResumeKind(exit) !== null;
 }
