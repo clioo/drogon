@@ -42,8 +42,7 @@ describe("bot-session-resume placement resync", () => {
     );
   });
 
-  it("reloads the renderer after Add Project and before Create Bot", () => {
-    const added = journey.indexOf(
+  it("reloads the renderer after Add Project and before Create Bot", () => {    const added = journey.indexOf(
       'addDialog.getByRole("button", { name: "Add Project", exact: true }).click();',
     );
     const reloaded = journey.indexOf("await page.reload();");
@@ -65,6 +64,33 @@ describe("bot-session-resume placement resync", () => {
     assert.ok(
       created !== -1 && created > reloaded,
       "Create Bot must come after the reload",
+    );
+  });
+
+  // The daemon inspects Pi's own session store before asking `pi --continue`
+  // to reopen a conversation (an empty store degrades to a stated fresh start
+  // instead of Pi silently opening a new session), and the session
+  // environment strips `PI_CODING_AGENT_DIR` from the harness child -- so the
+  // journey itself has to plant what a real `pi` run leaves, for the home the
+  // first session reported, before it asserts the reopen.
+  it("plants Pi's own store for the Bot home before the reopen", () => {
+    const seeded = journey.indexOf("const piStore = path.join(");
+    assert.ok(seeded !== -1, "the Pi store seeding must exist");
+    assert.ok(
+      journey.includes('line.startsWith("CWD=")'),
+      "the home must come from the session's own CWD report",
+    );
+    const firstOpen = journey.indexOf("await openSessionFromCard();");
+    const reopened = journey.indexOf(
+      "defect2-closed-session-resumes-with-continue",
+    );
+    assert.ok(
+      firstOpen !== -1 && seeded > firstOpen,
+      "the store is planted only after the home is known",
+    );
+    assert.ok(
+      reopened !== -1 && seeded < reopened,
+      "the store must be planted before the reopen is asserted",
     );
   });
 });

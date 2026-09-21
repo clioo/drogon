@@ -311,6 +311,36 @@ try {
   report.checks.push("first-open-session-is-live-and-idle");
   report.checks.push("poisoned-parent-harness-markers-scrubbed");
 
+  // Plant what a real `pi` run leaves in its own store for this home
+  // (`$PI_CODING_AGENT_DIR/sessions/<escaped cwd>/<id>.jsonl`). The daemon
+  // inspects that store before asking `pi --continue` to reopen a
+  // conversation: with nothing in it, the reopen degrades to a stated fresh
+  // start rather than Pi silently opening a new session. The fixture cannot
+  // write it itself -- the session environment deliberately strips
+  // `PI_CODING_AGENT_DIR` from the harness child -- so the journey derives the
+  // home from the session's own `CWD=` report.
+  const botHome = firstText
+    .split("\n")
+    .find((line) => line.startsWith("CWD="))
+    ?.slice("CWD=".length)
+    .trim();
+  assert.ok(botHome, `the first session must report its home: ${firstText}`);
+  const piStore = path.join(
+    fixture,
+    ".pi",
+    "agent",
+    "sessions",
+    `--${botHome.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`,
+  );
+  await mkdir(piStore, { recursive: true });
+  await writeFile(
+    path.join(
+      piStore,
+      "2026-09-20T22-36-05-857Z_01a0c0f6-5b60-72e7-8dc5-a9ed89ce5409.jsonl",
+    ),
+    "{}\n",
+  );
+
   // Defect 1: switch to a FOREIGN workspace, then click Open again. The old
   // code searched the selected workspace's session list, missed, and opened a
   // SECOND session. The fix focuses the recorded one.
