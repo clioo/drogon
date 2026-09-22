@@ -1815,12 +1815,20 @@ fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, O
     } else {
         handle.hook_turn_fact()
     };
-    let state = agent_state::derive(
+    let derived = agent_state::derive(
         verdict == "exited",
         activity,
         needs_input_at.is_some(),
         hook_turn,
     );
+    // F1 sidebar truth: activity-clock `Working` is PTY output (echo,
+    // redraw, an idle composer repainting without hooks) — unproven as a
+    // turn for shells, observed harnesses, and `harness.start` launches
+    // alike, so it downgrades to `Unknown` (session kept, no turn claimed).
+    // Hook-backed turns never reach the gate as unproven (`Active`
+    // bypasses it). Identity observation still runs below in `to_json` —
+    // a hosted harness stays recognized there, only its turn reads unknown.
+    let state = agent_state::gate_shell_activity(derived, hook_turn);
     let at = match state {
         AgentState::Working | AgentState::Idle => state_at,
         AgentState::NeedsInput => needs_input_at,

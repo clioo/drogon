@@ -23,7 +23,7 @@ import {
   recoveryActionFor,
   recoveryTabLabel,
 } from "../../session-recovery";
-import { sessionDotState } from "./agent-state";
+import { sessionAgentState } from "./agent-state";
 import { AgentStateIcon } from "./AgentStateIcon";
 import type { EditorTabState } from "./editor-tab";
 import { ShellIconButton } from "./ShellIconButton";
@@ -607,7 +607,7 @@ export function TabBar({
                             agent logo beside the state glyph so parallel
                             tabs stay scannable; the state indicator here is
                             unchanged, this only adds the harness identity. */}
-                        <AgentStateIcon state={sessionDotState(item)} size={13} />
+                        <AgentStateIcon state={sessionAgentState(item)} size={13} />
                         {badgeHarnessId && (
                           <span
                             className="inline-flex shrink-0"

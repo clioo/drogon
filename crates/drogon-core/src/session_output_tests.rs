@@ -400,6 +400,297 @@ fn identity_errors_answer_at_once_with_read_codes() {
     assert_eq!(missing.error.unwrap().code, "not_found");
 }
 
+/// Reads from cursor 0 until `needle` appears in the session's output, so
+/// the assertion below runs while the activity clock is provably fresh —
+/// exactly the instant the pre-fix derivation reported `working`.
+fn wait_for_output(engine: &Engine, id: &str, incarnation: &str, needle: &[u8]) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let page = invoke(
+            engine,
+            "read",
+            "session.read",
+            json!({"sessionId": id, "incarnation": incarnation, "cursor": 0}),
+        );
+        let bytes = decoded_data(&page);
+        if bytes.windows(needle.len()).any(|w| w == needle) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {needle:?} in session {id}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn list_row(engine: &Engine, workspace: &str, id: &str) -> Value {
+    let list = invoke(
+        engine,
+        "list",
+        "session.list",
+        json!({"workspaceId": workspace}),
+    );
+    list["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .expect("session still listed")
+        .clone()
+}
+
+#[test]
+fn plain_shell_output_is_unknown_never_working_nor_idle() {
+    // Owner report 2026-09-21 (F1): an idle Pi hosted inside Terminal 1-zsh
+    // read as Working. A harness-less shell's PTY bytes (echo, redraw) are
+    // unproven as a turn: fresh shell output must read `unknown` — neither
+    // a Working claim nor a manufactured Idle. The session still exists (no
+    // false NO SESSION), stays live, and no harness is observed.
+    let (_dir, engine) = open_engine();
+    let workspace = workspace_id(&engine);
+    let (id, incarnation) = start_shell(
+        &engine,
+        &workspace,
+        "/bin/sh",
+        vec!["-c", "echo shell-proof-marker; exec sleep 30"],
+    );
+    wait_for_output(&engine, &id, &incarnation, b"shell-proof-marker");
+    let row = list_row(&engine, &workspace, &id);
+    assert_eq!(row["verdict"], "live");
+    assert!(
+        row["harnessId"].is_null(),
+        "plain shell launches no harness"
+    );
+    assert!(row["observedHarnessId"].is_null());
+    assert_eq!(
+        row["agentState"], "unknown",
+        "fresh shell echo proves terminal liveness, not an agent turn: {row}"
+    );
+}
+
+#[test]
+fn shell_hosted_harness_is_recognized_but_its_turn_stays_unknown() {
+    // Coordinator guardrail "recognition is not turn evidence": a harness
+    // executable foregrounded inside a plain shell is observed by name
+    // (identity kept — never hidden to silence the badge), but its fresh
+    // output may be an idle composer repainting with no hooks firing, so
+    // the turn reads `unknown`, never `working`.
+    // The observed process runs under the harness's own argv[0] — the same
+    // mechanism that recognizes a symlinked install whose on-disk
+    // executable is a version number (`claude` -> `.../versions/2.1.278`):
+    // `exec -a` repoints argv[0] at a `pi` path while the image stays plain
+    // `sleep`. (A `#!/bin/sh` script would resolve to `sh`, and a homebrew
+    // `python3` to `python3.14` — neither is a runtime shim, and shells are
+    // deliberately never argv-scanned, so neither fixture observes.)
+    let bindir = tempfile::tempdir().unwrap();
+    let pi = bindir.path().join("pi");
+    let (_dir, engine) = open_engine();
+    let workspace = workspace_id(&engine);
+    let launch = format!("echo hosted-pi-marker; exec -a {} sleep 30", pi.display());
+    let (id, incarnation) = start_shell(
+        &engine,
+        &workspace,
+        "/bin/bash",
+        vec!["-c", launch.as_str()],
+    );
+    wait_for_output(&engine, &id, &incarnation, b"hosted-pi-marker");
+    // The foreground memo pins the pre-exec shell for its 1 s TTL, so the
+    // observation lands on the next re-probe — poll like the renderer's 3 s
+    // `session.list` cadence does, then assert immediately while the marker
+    // output is still inside the 3 s activity window.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let row = loop {
+        let row = list_row(&engine, &workspace, &id);
+        if row["observedHarnessId"] == "pi" {
+            break row;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for the hosted-pi observation: {row}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(row["verdict"], "live");
+    assert!(
+        row["harnessId"].is_null(),
+        "nothing was launched via harness.start"
+    );
+    assert_eq!(
+        row["agentState"], "unknown",
+        "an idle repaint is indistinguishable from inference without hooks: {row}"
+    );
+}
+
+/// Points `agentCmdOverrides` at a fixture `pi` running `body`, so the
+/// hook-lifecycle tests below drive a session that legitimately carries
+/// the pi hook namespace (hook events on harness-less sessions are refused
+/// as forgeries). Uses the product's absolute-path command override so no
+/// real harness runs and PATH stays untouched. Must run before open.
+fn write_pi_fixture(dir: &tempfile::TempDir, body: &str) {
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let pi_fixture = bin.join("pi");
+    std::fs::write(&pi_fixture, format!("#!/bin/sh\n{body}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&pi_fixture, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::write(
+        dir.path().join("agent-settings.json"),
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "settings": {
+                "defaultTuiAgent": null,
+                "disabledTuiAgents": [],
+                "agentCmdOverrides": { "pi": pi_fixture.to_string_lossy() },
+                "agentDefaultArgs": {},
+                "agentDefaultEnv": {},
+                "agentStatusHooksEnabled": true,
+                "tabAutoGenerateTitle": false,
+                "promptCacheTimerEnabled": false,
+                "promptCacheTtlMs": 300000,
+                "codexSessionSourceHome": ""
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+fn start_launched_pi(engine: &Engine, workspace: &str) -> Value {
+    let session = invoke(
+        engine,
+        "start",
+        "harness.start",
+        json!({
+            "workspaceId": workspace,
+            "harnessId": "pi",
+            "permissionMode": "inherit",
+        }),
+    );
+    assert_eq!(session["harnessId"], "pi");
+    session
+}
+
+fn hook_event(engine: &Engine, id: &str, incarnation: &str, event: &str) -> Value {
+    invoke(
+        engine,
+        &format!("hook-{event}"),
+        "session.hook_event",
+        json!({
+            "sessionId": id,
+            "incarnation": incarnation,
+            "event": event,
+        }),
+    )
+}
+
+#[test]
+fn launched_harness_idle_paint_is_unknown_until_a_start_hook() {
+    // F1 loophole removal: a launched composer repaints idle and echoes
+    // typing too, so fresh launch bytes without a hook turn prove terminal
+    // liveness, never an agent turn. The launch stays recognized (harness
+    // id, live verdict) — only the turn reads unknown.
+    let dir = tempfile::tempdir().unwrap();
+    write_pi_fixture(&dir, "echo launched-pi-marker\nsleep 30");
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace = workspace_id(&engine);
+    let session = start_launched_pi(&engine, &workspace);
+    let id = session["id"].as_str().unwrap();
+    let incarnation = session["incarnation"].as_str().unwrap();
+    wait_for_output(&engine, id, incarnation, b"launched-pi-marker");
+    let row = list_row(&engine, &workspace, id);
+    assert_eq!(row["verdict"], "live");
+    assert_eq!(row["harnessId"], "pi");
+    assert_eq!(
+        row["agentState"], "unknown",
+        "idle paint without a start hook is unproven as a turn: {row}"
+    );
+}
+
+#[test]
+fn launched_start_hook_is_working_even_silent() {
+    // The hook turn is authoritative: AgentStart reads `working` with zero
+    // PTY output, through silence that would otherwise flip the row idle.
+    let dir = tempfile::tempdir().unwrap();
+    write_pi_fixture(&dir, "exec sleep 30");
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace = workspace_id(&engine);
+    let session = start_launched_pi(&engine, &workspace);
+    let id = session["id"].as_str().unwrap();
+    let incarnation = session["incarnation"].as_str().unwrap();
+    let started = hook_event(&engine, id, incarnation, "AgentStart");
+    assert_eq!(started["agentState"], "working");
+    let row = list_row(&engine, &workspace, id);
+    assert_eq!(
+        row["agentState"], "working",
+        "a hook-reported turn stays working without output: {row}"
+    );
+}
+
+#[test]
+fn launched_end_hook_then_echo_remains_idle() {
+    // The turn-end hook closes the turn on the harness's own authority;
+    // later PTY output (the user's echo at the idle prompt) must not spin
+    // the row back to `working`.
+    let dir = tempfile::tempdir().unwrap();
+    write_pi_fixture(
+        &dir,
+        "echo first-marker\nsleep 5\necho second-marker\nsleep 30",
+    );
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace = workspace_id(&engine);
+    let session = start_launched_pi(&engine, &workspace);
+    let id = session["id"].as_str().unwrap();
+    let incarnation = session["incarnation"].as_str().unwrap();
+    wait_for_output(&engine, id, incarnation, b"first-marker");
+    assert_eq!(
+        hook_event(&engine, id, incarnation, "AgentStart")["agentState"],
+        "working"
+    );
+    assert_eq!(
+        hook_event(&engine, id, incarnation, "AgentEnd")["agentState"],
+        "idle"
+    );
+    // Fresh output after the turn ended: still idle, never working.
+    wait_for_output(&engine, id, incarnation, b"second-marker");
+    let row = list_row(&engine, &workspace, id);
+    assert_eq!(
+        row["agentState"], "idle",
+        "post-turn echo is not turn evidence: {row}"
+    );
+}
+
+#[test]
+fn launched_approval_stays_needs_input_until_cleared() {
+    // A genuine approval wait parks the session until the harness resolves
+    // it — output and silence must not clear it first.
+    let dir = tempfile::tempdir().unwrap();
+    write_pi_fixture(&dir, "echo launched-pi-marker\nexec sleep 30");
+    let engine = Engine::open(dir.path()).unwrap();
+    let workspace = workspace_id(&engine);
+    let session = start_launched_pi(&engine, &workspace);
+    let id = session["id"].as_str().unwrap();
+    let incarnation = session["incarnation"].as_str().unwrap();
+    wait_for_output(&engine, id, incarnation, b"launched-pi-marker");
+    assert_eq!(
+        hook_event(&engine, id, incarnation, "ToolApprovalRequested")["agentState"],
+        "needs_input"
+    );
+    assert_eq!(
+        list_row(&engine, &workspace, id)["agentState"],
+        "needs_input",
+        "the wait survives until the harness clears it"
+    );
+    assert_eq!(
+        hook_event(&engine, id, incarnation, "ToolApprovalResolved")["agentState"],
+        "working",
+        "the harness's own resolution hands the turn back: {id}"
+    );
+}
+
 #[test]
 fn limit_bounds_are_shared_with_read() {
     let (_dir, engine) = open_engine();

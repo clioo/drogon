@@ -282,6 +282,21 @@ pub(crate) fn classify_hook_event_for_harness(
 /// of silence"), not derived from any measurement.
 pub(crate) const ACTIVITY_WINDOW: Duration = Duration::from_secs(3);
 
+/// F1 sidebar truth: PTY bytes are not turn evidence — not shell echo, not
+/// an idle composer's repaint, whether the session was launched via
+/// `harness.start`, merely observed, or a plain shell. [`derive`] still
+/// reports activity-clock `Working` for any fresh output; without a
+/// hook-reported turn ([`HookTurn::Active`]) it is downgraded to `Unknown`
+/// here. The session still exists (never hidden, never exited) and terminal
+/// liveness is reported independently; only the agent turn is unclaimed.
+pub(crate) fn gate_shell_activity(state: AgentState, hook_turn: HookTurn) -> AgentState {
+    if state == AgentState::Working && !matches!(hook_turn, HookTurn::Active) {
+        AgentState::Unknown
+    } else {
+        state
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AgentState {
     Working,
@@ -542,6 +557,45 @@ mod tests {
             derive(true, Activity::NeverObserved, false, HookTurn::Active),
             AgentState::Exited
         );
+    }
+
+    #[test]
+    fn activity_working_without_a_hook_turn_is_unknown() {
+        // F1: PTY bytes prove terminal liveness, never an agent turn — for
+        // plain shells, observed harnesses, AND `harness.start` launches
+        // (a launched composer repaints idle and echoes typing too).
+        // Reads `Unknown`: neither a Working claim nor a manufactured Idle.
+        for hook_turn in [HookTurn::Untracked, HookTurn::Inactive] {
+            assert_eq!(
+                gate_shell_activity(AgentState::Working, hook_turn),
+                AgentState::Unknown
+            );
+        }
+    }
+
+    #[test]
+    fn hook_authoritative_turns_and_other_states_pass_through() {
+        // Only a hook-reported turn proves work; every non-Working state
+        // keeps its meaning with any turn fact.
+        assert_eq!(
+            gate_shell_activity(AgentState::Working, HookTurn::Active),
+            AgentState::Working
+        );
+        for state in [
+            AgentState::Idle,
+            AgentState::NeedsInput,
+            AgentState::Exited,
+            AgentState::Unknown,
+        ] {
+            for hook_turn in [
+                HookTurn::Untracked,
+                HookTurn::Inactive,
+                HookTurn::Active,
+                HookTurn::Ended,
+            ] {
+                assert_eq!(gate_shell_activity(state, hook_turn), state);
+            }
+        }
     }
 
     #[test]

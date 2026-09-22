@@ -151,3 +151,34 @@ describe("cardIdentitySession", () => {
     expect(cardIdentitySession([shell, observed])?.id).toBe("observed");
   });
 });
+
+describe("shell-aware derivation (F1)", () => {
+  test("harness-less working groups as not reporting on every summary surface", () => {
+    const shell = session({ id: "shell", agentState: "working", harnessId: null });
+    expect(cardDotState([shell])).toBe("unknown");
+    expect(summarizeCardAgentStates([shell])).toBe("1 session not reporting");
+    expect(
+      buildCardSummaryGroups([shell]).map((group) => group.state),
+    ).toEqual(["unknown"]);
+    expect(
+      summarizeSessionIdentities([shell], () => "Shell"),
+    ).toBe("Shell not reporting");
+  });
+
+  test("an observed harness repaint groups as not reporting, identity kept", () => {
+    const observed = session({
+      id: "observed",
+      agentState: "working",
+      harnessId: null,
+      observedHarnessId: "pi",
+    });
+    expect(cardDotState([observed])).toBe("unknown");
+    expect(summarizeCardAgentStates([observed])).toBe("1 session not reporting");
+  });
+
+  test("a launched working groups as working", () => {
+    const launched = session({ id: "launched", agentState: "working", harnessId: "pi" });
+    expect(cardDotState([launched])).toBe("working");
+    expect(summarizeCardAgentStates([launched])).toBe("1 session working");
+  });
+});

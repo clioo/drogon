@@ -310,10 +310,10 @@ fn settings_file_installs_the_full_claude_turn_lifecycle() {
 }
 
 /// When the user disables agent status hooks entirely there is no hook
-/// truth, so the claude session honestly falls back to the activity clock
-/// (keystroke echo reads working there — the documented hook-less policy,
-/// same as plain terminals), and the settings file carries no managed
-/// commands.
+/// truth, and PTY bytes are not turn evidence (F1 sidebar truth) — so the
+/// claude session honestly reads unknown on keystroke echo instead of
+/// manufacturing a working turn, same as plain terminals. The settings
+/// file carries no managed commands.
 #[test]
 fn hooks_disabled_claude_keeps_the_activity_policy() {
     let dir = tempfile::tempdir().unwrap();
@@ -336,8 +336,8 @@ fn hooks_disabled_claude_keeps_the_activity_policy() {
     write_and_wait_for_echo(&engine, &session, "typed with hooks disabled\n");
     assert_eq!(
         listed_state(&engine, session["id"].as_str().unwrap()),
-        "working",
-        "hook-less sessions keep the activity-clock policy"
+        "unknown",
+        "hook-less sessions claim no turn: PTY echo is not turn evidence"
     );
 }
 
@@ -397,9 +397,11 @@ fn disabling_status_hooks_mid_turn_drops_the_hook_lifecycle() {
 /// globally disabled must be SPENT, never concluded — concluding it
 /// durably parked ENDED hook authority over the live session, which hid
 /// later typing as `idle` and survived re-enable against the
-/// re-observation promise. The disabled row is pure activity clock; the
-/// re-enable resets unconditionally, so typing reads `working` again
-/// until the next real hook event re-establishes authority.
+/// re-observation promise. The disabled row claims no turn (PTY bytes are
+/// not turn evidence, so echo reads `unknown`, never `working`); the
+/// re-enable resets unconditionally, so typing still reads `unknown`
+/// (never hidden as `idle`) until the next real hook event
+/// re-establishes authority.
 #[test]
 fn stop_while_disabled_is_spent_and_reenable_reobserves() {
     let dir = tempfile::tempdir().unwrap();
@@ -415,19 +417,20 @@ fn stop_while_disabled_is_spent_and_reenable_reobserves() {
     assert_eq!(
         listed_state(&engine, &session_id),
         "unknown",
-        "a spent Stop must deposit no authority: the activity clock owns the row"
+        "a spent Stop must deposit no authority: the row claims no turn"
     );
 
-    // RACE-1's exact repro: typing while still disabled follows the
-    // activity clock — the spent Stop must not hide it as idle.
+    // RACE-1's exact repro: typing while still disabled claims no turn —
+    // the spent Stop must not hide it as idle, and echo must not spin it
+    // to working either (PTY bytes are not turn evidence).
     write_and_wait_for_echo(&engine, &session, "typed while disabled\n");
-    assert_eq!(listed_state(&engine, &session_id), "working");
+    assert_eq!(listed_state(&engine, &session_id), "unknown");
 
     set_status_hooks(&engine, true);
     write_and_wait_for_echo(&engine, &session, "typed after re-enable\n");
     assert_eq!(
         listed_state(&engine, &session_id),
-        "working",
+        "unknown",
         "typing after the disabled window must not be hidden as idle"
     );
 

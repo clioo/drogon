@@ -134,8 +134,11 @@ describe("WorktreeCard nested session rows", () => {
   test("focused highlight follows the active tab and summary matches rows", () => {
     const { container, unmount } = renderCard(
       [
-        session({ id: "s-1", agentState: "working" }),
-        session({ id: "s-2", agentState: "idle" }),
+        // F1 sidebar truth (coordinator grant): launched agents, so the
+        // launch record rides along — harness-less `working` wire is the
+        // old-daemon false positive, never an agent turn.
+        session({ id: "s-1", agentState: "working", harnessId: "pi" }),
+        session({ id: "s-2", agentState: "idle", harnessId: "pi" }),
       ],
       "s-2",
     );
@@ -175,18 +178,36 @@ describe("WorktreeCard nested session rows", () => {
           command: "/bin/zsh",
           createdAt: "2026-09-08T11:30:00.000Z",
         }),
+        // F1 sidebar truth (regression, explained): only a `harness.start`
+        // turn is proven work. The observed and shell sessions above keep
+        // their identity but state their agent silence (an idle repaint
+        // without hooks proves no turn), so the lane's working spinner
+        // rides on this launched session.
+        session({
+          id: "s-3",
+          agentState: "working",
+          harnessId: "pi",
+          command: "pi",
+          createdAt: "2026-09-08T11:45:00.000Z",
+        }),
       ],
       "",
     );
     try {
       // No `Claude - zsh`, never `Claude - Claude`: the harness label is
       // the whole row text for the observed session, followed by the state
-      // the owner's design puts on every row (here: working). Sidebar
-      // branding reads "Claude Code" (owner-authorized), carried in the
-      // accessible name per label-in-name.
-      expect(screen.getByRole("button", { name: "Claude Code - Working" })).toBeTruthy();
+      // the owner's design puts on every row (here: the agent silence —
+      // recognition is not turn evidence). Sidebar branding reads
+      // "Claude Code" (owner-authorized), carried in the accessible name
+      // per label-in-name.
       expect(
-        screen.getByRole("button", { name: "Terminal 2 - zsh - Working" }),
+        screen.getByRole("button", { name: /Claude Code - No update in/ }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: /Terminal 2 - .*No update in/ }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Pi - Working" }),
       ).toBeTruthy();
       const observedRow = container.querySelector(
         '[data-worktree-agent-row="s-1"]',
