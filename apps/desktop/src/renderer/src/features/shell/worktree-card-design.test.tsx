@@ -818,3 +818,70 @@ describe("creator provenance", () => {
     ).toBeNull();
   });
 });
+
+describe("full-width tree line (R1 density)", () => {
+  test("the rows list is a direct card child after the header, not squeezed into it", () => {
+    const { container } = renderCard({
+      sessions: [
+        session({ id: "a", harnessId: "pi" }),
+        session({ id: "b", harnessId: "codex", parentSessionId: "a" }),
+      ],
+    });
+    const card = container.querySelector(".shell-worktree-card") as HTMLElement;
+    const rows = container.querySelector(
+      ".shell-worktree-card-rows",
+    ) as HTMLElement;
+    const header = container.querySelector(
+      ".shell-worktree-card-main",
+    ) as HTMLElement;
+    const menu = container.querySelector(
+      ".shell-worktree-card-menu",
+    ) as HTMLElement;
+    // The tree leaves the header column (fold, lane, title, affordances,
+    // kebab) so it can use the whole card width like the owner's guide.
+    expect(rows.parentElement).toBe(card);
+    expect(header.parentElement).toBe(card);
+    const order = [header, rows, menu].map((node) =>
+      [...card.children].indexOf(node as Element),
+    );
+    expect(order[0]).toBeLessThan(order[1]);
+    expect(order[1]).toBeLessThan(order[2]);
+    // Both sessions still render as rows on that line.
+    expect(rows.querySelector('[data-worktree-agent-row="a"]')).not.toBeNull();
+    expect(rows.querySelector('[data-worktree-agent-row="b"]')).not.toBeNull();
+  });
+
+  test("the card fold is a keyboard-operable button that folds and restores the tree", () => {
+    const { container } = renderCard({
+      sessions: [session({ id: "a", harnessId: "pi" })],
+    });
+    const fold = container.querySelector(
+      ".shell-worktree-card-fold",
+    ) as HTMLButtonElement;
+    // A native button: reachable by Tab, operable by Enter/Space, with its
+    // collapsed state announced — no pointer-only div.
+    expect(fold.tagName).toBe("BUTTON");
+    expect(fold.disabled).toBe(false);
+    expect(fold.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(fold);
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector('[data-worktree-agent-row="a"]')).toBeNull();
+    fireEvent.click(fold);
+    expect(fold.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      container.querySelector('[data-worktree-agent-row="a"]'),
+    ).not.toBeNull();
+  });
+
+  test("a selected card marks itself for the tinted treatment", () => {
+    const { container } = renderCard({
+      sessions: [session({ id: "a", harnessId: "pi" })],
+    });
+    // The blue-tinted wash/border rule keys off this attribute; the real
+    // color proof is the rendered screenshot plus the computed-style assert
+    // over CDP in scripts/accept-sidebar-agent-tree.mjs.
+    expect(
+      container.querySelector(".shell-worktree-card")?.getAttribute("data-active"),
+    ).toBe("true");
+  });
+});
