@@ -21,8 +21,10 @@ import {
   sidebarPrFetchSignature,
   sidebarPrNextWakeDelayMs,
   sidebarProjectHasUnresolvedBranches,
+  sidebarProjectHasUnresolvedLiveBranches,
   sidebarPrProjectIds,
   sidebarPullsRetryDelayMs,
+  sidebarPullsWalkErrorOutcome,
   sortSidebarPullsBestFirst,
 } from "./sidebar-pr-fetch";
 
@@ -419,6 +421,92 @@ describe("sidebar PR pagination", () => {
       ],
     };
     expect(sidebarProjectHasUnresolvedBranches(linked, page1)).toBe(false);
+  });
+
+  test("the live-aware walk keeps going past a concluded-only match", () => {
+    // The reported defect: page 1 names a MERGED review for branch X and
+    // the walk stops, so a still-live review for X on page 2 is never
+    // discovered and live-first selection is defeated. A concluded-only
+    // match must hold the walk open; a live match resolves it.
+    const groups = [group("a", "git", ["x"])];
+    const concludedOnly = [pull({ number: 10, state: "closed", headRefName: "x" })];
+    // The old any-match predicate stops here — that is the bug this
+    // replaces in the walk.
+    expect(sidebarProjectHasUnresolvedBranches(groups[0], concludedOnly)).toBe(false);
+    expect(sidebarProjectHasUnresolvedLiveBranches(groups[0], concludedOnly)).toBe(true);
+    const withLive = [
+      ...concludedOnly,
+      pull({ number: 9, state: "open", headRefName: "x" }),
+    ];
+    expect(sidebarProjectHasUnresolvedLiveBranches(groups[0], withLive)).toBe(false);
+    // Unmatched branches still hold the walk open; live matches resolve.
+    expect(
+      sidebarProjectHasUnresolvedLiveBranches(groups[0], [pull({ headRefName: "other" })]),
+    ).toBe(true);
+    // A stored link never holds a walk open, even unmatched.
+    const linked = {
+      ...groups[0],
+      worktrees: [
+        {
+          id: "wt-x",
+          projectId: "a",
+          workspaceId: "ws-x",
+          path: "/repo/a/x",
+          branch: "renamed",
+          head: "abc",
+          baseRef: null,
+          createdAt: "2026-09-09T00:00:00Z",
+          linkedPr: 99,
+        },
+      ],
+    };
+    expect(sidebarProjectHasUnresolvedLiveBranches(linked, concludedOnly)).toBe(false);
+    // Branch-less worktrees (folder implicits, detached HEAD) never hold it open either.
+    const branchless = [group("a", "git", [""])];
+    expect(sidebarProjectHasUnresolvedLiveBranches(branchless[0], concludedOnly)).toBe(false);
+    // Drafts are live: a draft match resolves the walk.
+    expect(
+      sidebarProjectHasUnresolvedLiveBranches(
+        groups[0],
+        [pull({ number: 4, state: "draft", headRefName: "x" })],
+      ),
+    ).toBe(false);
+  });
+
+  test("a mid-walk failure keeps the fetched pages, marked incomplete and failed", () => {
+    const page1 = mergeSidebarPrPageResults(
+      new Map(),
+      "a",
+      [pull({ number: 5, state: "open", headRefName: "feature" })],
+      1,
+    );
+    // Thrown OR typed page-2 failure: page 1 survives with honest metadata.
+    const outcome = sidebarPullsWalkErrorOutcome(page1, "a");
+    expect(outcome).toEqual({
+      projectId: "a",
+      pulls: page1.get("a"),
+      incomplete: true,
+      failed: true,
+    });
+    expect(outcome.pulls).not.toBeNull();
+    // Merging the partial keeps the page-1 marker visible (facts stay);
+    // recording the failure drives the backoff retry and the stale
+    // projection (so the ready-claim lapses until a clean walk).
+    const merged = mergeSidebarPrResults(new Map(), [[outcome.projectId, outcome.pulls]]);
+    expect(merged.get("a")?.map((item) => item.number)).toEqual([5]);
+    const health = recordSidebarPrFetchOutcome(undefined, !outcome.failed, 1_000_000);
+    expect(health.failures).toBe(1);
+    expect(selectStaleSidebarPrProjects(merged, new Map([["a", health]]))).toEqual(
+      new Set(["a"]),
+    );
+  });
+
+  test("a page-1 failure keeps the last good listing and records null only when nothing was fetched", () => {
+    const outcome = sidebarPullsWalkErrorOutcome(new Map(), "a");
+    expect(outcome).toEqual({ projectId: "a", pulls: null, incomplete: false, failed: true });
+    const good = new Map([["a", [pull({ number: 5 })]]]);
+    expect(mergeSidebarPrResults(good, [["a", outcome.pulls]]).get("a")?.length).toBe(1);
+    expect(mergeSidebarPrResults(new Map(), [["a", outcome.pulls]]).get("a")).toBeNull();
   });
 
   test("page 1 replaces, later pages append without duplicating numbers", () => {

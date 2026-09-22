@@ -16,7 +16,10 @@ import type {
 } from "../../../../shared/session-contract";
 import type { TaskPullRequest } from "../../../../shared/tasks-contract";
 import type { ProjectGroup } from "./project-adapter";
-import { SIDEBAR_PULLS_REFRESH_MS } from "./sidebar-pr-fetch";
+import {
+  SIDEBAR_PULLS_REFRESH_MS,
+  SIDEBAR_PULLS_RETRY_BASE_MS,
+} from "./sidebar-pr-fetch";
 import { ProjectList } from "./ProjectList";
 import { EMPTY_TAB_STRIP_STATE } from "./tab-order";
 import { TooltipProvider } from "../../components/ui/tooltip";
@@ -606,6 +609,226 @@ describe("sidebar PR states: ProjectList wiring", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("a page-1 concluded review does not hide a page-2 live review for the same branch", async () => {
+    // The walk defect: page 1 names a newer CLOSED review for branch X and
+    // the walk stops, so the older OPEN review for X on page 2 is never
+    // discovered and live-first selection is defeated. Against the actual
+    // ProjectList (not a helper): the card must name the live review.
+    const page1 = {
+      ok: true as const,
+      result: {
+        repo: "example/repo",
+        issues: [],
+        pulls: [pull({ number: 10, title: "Closed newer", state: "closed", headRefName: "x" })],
+        page: 1,
+        perPage: 100,
+        hasNextPage: true,
+      },
+    };
+    const page2 = {
+      ok: true as const,
+      result: {
+        repo: "example/repo",
+        issues: [],
+        pulls: [pull({ number: 9, title: "Open older", state: "open", headRefName: "x" })],
+        page: 2,
+        perPage: 100,
+        hasNextPage: false,
+      },
+    };
+    const tasksList = vi.fn(async (input: { projectId: string; page?: number }) =>
+      (input.page ?? 1) === 1 ? page1 : page2,
+    );
+    (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+      tasks: { tasksList },
+    };
+    const { container } = mount({
+      groups: [
+        {
+          project: project(),
+          worktrees: [worktree({ id: "wt-x", branch: "x" })],
+        },
+      ],
+    });
+    await waitFor(() => expect(cardPrState(container, "wt-x")).toBe("open"));
+    expect(screen.getByLabelText("Linked PR #9: Open")).toBeTruthy();
+    expect(tasksList).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "proj-1", page: 2 }),
+    );
+    expect(tasksList).toHaveBeenCalledTimes(2);
+  });
+
+  test("a thrown page-2 failure keeps the page-1 marker, lapses ready, then recovers on retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const readyPull = pull({
+        number: 6,
+        title: "Ready",
+        state: "open",
+        mergeable: "MERGEABLE",
+        checks: { state: "success", total: 1, passed: 1, failed: 0, pending: 0, neutral: 0 },
+        headRefName: "feature",
+      });
+      const page1 = {
+        ok: true as const,
+        result: {
+          repo: "example/repo",
+          issues: [],
+          pulls: [readyPull],
+          page: 1,
+          perPage: 100,
+          hasNextPage: true,
+        },
+      };
+      let failPage2 = true;
+      const page2ok = {
+        ok: true as const,
+        result: {
+          repo: "example/repo",
+          issues: [],
+          pulls: [pull({ number: 1, title: "Elsewhere", state: "open", headRefName: "elsewhere" })],
+          page: 2,
+          perPage: 100,
+          hasNextPage: false,
+        },
+      };
+      const tasksList = vi.fn(async (input: { projectId: string; page?: number }) => {
+        if ((input.page ?? 1) === 1) return page1;
+        if (failPage2) throw new Error("gh exploded mid-walk");
+        return page2ok;
+      });
+      (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+        tasks: { tasksList },
+      };
+      const { container } = mount({
+        groups: [
+          {
+            project: project(),
+            worktrees: [
+              worktree({ id: "wt-1", branch: "feature" }),
+              // Lives only past the failed window: no marker, never a success claim.
+              worktree({ id: "wt-late", branch: "late-branch" }),
+            ],
+          },
+        ],
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(tasksList).toHaveBeenCalledTimes(2);
+      // Page-1 facts stay visible behind the failure, but the ready-claim
+      // lapses: no Ready claim from incomplete knowledge.
+      expect(screen.getByLabelText("Linked PR #6 checks: Passing")).toBeTruthy();
+      expect(cardPrState(container, "wt-1")).toBe("open");
+      // The later branch has no marker at all — explicitly unavailable, not empty-success.
+      expect(cardPrState(container, "wt-late")).toBeNull();
+      // The failure streak schedules a bounded retry on the stable set.
+      failPage2 = false;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SIDEBAR_PULLS_RETRY_BASE_MS + 1_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      // Retry re-walks from page 1 through page 2 (the late branch still
+      // holds the walk open) and confirms the ready-claim again.
+      expect(tasksList).toHaveBeenCalledTimes(4);
+      expect(cardPrState(container, "wt-1")).toBe("ready");
+      expect(cardPrState(container, "wt-late")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a typed page-2 failure keeps the page-1 marker and never fetches after unmount", async () => {
+    vi.useFakeTimers();
+    try {
+      const page1 = {
+        ok: true as const,
+        result: {
+          repo: "example/repo",
+          issues: [],
+          pulls: [pull({ number: 5, title: "Live", state: "open", headRefName: "feature" })],
+          page: 1,
+          perPage: 100,
+          hasNextPage: true,
+        },
+      };
+      const page2 = {
+        ok: false as const,
+        error: { code: "gh_unavailable", message: "no gh", retryable: true },
+      };
+      const tasksList = vi.fn(async (input: { projectId: string; page?: number }) =>
+        (input.page ?? 1) === 1 ? page1 : page2,
+      );
+      (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+        tasks: { tasksList },
+      };
+      const { container, unmount } = mount({
+        groups: [
+          {
+            project: project(),
+            worktrees: [
+              worktree({ id: "wt-1", branch: "feature" }),
+              // Unmatched on page 1, so the walk must attempt page 2.
+              worktree({ id: "wt-late", branch: "late-branch" }),
+            ],
+          },
+        ],
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(tasksList).toHaveBeenCalledTimes(2);
+      // The successfully fetched page survives the typed failure (the old
+      // code blanked it to null); the marker is honestly unconfirmed.
+      expect(screen.getByLabelText("Linked PR #5: Open")).toBeTruthy();
+      expect(cardPrState(container, "wt-1")).toBe("open");
+      // Unmount drops the scheduled retry: no fetch after teardown.
+      unmount();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SIDEBAR_PULLS_RETRY_BASE_MS + 60_000);
+      });
+      expect(tasksList).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a linked review the branch misses shows on the card AND in its PR-status group", async () => {
+    // The reported contradiction, end to end: branch "feature" matches
+    // nothing while stored link #7 names a merged review. Group-by PR
+    // status must bucket the worktree under Merged — never No pull request.
+    localStorage.setItem(
+      "drogon:shell:workspace-options",
+      JSON.stringify({ groupBy: "pr-status" }),
+    );
+    const tasksList = vi.fn(async () =>
+      okPulls([pull({ number: 7, title: "Renamed", state: "merged", headRefName: "renamed" })]),
+    );
+    (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+      tasks: { tasksList },
+    };
+    const { container } = mount({
+      groups: [
+        {
+          project: project(),
+          worktrees: [worktree({ id: "wt-linked", branch: "feature", linkedPr: 7 })],
+        },
+      ],
+    });
+    await waitFor(() => expect(screen.getByLabelText("Linked PR #7: Merged")).toBeTruthy());
+    // The group key lives on the header row; the card is its section sibling.
+    const mergedSection = container
+      .querySelector('[data-entry-group-key="merged"]')
+      ?.closest(".shell-project");
+    expect(mergedSection?.textContent).toContain("Merged");
+    expect(
+      mergedSection?.querySelector('[data-worktree-card-id="wt-linked"]'),
+    ).toBeTruthy();
+    expect(container.querySelector('[data-entry-group-key="none"]')).toBeNull();
   });
 
   test("a stored linkedPr falls back to one targeted show lookup", async () => {
