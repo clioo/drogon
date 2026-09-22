@@ -2601,33 +2601,55 @@ export function App() {
     seq: number;
     freshKeys: ReadonlySet<string>;
   }>({ seq: 0, freshKeys: new Set() });
+  // R3 proof outbox: the adopt updater below is pure (it reads the ledger
+  // but never writes it, so replay with identical inputs agrees), and
+  // records applied keys here. The next queue flushes them into the ledger
+  // before any later shouldApply read, so ordering still holds. Drained in
+  // place (never replaced): an updater queued before the flush still pushes
+  // into this same map at render time.
+  const pendingObservationProof = useRef(new Map<string, number>());
   // R3 selected-copy reconciliation, shared by the adopt effect below and
-  // the poll settlement further down. The plan is pure and runs once
-  // against the ref mirrors (never inside a setState updater, which React
-  // may replay): its proof commits exactly once, only when its sessions
-  // commit. `active` is deliberately left alone: adopting a session must
-  // never steal the tab the owner is looking at.
-  const reconcileSelectedAdopt = useCallback(() => {
+  // the poll settlement further down. Immutable facts (host-wide rows +
+  // proof) are snapshotted outside React; the pure plan projects them onto
+  // the ACTUAL current sessions through the functional updater form, so a
+  // lagging mirror can never discard queued local updates (push state,
+  // renames, sizing). `active` is deliberately left alone: adopting a
+  // session must never steal the tab the owner is looking at.
+  const queueSelectedAdopt = useCallback(() => {
+    // Flush the previous render's applied keys first: the updater about to
+    // be queued must observe proof that includes them.
+    const pending = pendingObservationProof.current;
+    if (pending.size > 0) {
+      const ledger = observationLedger.current;
+      for (const [key, seq] of pending) ledger.markApplied(key, seq);
+      pending.clear();
+    }
     const workspaceId = selectedRef.current;
     if (!workspaceId) return;
     const dismissed = loadDismissedSessions();
+    const isHidden = (item: Session) =>
+      isSessionDismissed(dismissed, item.hostId, item);
     const provenance = sidebarObservationProvenance.current;
     const ledger = observationLedger.current;
-    const plan = planAdoptOutOfBandSessions(
-      sessionsRef.current,
-      allBotSessionsRef.current,
-      workspaceId,
-      (item) => isSessionDismissed(dismissed, item.hostId, item),
-      {
-        freshKeys: provenance.freshKeys,
-        seq: provenance.seq,
+    const hostWide = allBotSessionsRef.current;
+    const { freshKeys, seq } = provenance;
+    setSessions((items) => {
+      const plan = planAdoptOutOfBandSessions(items, hostWide, workspaceId, isHidden, {
+        freshKeys,
+        seq,
         ledger,
-      },
-    );
-    if (plan.sessions === sessionsRef.current) return;
-    commitObservationProof(ledger, plan.appliedKeys, provenance.seq);
-    sessionsRef.current = plan.sessions;
-    setSessions(plan.sessions);
+      });
+      // Scratch only, not applied proof: deduped at the next flush, and
+      // re-pushing the same keys on replay changes neither the result nor
+      // the eventual commit.
+      if (seq !== undefined) {
+        for (const key of plan.appliedKeys) {
+          const prev = pending.get(key);
+          if (prev === undefined || seq > prev) pending.set(key, seq);
+        }
+      }
+      return plan.sessions;
+    });
   }, []);
   useEffect(() => {
     // A session this shell did not start — `drogon-cli terminal create`, a
@@ -2635,8 +2657,8 @@ export function App() {
     // list here, from the host-wide poll that already runs for the sidebar.
     // The provenance ref was stored synchronously with the commit that
     // produced the current `allBotSessions` value, so the pairing holds.
-    reconcileSelectedAdopt();
-  }, [allBotSessions, selected, reconcileSelectedAdopt]);
+    queueSelectedAdopt();
+  }, [allBotSessions, selected, queueSelectedAdopt]);
   useEffect(() => {
     // Persists every confirmed selection once it settles against a known
     // workspace, so the next reload's restore has an up-to-date target.
@@ -2822,11 +2844,11 @@ export function App() {
           setAllBotSessions(settled.sessions);
         }
         // The adopt effect above will not re-run for an unchanged commit
-        // (its inputs are identical), so reconcile the selected copy here
+        // (its inputs are identical), so queue the same pure projection here
         // against the fresh proof: a stale selected fetch may have replaced
-        // it since the last commit, and only this poll's order can heal it.
-        // A no-op plan commits nothing.
-        reconcileSelectedAdopt();
+        // the selected copy since the last commit, and only this poll's
+        // order can heal it. A no-op plan queues an identity update.
+        queueSelectedAdopt();
       } finally {
         inFlight = false;
       }
@@ -2851,9 +2873,9 @@ export function App() {
       window.clearInterval(timer);
     };
     // PERF-04: connectivity primitives + reconnect epoch, never `status`.
-    // reconcileSelectedAdopt is ref-driven and identity-stable, so it never
+    // queueSelectedAdopt is ref-driven and identity-stable, so it never
     // restarts the poll.
-  }, [statusHostId, statusServiceInstanceId, statusEpoch, reconcileSelectedAdopt]);
+  }, [statusHostId, statusServiceInstanceId, statusEpoch, queueSelectedAdopt]);
   useEffect(() => {
     // J1 needs_input: main polls session.list for transitions (this repo
     // has no daemon push channel) and forwards them here. Clicking the

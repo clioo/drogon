@@ -1094,4 +1094,57 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     expect(ledger.shouldApply(observationKeyOf(target()), 6)).toBe(false);
     expect(ledger.shouldApply(observationKeyOf(target()), 7)).toBe(true);
   });
+
+  test("a queued local sizing update survives a following observation adoption", () => {
+    // The shell's queue: immutable facts snapshotted outside React, pure
+    // projection through the functional updater form onto the ACTUAL
+    // current sessions — never a value computed from a lagging mirror, so
+    // queued local updates (push state, renames, sizing) are never
+    // discarded. The pure plan reads the ledger but only records into the
+    // pending outbox; the flush between queueings is what commits proof.
+    const ledger = createObservationLedger();
+    const keys = new Set([observationKeyOf(target())]);
+    const hostWidePi = [target(freshPi)];
+    const pending = new Map<string, number>();
+    const flush = () => {
+      for (const [key, seq] of pending) ledger.markApplied(key, seq);
+      pending.clear();
+    };
+    const queueAdopt =
+      (seq: number) =>
+      (items: Session[]): Session[] => {
+        const plan = planAdoptOutOfBandSessions(items, hostWidePi, "w1", never, {
+          freshKeys: keys,
+          seq,
+          ledger,
+        });
+        for (const key of plan.appliedKeys) {
+          const prev = pending.get(key);
+          if (prev === undefined || seq > prev) pending.set(key, seq);
+        }
+        return plan.sessions;
+      };
+    // A queued local update from elsewhere in the shell (sizing/push).
+    const localSizing = (items: Session[]): Session[] =>
+      items.map((item) =>
+        item.id === "s1" ? { ...item, cols: 120, command: "/bin/zsh" } : item,
+      );
+    // React applies queued updaters in order against actual current state.
+    const base = [target({ hasForegroundChild: false })];
+    const afterLocal = localSizing(base);
+    const first = queueAdopt(6)(afterLocal);
+    const replayed = queueAdopt(6)(afterLocal);
+    expect(replayed).toEqual(first);
+    expect(replayed[0].observedHarnessId).toBe("pi");
+    expect(replayed[0].cols).toBe(120);
+    flush();
+    // The committed state carries BOTH the local update and the adoption.
+    expect(first[0].cols).toBe(120);
+    expect(first[0].command).toBe("/bin/zsh");
+    expect(first[0].observedHarnessId).toBe("pi");
+    expect(first[0].hasForegroundChild).toBe(true);
+    // A stale poll queued after the flush cannot move what seq 6 wrote.
+    expect(queueAdopt(5)(first)).toBe(first);
+    expect(pending.size).toBe(0);
+  });
 });
