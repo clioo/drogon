@@ -4,20 +4,31 @@
 // PTY.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   ACCEPTANCE_RUST_BUILD,
   CHECK_NAMES,
   COLLAPSE_STORAGE_KEY,
+  ELF_MAGIC_HEX,
+  MACH_O_MAGICS,
   TIMED_SLEEPER_C_SOURCE,
+  isNativeCompiledSleeper,
   isObservedClaudeSession,
+  nativeSleeperFormatName,
   parseCollapsedLineageEnvelope,
   projectAgentTreeRow,
   projectBinaryIdentity,
   quoteShellWord,
   rootRowTextIsAgentNotTerminal,
 } from "./accept-sidebar-agent-tree.mjs";
+
+const execFileAsync = promisify(execFile);
 
 describe("accept-sidebar-agent-tree check names", () => {
   it("names the nine acceptance checks in order", () => {
@@ -184,6 +195,87 @@ describe("binary provenance guard wiring", () => {
     assert.match(source, /report\.binaries\s*=/);
     assert.match(source, /projectBinaryIdentity\(daemonBinary, drogondStat\)/);
     assert.match(source, /\["rev-parse", "HEAD"\]/);
+  });
+});
+
+describe("nativeSleeperFormatName", () => {
+  it("names the compiled format each supported platform produces", () => {
+    assert.equal(nativeSleeperFormatName("darwin"), "Mach-O");
+    assert.equal(nativeSleeperFormatName("linux"), "ELF");
+  });
+});
+
+describe("isNativeCompiledSleeper on darwin", () => {
+  it("accepts every known Mach-O header", () => {
+    assert.ok(MACH_O_MAGICS.has("cffaedfe"), "the arm64 header cc emits stays covered");
+    assert.ok(MACH_O_MAGICS.has("cafebabe"), "the universal header stays covered");
+    for (const hex of MACH_O_MAGICS) {
+      assert.equal(
+        isNativeCompiledSleeper(Buffer.from(hex, "hex"), "darwin"),
+        true,
+        hex,
+      );
+    }
+  });
+
+  it("rejects ELF binaries, shell scripts and short input", () => {
+    assert.equal(isNativeCompiledSleeper(Buffer.from(ELF_MAGIC_HEX, "hex"), "darwin"), false);
+    assert.equal(
+      isNativeCompiledSleeper(Buffer.from("#!/bin/sh\nsleep 120\n"), "darwin"),
+      false,
+    );
+    assert.equal(isNativeCompiledSleeper(Buffer.alloc(0), "darwin"), false);
+    assert.equal(isNativeCompiledSleeper(Buffer.from([0xcf, 0xfa]), "darwin"), false);
+    assert.equal(isNativeCompiledSleeper(null, "darwin"), false);
+  });
+});
+
+describe("isNativeCompiledSleeper on linux", () => {
+  it("accepts the ELF header", () => {
+    assert.equal(ELF_MAGIC_HEX, "7f454c46");
+    assert.equal(
+      isNativeCompiledSleeper(Buffer.from([0x7f, 0x45, 0x4c, 0x46]), "linux"),
+      true,
+    );
+  });
+
+  it("rejects Mach-O binaries, shell scripts and short input", () => {
+    for (const hex of MACH_O_MAGICS) {
+      assert.equal(isNativeCompiledSleeper(Buffer.from(hex, "hex"), "linux"), false, hex);
+    }
+    assert.equal(
+      isNativeCompiledSleeper(Buffer.from("#!/bin/sh\nsleep 120\n"), "linux"),
+      false,
+    );
+    assert.equal(isNativeCompiledSleeper(Buffer.alloc(0), "linux"), false);
+    assert.equal(isNativeCompiledSleeper(undefined, "linux"), false);
+  });
+});
+
+describe("compiled sleeper fixture on this platform", () => {
+  // Mirrors the acceptance's own fixture step: compile the real C sleeper
+  // with cc, prove the guard accepts this platform's header, and execute
+  // the binary for a real exit code. This runs only the platform under
+  // test — it never claims the other platform executes.
+  it("compiles, passes the native guard and exits 0", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "dg-622-sleeper-"));
+    try {
+      const source = path.join(dir, "9.9.9.c");
+      const binary = path.join(dir, "9.9.9");
+      await writeFile(source, TIMED_SLEEPER_C_SOURCE);
+      await execFileAsync("cc", ["-O2", "-o", binary, source], { timeout: 120000 });
+      await chmod(binary, 0o755);
+      const magic = (await readFile(binary)).subarray(0, 4);
+      assert.equal(
+        isNativeCompiledSleeper(magic),
+        true,
+        `cc output header ${Buffer.from(magic).toString("hex")} must pass on ${process.platform}`,
+      );
+      const { stdout } = await execFileAsync(binary, ["0"], { timeout: 30000 });
+      assert.equal(stdout, "");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
