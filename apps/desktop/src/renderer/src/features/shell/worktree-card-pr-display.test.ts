@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { TaskPullRequest } from "../../../../shared/tasks-contract";
 import {
+  applySidebarPrStaleness,
   getPrStateLabel,
   resolveCardPullRequest,
   resolveCardPrState,
@@ -88,6 +89,59 @@ describe("card PR state", () => {
         reviewDecision: "CHANGES_REQUESTED",
       }),
     ).toBe("open");
+  });
+
+  test("pending or neutral checks never read as ready", () => {
+    // Pending required checks are not a merge confirmation.
+    expect(
+      resolveCardPrState({ ...base, state: "open", mergeable: "MERGEABLE", checks: "pending" }),
+    ).toBe("open");
+    // A neutral rollup (no pass verdict) rides as pending, never ready.
+    const neutral = pull({
+      checks: { state: "neutral", total: 1, passed: 0, failed: 0, pending: 0, neutral: 1 },
+    });
+    const display = resolveCardPullRequest(
+      {
+        id: "wt-1",
+        projectId: "proj-1",
+        workspaceId: "ws-1",
+        path: "/repo/wt-1",
+        branch: "feature",
+        head: "abc123",
+        baseRef: "main",
+        createdAt: "2026-09-09T00:00:00Z",
+      },
+      [{ ...neutral, mergeable: "MERGEABLE" }],
+    );
+    expect(display?.checks).toBe("pending");
+    expect(resolveCardPrState(display)).toBe("open");
+  });
+
+  test("a stale listing lapses the ready-claim but keeps the facts", () => {
+    const ready = { ...base, state: "open" as const, mergeable: "MERGEABLE" as const };
+    // Not stale: untouched (same reference).
+    expect(applySidebarPrStaleness(ready, false)).toBe(ready);
+    expect(applySidebarPrStaleness(null, true)).toBeNull();
+    // Stale: the confirmation expires, so the marker falls back to open.
+    const stale = applySidebarPrStaleness(ready, true);
+    expect(stale?.mergeable).toBe("UNKNOWN");
+    expect(resolveCardPrState(stale)).toBe("open");
+    // Facts resolve before mergeability: merged, conflicts, draft and
+    // closed survive staleness unchanged.
+    expect(
+      resolveCardPrState(applySidebarPrStaleness({ ...base, state: "merged" }, true)),
+    ).toBe("merged");
+    expect(
+      resolveCardPrState(
+        applySidebarPrStaleness({ ...base, state: "open", mergeable: "CONFLICTING" }, true),
+      ),
+    ).toBe("conflicts");
+    expect(
+      resolveCardPrState(applySidebarPrStaleness({ ...base, state: "draft" }, true)),
+    ).toBe("draft");
+    expect(
+      resolveCardPrState(applySidebarPrStaleness({ ...base, state: "closed" }, true)),
+    ).toBe("closed");
   });
 
   test("a closed review keeps its own state instead of reading as ready", () => {

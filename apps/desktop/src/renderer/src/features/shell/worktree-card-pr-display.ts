@@ -60,10 +60,13 @@ export function resolveCardPullRequest(worktree: Worktree, pulls: readonly TaskP
     mergeable: pull.mergeable,
     isDraft: pull.isDraft,
     reviewDecision: pull.reviewDecision,
+    // Only a terminal failure/success/pending verdict travels. A neutral
+    // rollup (completed checks with no pass/fail verdict) is NOT a pass, so
+    // it rides as "pending": unconfirmed, never ready-claiming.
     checks:
       pull.checks?.state === "failure"
         ? "failure"
-        : pull.checks?.state === "pending"
+        : pull.checks?.state === "pending" || pull.checks?.state === "neutral"
           ? "pending"
           : pull.checks?.state === "success"
             ? "success"
@@ -93,10 +96,11 @@ export type WorktreeCardPrDisplay = {
  *  - `conflicts`: the provider reports a conflicting branch — the one state
  *    that will not merge until a human acts, so it outranks `ready`.
  *  - `draft`: still a draft (never "ready").
- *  - `ready`: open, not a draft, confirmed MERGEABLE, no failing checks,
- *    no requested changes — the only state that claims "Ready to merge".
- *  - `open`: live but unconfirmed (unknown mergeability, failing checks,
- *    or requested changes) — honest, never "Ready to merge".
+ *  - `ready`: open, not a draft, confirmed MERGEABLE, checks passing (or
+ *    no checks at all), no requested changes — the only state that claims
+ *    "Ready to merge".
+ *  - `open`: live but unconfirmed (unknown mergeability, failing/pending/
+ *    neutral checks, or requested changes) — honest, never "Ready to merge".
  *  - `closed`: closed without merging.
  * `null` means no review is linked: the card draws no icon at all rather
  * than a placeholder claiming a state.
@@ -120,11 +124,13 @@ export function resolveCardPrState(
   if (pr.state === "open" || pr.state === undefined) {
     // "Ready" is a confirmed claim: the provider computed MERGEABLE and
     // nothing on record blocks the merge. Unknown mergeability (gh reports
-    // UNKNOWN while computing, and for every concluded review), a failing
-    // check rollup, or requested changes all stay honestly `open`.
+    // UNKNOWN while computing, and for every concluded review), a
+    // failing/pending/neutral check rollup, or requested changes all stay
+    // honestly `open` — pending required checks are not a merge confirmation.
     if (
       pr.mergeable === "MERGEABLE" &&
       pr.checks !== "failure" &&
+      pr.checks !== "pending" &&
       pr.reviewDecision !== "CHANGES_REQUESTED"
     ) {
       return "ready";
@@ -132,6 +138,23 @@ export function resolveCardPrState(
     return "open";
   }
   return null;
+}
+
+/**
+ * Expires the mergeability confirmation behind a `ready` claim when a
+ * scheduled refresh fails: the facts (merged/closed/draft/conflicts, the
+ * check verdict) are untouched — they resolve before mergeability is ever
+ * consulted — but a MERGEABLE verdict we can no longer re-confirm reads as
+ * UNKNOWN, so the marker falls back to honestly `open` until the next
+ * successful refresh. A non-stale display is returned unchanged.
+ */
+export function applySidebarPrStaleness(
+  pr: WorktreeCardPrDisplay | null,
+  isStale: boolean,
+): WorktreeCardPrDisplay | null {
+  if (!pr || !isStale) return pr;
+  if (pr.mergeable === "MERGEABLE") return { ...pr, mergeable: "UNKNOWN" };
+  return pr;
 }
 
 function providerLabel(provider: WorktreeCardPrDisplay["provider"]): string {

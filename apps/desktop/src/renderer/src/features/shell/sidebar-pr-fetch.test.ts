@@ -3,13 +3,26 @@ import type { TaskPullRequest } from "../../../../shared/tasks-contract";
 import type { ProjectGroup } from "./project-adapter";
 import {
   mergeSidebarLinkedPrResults,
+  mergeSidebarPrPageResults,
   mergeSidebarPrResults,
+  pruneSidebarLinkedPrAttempts,
   pruneSidebarPrCache,
+  pruneSidebarPrFreshness,
+  recordSidebarPrFetchOutcome,
   selectSidebarLinkedPrLookups,
+  selectSidebarPrDueIds,
   selectSidebarPrFetchIds,
+  selectStaleSidebarPrProjects,
+  SIDEBAR_PULLS_MAX_PAGES,
   SIDEBAR_PULLS_PER_PAGE,
+  SIDEBAR_PULLS_REFRESH_MS,
+  sidebarLinkedPrAttemptKey,
+  sidebarPrBranchCoverage,
   sidebarPrFetchSignature,
+  sidebarPrNextWakeDelayMs,
+  sidebarProjectHasUnresolvedBranches,
   sidebarPrProjectIds,
+  sidebarPullsRetryDelayMs,
   sortSidebarPullsBestFirst,
 } from "./sidebar-pr-fetch";
 
@@ -151,6 +164,70 @@ describe("sidebar linked-PR fallback", () => {
     ]);
   });
 
+  test("the same number in two projects queues two lookups (per-project attempts)", () => {
+    const linked = (projectId: string) => ({
+      id: `wt-${projectId}`,
+      projectId,
+      workspaceId: `ws-${projectId}`,
+      path: `/repo/${projectId}/wt`,
+      branch: "feature",
+      head: "abc",
+      baseRef: null,
+      createdAt: "2026-09-09T00:00:00Z",
+      linkedPr: 1,
+    });
+    const groups: ProjectGroup[] = [
+      { ...group("repo-a", "git", []), worktrees: [linked("repo-a")] },
+      { ...group("repo-b", "git", []), worktrees: [linked("repo-b")] },
+    ];
+    const cache = new Map([
+      ["repo-a", [pull({ number: 2, headRefName: "elsewhere" })]],
+      ["repo-b", [pull({ number: 2, headRefName: "elsewhere" })]],
+    ]);
+    // An attempt for PR #1 in repo A must not suppress PR #1 in repo B.
+    const attempted = new Set([sidebarLinkedPrAttemptKey("repo-a", 1)]);
+    expect(selectSidebarLinkedPrLookups(groups, cache, attempted)).toEqual([
+      { projectId: "repo-b", number: 1 },
+    ]);
+    // With neither attempted, both queue (dedupe is per project + number).
+    expect(selectSidebarLinkedPrLookups(groups, cache, new Set())).toEqual([
+      { projectId: "repo-a", number: 1 },
+      { projectId: "repo-b", number: 1 },
+    ]);
+  });
+
+  test("removing a worktree releases its attempt key so a re-add retries", () => {
+    const attempted = new Set([
+      sidebarLinkedPrAttemptKey("a", 7),
+      sidebarLinkedPrAttemptKey("a", 8),
+    ]);
+    const groups: ProjectGroup[] = [
+      {
+        ...group("a", "git", []),
+        worktrees: [
+          {
+            id: "wt-1",
+            projectId: "a",
+            workspaceId: "ws-1",
+            path: "/repo/a/wt-1",
+            branch: "feature",
+            head: "abc",
+            baseRef: null,
+            createdAt: "2026-09-09T00:00:00Z",
+            linkedPr: 7,
+          },
+        ],
+      },
+    ];
+    // Only the still-named link survives; the removed worktree's key drops.
+    expect(pruneSidebarLinkedPrAttempts(attempted, groups)).toEqual(
+      new Set([sidebarLinkedPrAttemptKey("a", 7)]),
+    );
+    // Nothing leaves: the same reference comes back.
+    const all = new Set([sidebarLinkedPrAttemptKey("a", 7)]);
+    expect(pruneSidebarLinkedPrAttempts(all, groups)).toBe(all);
+  });
+
   test("skips lookups already attempted, already listed, branch-matched, or on failed listings", () => {
     const linked = {
       id: "wt-1",
@@ -169,9 +246,11 @@ describe("sidebar linked-PR fallback", () => {
     const listed = new Map([["a", [pull({ number: 7, headRefName: "elsewhere" })]]]);
     // Number present: no lookup (the card's number fallback already applies).
     expect(selectSidebarLinkedPrLookups(groups, listed, new Set())).toEqual([]);
-    // Number attempted before: never guessed twice.
+    // Number attempted before for this project: never guessed twice.
     const unlisted = new Map([["a", [pull({ headRefName: "elsewhere" })]]]);
-    expect(selectSidebarLinkedPrLookups(groups, unlisted, new Set([7]))).toEqual([]);
+    expect(
+      selectSidebarLinkedPrLookups(groups, unlisted, new Set([sidebarLinkedPrAttemptKey("a", 7)])),
+    ).toEqual([]);
     // Branch matched: the branch correlation already names a review.
     const matched = new Map([["a", [pull({ headRefName: "feature" })]]]);
     expect(selectSidebarLinkedPrLookups(groups, matched, new Set())).toEqual([]);
@@ -191,5 +270,238 @@ describe("sidebar linked-PR fallback", () => {
     ]);
     expect(merged.get("a")?.map((item) => item.number).sort()).toEqual([1, 99]);
     expect(merged.has("missing")).toBe(false);
+  });
+});
+
+describe("sidebar PR refresh policy", () => {
+  const NOW = 1_000_000;
+
+  function due(
+    cache: Map<string, readonly TaskPullRequest[] | null>,
+    gitIds: string[],
+    freshness: Map<string, { fetchedAt: number | null; failures: number; failedAt: number | null }>,
+    nowMs: number,
+    signatureChanged = false,
+  ) {
+    return selectSidebarPrDueIds({ cache, gitIds, freshness, nowMs, signatureChanged });
+  }
+
+  test("backoff doubles per consecutive failure, capped", () => {
+    expect(sidebarPullsRetryDelayMs(1)).toBe(15_000);
+    expect(sidebarPullsRetryDelayMs(2)).toBe(30_000);
+    expect(sidebarPullsRetryDelayMs(3)).toBe(60_000);
+    expect(sidebarPullsRetryDelayMs(100)).toBe(300_000);
+  });
+
+  test("success confirms and clears the streak; failure extends it", () => {
+    const confirmed = recordSidebarPrFetchOutcome(undefined, true, NOW);
+    expect(confirmed).toEqual({ fetchedAt: NOW, failures: 0, failedAt: null });
+    const failed = recordSidebarPrFetchOutcome(confirmed, false, NOW + 1);
+    expect(failed).toEqual({ fetchedAt: NOW, failures: 1, failedAt: NOW + 1 });
+    const recovered = recordSidebarPrFetchOutcome(failed, true, NOW + 2);
+    expect(recovered).toEqual({ fetchedAt: NOW + 2, failures: 0, failedAt: null });
+  });
+
+  test("stable set: fresh listings are not due, stale ones are", () => {
+    const cache = new Map<string, readonly TaskPullRequest[] | null>([["a", [pull()]]]);
+    const fresh = new Map([["a", { fetchedAt: NOW, failures: 0, failedAt: null }]]);
+    expect(due(cache, ["a"], fresh, NOW + 1_000)).toEqual([]);
+    // A listing confirmed long ago revalidates without any set change.
+    expect(due(cache, ["a"], fresh, NOW + SIDEBAR_PULLS_REFRESH_MS)).toEqual(["a"]);
+    // Never-attempted projects are always due.
+    expect(due(cache, ["a", "b"], fresh, NOW + 1_000)).toEqual(["b"]);
+  });
+
+  test("stable set: a failed refresh retries on backoff, not per render", () => {
+    const cache = new Map<string, readonly TaskPullRequest[] | null>([["a", [pull()]]]);
+    const failed = new Map([["a", { fetchedAt: NOW, failures: 1, failedAt: NOW }]]);
+    // Immediately after the failure: no retry (never per render).
+    expect(due(cache, ["a"], failed, NOW + 1_000)).toEqual([]);
+    // After the first backoff (15s): due again on the same set.
+    expect(due(cache, ["a"], failed, NOW + 15_000)).toEqual(["a"]);
+  });
+
+  test("a failed refresh of a stale listing backs off instead of looping", () => {
+    // The confirmation predates the failure: without the streak gate the
+    // listing would read stale forever and every run would refetch it.
+    const cache = new Map<string, readonly TaskPullRequest[] | null>([["a", [pull()]]]);
+    const failedStale = new Map([
+      ["a", { fetchedAt: NOW - SIDEBAR_PULLS_REFRESH_MS, failures: 1, failedAt: NOW }],
+    ]);
+    expect(due(cache, ["a"], failedStale, NOW + 1_000)).toEqual([]);
+    expect(due(cache, ["a"], failedStale, NOW + 15_000)).toEqual(["a"]);
+    // A second consecutive failure doubles the wait.
+    const failedTwice = new Map([
+      ["a", { fetchedAt: NOW - SIDEBAR_PULLS_REFRESH_MS, failures: 2, failedAt: NOW }],
+    ]);
+    expect(due(cache, ["a"], failedTwice, NOW + 15_000)).toEqual([]);
+    expect(due(cache, ["a"], failedTwice, NOW + 30_000)).toEqual(["a"]);
+  });
+
+  test("a failed project with nothing to show retries on set change or backoff", () => {
+    const cache = new Map<string, readonly TaskPullRequest[] | null>([["a", null]]);
+    const failed = new Map([["a", { fetchedAt: null, failures: 1, failedAt: NOW }]]);
+    expect(due(cache, ["a"], failed, NOW + 1_000, false)).toEqual([]);
+    expect(due(cache, ["a"], failed, NOW + 1_000, true)).toEqual(["a"]);
+    expect(due(cache, ["a"], failed, NOW + 15_000, false)).toEqual(["a"]);
+  });
+
+  test("next wake sleeps until the nearest due moment", () => {
+    const cache = new Map<string, readonly TaskPullRequest[] | null>([["a", [pull()]]]);
+    const fresh = new Map([["a", { fetchedAt: NOW, failures: 0, failedAt: null }]]);
+    const input = { cache, gitIds: ["a"], freshness: fresh, nowMs: NOW };
+    expect(sidebarPrNextWakeDelayMs(input)).toBe(SIDEBAR_PULLS_REFRESH_MS);
+    // In-flight projects never pull the wake earlier.
+    expect(
+      sidebarPrNextWakeDelayMs({ ...input, exclude: new Set(["a"]) }),
+    ).toBe(SIDEBAR_PULLS_REFRESH_MS);
+    // A failed refresh wakes on its backoff instead.
+    const failed = new Map([["a", { fetchedAt: NOW - 50_000, failures: 1, failedAt: NOW }]]);
+    expect(
+      sidebarPrNextWakeDelayMs({ cache, gitIds: ["a"], freshness: failed, nowMs: NOW }),
+    ).toBe(15_000);
+  });
+
+  test("only last-good listings behind a failed refresh read as stale", () => {
+    const cache = new Map<string, readonly TaskPullRequest[] | null>([
+      ["good-stale", [pull()]],
+      ["good-fresh", [pull()]],
+      ["failed", null],
+    ]);
+    const freshness = new Map([
+      ["good-stale", { fetchedAt: NOW, failures: 1, failedAt: NOW + 1 }],
+      ["good-fresh", { fetchedAt: NOW, failures: 0, failedAt: null }],
+      ["failed", { fetchedAt: null, failures: 2, failedAt: NOW + 1 }],
+    ]);
+    // The failed entry shows nothing (unavailable), so only the project
+    // still showing markers behind a failure is stale.
+    expect(selectStaleSidebarPrProjects(cache, freshness)).toEqual(new Set(["good-stale"]));
+  });
+
+  test("health records prune with their projects", () => {
+    const freshness = new Map([
+      ["a", { fetchedAt: NOW, failures: 0, failedAt: null }],
+      ["gone", { fetchedAt: NOW, failures: 0, failedAt: null }],
+    ]);
+    const pruned = pruneSidebarPrFreshness(freshness, new Set(["a"]));
+    expect([...pruned.keys()]).toEqual(["a"]);
+    expect(pruneSidebarPrFreshness(freshness, new Set(["a", "gone"]))).toBe(freshness);
+  });
+});
+
+describe("sidebar PR pagination", () => {
+  test("page walks stay within an explicit budget", () => {
+    expect(SIDEBAR_PULLS_MAX_PAGES).toBeLessThanOrEqual(10);
+    expect(SIDEBAR_PULLS_MAX_PAGES).toBeGreaterThan(1);
+  });
+
+  test("a walk continues only while visible branches stay unmatched", () => {
+    const groups = [group("a", "git", ["late-branch", "done-branch"])];
+    const page1 = [pull({ number: 1, headRefName: "done-branch" })];
+    expect(sidebarProjectHasUnresolvedBranches(groups[0], page1)).toBe(true);
+    const page2 = [...page1, pull({ number: 2, headRefName: "late-branch" })];
+    expect(sidebarProjectHasUnresolvedBranches(groups[0], page2)).toBe(false);
+    // A stored link never holds a walk open: its own show lookup covers it.
+    const linked = {
+      ...groups[0],
+      worktrees: [
+        {
+          id: "wt-x",
+          projectId: "a",
+          workspaceId: "ws-x",
+          path: "/repo/a/x",
+          branch: "renamed",
+          head: "abc",
+          baseRef: null,
+          createdAt: "2026-09-09T00:00:00Z",
+          linkedPr: 99,
+        },
+      ],
+    };
+    expect(sidebarProjectHasUnresolvedBranches(linked, page1)).toBe(false);
+  });
+
+  test("page 1 replaces, later pages append without duplicating numbers", () => {
+    const first = mergeSidebarPrPageResults(
+      new Map(),
+      "a",
+      [pull({ number: 2, state: "merged", headRefName: "old" })],
+      1,
+    );
+    const second = mergeSidebarPrPageResults(
+      first,
+      "a",
+      [
+        pull({ number: 2, state: "merged", headRefName: "old" }),
+        pull({ number: 1, state: "open", headRefName: "late-branch" }),
+      ],
+      2,
+    );
+    // Best-first: the live review sorts ahead of concluded history.
+    expect(second.get("a")?.map((item) => item.number)).toEqual([1, 2]);
+  });
+
+  test("coverage tells matched, none, incomplete and unavailable apart", () => {
+    const groups: ProjectGroup[] = [
+      {
+        ...group("a", "git", []),
+        worktrees: [
+          {
+            id: "wt-hit",
+            projectId: "a",
+            workspaceId: "ws-hit",
+            path: "/repo/a/hit",
+            branch: "early",
+            head: "abc",
+            baseRef: null,
+            createdAt: "2026-09-09T00:00:00Z",
+          },
+          {
+            id: "wt-miss",
+            projectId: "a",
+            workspaceId: "ws-miss",
+            path: "/repo/a/miss",
+            branch: "lonely",
+            head: "abc",
+            baseRef: null,
+            createdAt: "2026-09-09T00:00:00Z",
+            linkedPr: null,
+          },
+        ],
+      },
+      {
+        ...group("b", "git", ["ghost"]),
+        worktrees: [
+          {
+            id: "wt-ghost",
+            projectId: "b",
+            workspaceId: "ws-ghost",
+            path: "/repo/b/ghost",
+            branch: "ghost",
+            head: "abc",
+            baseRef: null,
+            createdAt: "2026-09-09T00:00:00Z",
+          },
+        ],
+      },
+    ];
+    const cache = new Map<string, readonly TaskPullRequest[] | null>([
+      ["a", [pull({ headRefName: "early" })]],
+      ["b", null],
+    ]);
+    const byId = new Map(
+      sidebarPrBranchCoverage(groups, cache, new Set()).map((entry) => [entry.worktreeId, entry.coverage]),
+    );
+    expect(byId.get("wt-hit")).toBe("matched");
+    // Exhausted windows prove the branch review-less: genuinely none.
+    expect(byId.get("wt-miss")).toBe("none");
+    // A failed listing is unavailable, never none.
+    expect(byId.get("wt-ghost")).toBe("unavailable");
+    // The same miss behind an exhausted page budget is incomplete.
+    const incomplete = new Map(
+      sidebarPrBranchCoverage(groups, cache, new Set(["a"])).map((entry) => [entry.worktreeId, entry.coverage]),
+    );
+    expect(incomplete.get("wt-miss")).toBe("incomplete");
+    expect(incomplete.get("wt-hit")).toBe("matched");
   });
 });

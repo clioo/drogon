@@ -240,7 +240,19 @@ export interface TasksRpcBridge {
     /** Bounded page size; the sidebar asks for the full page so the
      *  default window cannot hide a branch's PRs. */
     perPage?: number;
-  }) => Promise<Result<{ pulls?: import("../../../../shared/tasks-contract").TaskPullRequest[] }>>;
+    /** 1-based follow-up page for the sidebar's bounded page walk (a
+     *  review past the first window); the shared bridge declares the same
+     *  param, and the daemon defaults an absent page to the first window. */
+    page?: number;
+  }) => Promise<
+    Result<{
+      pulls?: import("../../../../shared/tasks-contract").TaskPullRequest[];
+      /** True while at least one more row exists past this window — the
+       *  sidebar's page walk follows it within its page budget; the shared
+       *  result declares the same field. */
+      hasNextPage?: boolean;
+    }>
+  >;
   /** Targeted single-review lookup for a stored `linkedPr` whose branch
    *  matched no listed pull (the additive `mode: "pulls"` composer lookup,
    *  `gh pr view` behind it). */

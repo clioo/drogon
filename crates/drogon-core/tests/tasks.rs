@@ -769,12 +769,16 @@ fn pulls_list_returns_prs_with_rollup_draft_and_empty_issues() {
     assert!(listed.get("total").is_none());
 }
 
-/// A fake `gh` whose `pr list` reports the sidebar's real failure shape: one
-/// head branch carrying both concluded history and its next review (MERGED
-/// #641 beneath OPEN #642 on `collapsable-widgets`), plus a CLOSED row, so
-/// the `state: "all"` sidebar page is exercised end to end.
-fn fake_gh_pr_list_all_states() -> String {
-    const ROWS: &str = r#"[
+/// A fake `gh` that honors the requested `--json` fields the way real `gh`
+/// does: rows carry `state` only when the argv asked for it. The sidebar's
+/// real failure shape is one head branch carrying both concluded history
+/// and its next review (MERGED #641 beneath OPEN #642 on
+/// `collapsable-widgets`), plus a CLOSED row, so the `state: "all"` sidebar
+/// page is exercised end to end — and a producer that forgets to request
+/// `state` sees every row arrive stateless (exactly what real `gh` omits),
+/// which the assertions below turn red.
+fn fake_gh_pr_state_field_aware() -> String {
+    const ROWS_WITH_STATE: &str = r#"[
   {"number":642,"title":"Sidebar follow-up","state":"OPEN","isDraft":false,
    "labels":[],"assignees":[],"author":{"login":"helix"},
    "reviewDecision":"","statusCheckRollup":[
@@ -799,18 +803,82 @@ fn fake_gh_pr_list_all_states() -> String {
    "updatedAt":"2026-09-19T10:00:00Z",
    "url":"https://github.com/example/repo/pull/638"}
 ]"#;
+    // Same rows with no `state` key at all: what real `gh` returns when the
+    // producer never requested the field. `convert_pull` then defaults to
+    // OPEN, so concluded reviews falsely read open — the old-daemon shape.
+    const ROWS_STATELESS: &str = r#"[
+  {"number":642,"title":"Sidebar follow-up","isDraft":false,
+   "labels":[],"assignees":[],"author":{"login":"helix"},
+   "reviewDecision":"","statusCheckRollup":[
+     {"name":"build","status":"COMPLETED","conclusion":"SUCCESS"},
+     {"name":"discrimination","status":"COMPLETED","conclusion":"FAILURE"}],
+   "mergeable":"MERGEABLE",
+   "headRefName":"collapsable-widgets","baseRefName":"v2",
+   "updatedAt":"2026-09-21T20:53:17Z",
+   "url":"https://github.com/example/repo/pull/642"},
+  {"number":641,"title":"The card design","isDraft":false,
+   "labels":[],"assignees":[],"author":{"login":"helix"},
+   "reviewDecision":"APPROVED","statusCheckRollup":[],
+   "mergeable":"UNKNOWN",
+   "headRefName":"collapsable-widgets","baseRefName":"v2",
+   "updatedAt":"2026-09-20T10:00:00Z",
+   "url":"https://github.com/example/repo/pull/641"},
+  {"number":638,"title":"Ask for state","isDraft":false,
+   "labels":[],"assignees":[],
+   "reviewDecision":"","statusCheckRollup":[],
+   "mergeable":"UNKNOWN",
+   "headRefName":"pr-not-reflected-2","baseRefName":"v2",
+   "updatedAt":"2026-09-19T10:00:00Z",
+   "url":"https://github.com/example/repo/pull/638"}
+]"#;
+    const VIEW_WITH_STATE: &str = r#"{"number":641,"title":"The card design","state":"MERGED","isDraft":false,
+   "labels":[],"assignees":[],"author":{"login":"helix"},
+   "reviewDecision":"APPROVED","statusCheckRollup":[],
+   "mergeable":"UNKNOWN",
+   "headRefName":"collapsable-widgets","baseRefName":"v2",
+   "updatedAt":"2026-09-20T10:00:00Z",
+   "url":"https://github.com/example/repo/pull/641"}"#;
+    const VIEW_STATELESS: &str = r#"{"number":641,"title":"The card design","isDraft":false,
+   "labels":[],"assignees":[],"author":{"login":"helix"},
+   "reviewDecision":"APPROVED","statusCheckRollup":[],
+   "mergeable":"UNKNOWN",
+   "headRefName":"collapsable-widgets","baseRefName":"v2",
+   "updatedAt":"2026-09-20T10:00:00Z",
+   "url":"https://github.com/example/repo/pull/641"}"#;
+    // `,state,` matches the `--json` field list (`--state all` carries no
+    // commas, so the flag alone never selects the stateful rows).
     format!(
         "#!/bin/sh\necho \"$*\" > \"$PWD/.gh-argv-last\"\n\
-         if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then\ncat <<'EOF'\n{ROWS}\nEOF\n\
+         if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then\n\
+         case \"$*\" in\n*,state,*)\ncat <<'EOF'\n{ROWS_WITH_STATE}\nEOF\n;;\n\
+         *)\ncat <<'EOF'\n{ROWS_STATELESS}\nEOF\n;;\nesac\n\
+         elif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n\
+         case \"$*\" in\n*,state,*)\ncat <<'EOF'\n{VIEW_WITH_STATE}\nEOF\n;;\n\
+         *)\ncat <<'EOF'\n{VIEW_STATELESS}\nEOF\n;;\nesac\n\
          else\necho 'could not resolve to a PR' >&2\nexit 1\nfi\n"
     )
+}
+
+/// Human-readable `--json` field assertion: the producer must name `state`
+/// for both PR call shapes, since `gh` returns only requested fields.
+fn assert_pr_argv_requests_state(argv: &str, shape: &str) {
+    let json_fields = argv
+        .split("--json")
+        .nth(1)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    assert!(
+        argv.contains(shape) && json_fields.split(',').any(|field| field.trim() == "state"),
+        "core must request the state field via --json for {shape}, got: {argv}"
+    );
 }
 
 #[test]
 fn pulls_list_state_all_reaches_gh_and_maps_concluded_states() {
     let fx = Fixture::new(
         Some("https://github.com/example/repo.git"),
-        Some(&fake_gh_pr_list_all_states()),
+        Some(&fake_gh_pr_state_field_aware()),
     );
     // The sidebar's page: every state, one bounded window. Without
     // `state: "all"` the producer asks `gh` for open reviews only and the
@@ -827,6 +895,10 @@ fn pulls_list_state_all_reaches_gh_and_maps_concluded_states() {
             && argv.contains("--limit 101"),
         "core must derive pr list --state all with the fetch-one-extra probe row, got: {argv}"
     );
+    // The lifecycle field itself must be requested: real `gh` omits
+    // unrequested fields, and the field-aware fixture answers stateless
+    // rows otherwise — the `merged`/`closed` assertions below go red.
+    assert_pr_argv_requests_state(&argv, "pr list");
     let pulls = listed["pulls"].as_array().unwrap();
     assert_eq!(pulls.len(), 3);
     // The live review keeps the fields the card's ready-claim inspects:
@@ -845,6 +917,31 @@ fn pulls_list_state_all_reaches_gh_and_maps_concluded_states() {
     assert_eq!(pulls[2]["number"], 638);
     assert_eq!(pulls[2]["state"], "closed");
     assert_eq!(listed["perPage"], 100);
+}
+
+#[test]
+fn pulls_show_requests_state_and_maps_a_concluded_review() {
+    let fx = Fixture::new(
+        Some("https://github.com/example/repo.git"),
+        Some(&fake_gh_pr_state_field_aware()),
+    );
+    // The sidebar's stored-link fallback: one targeted `gh pr view` for a
+    // real stored number. A producer that never requests `state` gets the
+    // stateless row and misreports the concluded review as open.
+    let shown = ok(
+        &fx.engine,
+        "tasks.show",
+        json!({"projectId": fx.project_id, "mode": "pulls", "number": 641}),
+    );
+    let argv = fx.last_argv();
+    assert!(
+        argv.contains("pr view") && argv.contains(" 641 "),
+        "core must derive pr view for the stored number, got: {argv}"
+    );
+    assert_pr_argv_requests_state(&argv, "pr view");
+    assert_eq!(shown["pull"]["number"], 641);
+    assert_eq!(shown["pull"]["state"], "merged");
+    assert_eq!(shown["pull"]["headRefName"], "collapsable-widgets");
 }
 
 #[test]

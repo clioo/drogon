@@ -8,7 +8,7 @@
    icons, proving fetch params, deterministic selection, honest states,
    and failure handling end to end. */
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type {
   Project,
   Worktree,
@@ -16,6 +16,7 @@ import type {
 } from "../../../../shared/session-contract";
 import type { TaskPullRequest } from "../../../../shared/tasks-contract";
 import type { ProjectGroup } from "./project-adapter";
+import { SIDEBAR_PULLS_REFRESH_MS } from "./sidebar-pr-fetch";
 import { ProjectList } from "./ProjectList";
 import { EMPTY_TAB_STRIP_STATE } from "./tab-order";
 import { TooltipProvider } from "../../components/ui/tooltip";
@@ -159,6 +160,14 @@ describe("sidebar PR states: ProjectList wiring", () => {
         pull({ number: 14, title: "Clash", state: "open", mergeable: "CONFLICTING", headRefName: "b-conflicts" }),
         pull({ number: 15, title: "Abandoned", state: "closed", headRefName: "b-closed" }),
         pull({ number: 16, title: "Uncomputed", state: "open", mergeable: "UNKNOWN", headRefName: "b-open" }),
+        pull({
+          number: 17,
+          title: "Checks running",
+          state: "open",
+          mergeable: "MERGEABLE",
+          checks: { state: "pending", total: 2, passed: 1, failed: 0, pending: 1, neutral: 0 },
+          headRefName: "b-pending",
+        }),
       ]),
     );
     (window as unknown as { drogon: Record<string, unknown> }).drogon = {
@@ -167,7 +176,7 @@ describe("sidebar PR states: ProjectList wiring", () => {
     const groups: ProjectGroup[] = [
       {
         project: project(),
-        worktrees: ["merged", "ready", "draft", "conflicts", "closed", "open"].map((kind) =>
+        worktrees: ["merged", "ready", "draft", "conflicts", "closed", "open", "pending"].map((kind) =>
           worktree({ id: `wt-${kind}`, branch: `b-${kind}` }),
         ),
       },
@@ -180,6 +189,9 @@ describe("sidebar PR states: ProjectList wiring", () => {
     expect(cardPrState(container, "wt-closed")).toBe("closed");
     // Unknown mergeability stays honestly open, never "Ready to merge".
     expect(cardPrState(container, "wt-open")).toBe("open");
+    // Pending required checks are not a merge confirmation either.
+    expect(cardPrState(container, "wt-pending")).toBe("open");
+    expect(screen.getByLabelText("Linked PR #17 checks: Pending")).toBeTruthy();
     expect(screen.getByLabelText("Linked PR #11: Merged")).toBeTruthy();
     expect(screen.getByLabelText("Linked PR #15: Closed")).toBeTruthy();
   });
@@ -349,6 +361,251 @@ describe("sidebar PR states: ProjectList wiring", () => {
     await waitFor(() => expect(tasksList).toHaveBeenCalledTimes(3));
     const ids = tasksList.mock.calls.map((call) => (call[0] as { projectId: string }).projectId).sort();
     expect(ids).toEqual(["a", "a", "b"]);
+  });
+
+  test("a review past the first window is found through the bounded page walk", async () => {
+    const page1 = {
+      ok: true as const,
+      result: {
+        repo: "example/repo",
+        issues: [],
+        pulls: [pull({ number: 10, title: "Early", state: "open", headRefName: "early" })],
+        page: 1,
+        perPage: 100,
+        hasNextPage: true,
+      },
+    };
+    const page2 = {
+      ok: true as const,
+      result: {
+        repo: "example/repo",
+        issues: [],
+        pulls: [pull({ number: 9, title: "Late", state: "merged", headRefName: "late-branch" })],
+        page: 2,
+        perPage: 100,
+        hasNextPage: false,
+      },
+    };
+    const tasksList = vi.fn(async (input: { projectId: string; page?: number }) =>
+      (input.page ?? 1) === 1 ? page1 : page2,
+    );
+    (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+      tasks: { tasksList },
+    };
+    const { container } = mount({
+      groups: [
+        {
+          project: project(),
+          worktrees: [
+            worktree({ id: "wt-early", branch: "early" }),
+            // Explicitly no stored link: the walk itself must find this one.
+            worktree({ id: "wt-late", branch: "late-branch", linkedPr: null }),
+          ],
+        },
+      ],
+    });
+    await waitFor(() => expect(cardPrState(container, "wt-late")).toBe("merged"));
+    expect(cardPrState(container, "wt-early")).toBe("open");
+    // Page 1 keeps its call shape (no page param); the walk names page 2.
+    expect(tasksList).toHaveBeenCalledWith({
+      projectId: "proj-1",
+      mode: "pulls",
+      state: "all",
+      perPage: 100,
+    });
+    expect(tasksList).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "proj-1", page: 2 }),
+    );
+    expect(tasksList).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("Linked PR #9: Merged")).toBeTruthy();
+  });
+
+  test("the same stored number in two projects looks up both reviews", async () => {
+    // The listing names an unrelated review: neither stored link is listed,
+    // so both need their targeted lookup.
+    const tasksList = vi.fn(async () => okPulls([pull({ number: 2, headRefName: "elsewhere" })]));
+    const tasksShow = vi.fn(
+      async ({ projectId, number }: { projectId: string; number: number }) => ({
+        ok: true as const,
+        result: {
+          pull: pull({
+            number,
+            title: `Review in ${projectId}`,
+            state: "open",
+            headRefName: "renamed",
+          }),
+        },
+      }),
+    );
+    (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+      tasks: { tasksList, tasksShow },
+    };
+    mount({
+      groups: [
+        {
+          project: project({ id: "repo-a", name: "Repo A" }),
+          worktrees: [worktree({ id: "wa", projectId: "repo-a", branch: "feature", linkedPr: 1 })],
+        },
+        {
+          project: project({ id: "repo-b", name: "Repo B" }),
+          worktrees: [worktree({ id: "wb", projectId: "repo-b", branch: "feature", linkedPr: 1 })],
+        },
+      ],
+    });
+    // A global number dedupe would stop at one; per-project attempts fetch both.
+    await waitFor(() => expect(tasksShow).toHaveBeenCalledTimes(2));
+    expect(tasksShow).toHaveBeenCalledWith({ projectId: "repo-a", number: 1, mode: "pulls" });
+    expect(tasksShow).toHaveBeenCalledWith({ projectId: "repo-b", number: 1, mode: "pulls" });
+  });
+
+  test("a newly added worktree's stored link triggers its lookup on a stable set", async () => {
+    const tasksList = vi.fn(async () => okPulls([pull({ number: 2, headRefName: "elsewhere" })]));
+    const tasksShow = vi.fn(async () => ({
+      ok: true as const,
+      result: {
+        pull: pull({ number: 7, title: "Added", state: "open", headRefName: "renamed" }),
+      },
+    }));
+    (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+      tasks: { tasksList, tasksShow },
+    };
+    const groups: ProjectGroup[] = [
+      { project: project(), worktrees: [worktree({ id: "wt-old", branch: "feature" })] },
+    ];
+    const { container, rerender } = mount({ groups });
+    await waitFor(() => expect(tasksList).toHaveBeenCalledTimes(1));
+    expect(tasksShow).not.toHaveBeenCalled();
+    // The project set is stable; only a worktree joins, carrying a stored
+    // link the listing misses — it gets its one targeted lookup.
+    rerender(
+      <TooltipProvider>
+        <ProjectList
+          groups={[
+            {
+              project: project(),
+              worktrees: [
+                worktree({ id: "wt-old", branch: "feature" }),
+                worktree({ id: "wt-new", branch: "fresh", linkedPr: 7 }),
+              ],
+            },
+          ]}
+          workspaces={[]}
+          sessions={[]}
+          selectedWorkspaceId=""
+          activeSessionId=""
+          tabStrip={EMPTY_TAB_STRIP_STATE}
+          onSelectSession={() => {}}
+          disabled={false}
+          addDisabled={false}
+          sidebarWidth={300}
+          worktreesAvailable={true}
+          action={null}
+          onSelectWorkspace={() => {}}
+          onAddProject={() => {}}
+          onCreateWorkspace={() => {}}
+          onOpenAction={() => {}}
+          onCloseAction={() => {}}
+          onOpenProjectSettings={() => {}}
+          onBrowse={async () => null}
+          onSubmitAdd={async () => null}
+          onSubmitRemove={async () => null}
+          onSubmitRemoveProject={async () => null}
+          onSubmitRename={async () => null}
+        />
+      </TooltipProvider>,
+    );
+    await waitFor(() =>
+      expect(tasksShow).toHaveBeenCalledWith({ projectId: "proj-1", number: 7, mode: "pulls" }),
+    );
+    await waitFor(() => expect(cardPrState(container, "wt-new")).toBe("open"));
+    expect(tasksShow).toHaveBeenCalledTimes(1);
+  });
+
+  test("a stable project set revalidates: open becomes merged without any set change", async () => {
+    vi.useFakeTimers();
+    try {
+      let truth: TaskPullRequest[] = [
+        pull({ number: 5, title: "Live", state: "open", headRefName: "feature" }),
+      ];
+      const tasksList = vi.fn(async () => okPulls(truth));
+      (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+        tasks: { tasksList },
+      };
+      const { container } = mount({
+        groups: [{ project: project(), worktrees: [worktree({ id: "wt-1" })] }],
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(cardPrState(container, "wt-1")).toBe("open");
+      expect(tasksList).toHaveBeenCalledTimes(1);
+      // The review merges while the sidebar stays open; the scheduled
+      // revalidation picks it up on the unchanged project set.
+      truth = [pull({ number: 5, title: "Live", state: "merged", headRefName: "feature" })];
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SIDEBAR_PULLS_REFRESH_MS + 1_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(tasksList).toHaveBeenCalledTimes(2);
+      expect(cardPrState(container, "wt-1")).toBe("merged");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a failed refresh keeps markers but lapses ready, then recovers", async () => {
+    vi.useFakeTimers();
+    try {
+      const readyPull = pull({
+        number: 6,
+        title: "Ready",
+        state: "open",
+        mergeable: "MERGEABLE",
+        checks: { state: "success", total: 1, passed: 1, failed: 0, pending: 0, neutral: 0 },
+        headRefName: "feature",
+      });
+      let fail = false;
+      const tasksList = vi.fn(async () =>
+        fail
+          ? { ok: false as const, error: { code: "gh_unavailable", message: "no gh", retryable: true } }
+          : okPulls([readyPull]),
+      );
+      (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+        tasks: { tasksList },
+      };
+      const { container } = mount({
+        groups: [{ project: project(), worktrees: [worktree({ id: "wt-1" })] }],
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(cardPrState(container, "wt-1")).toBe("ready");
+      // The refresh fails: markers stay (facts don't expire) but the
+      // ready-claim lapses until the next success.
+      fail = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SIDEBAR_PULLS_REFRESH_MS + 1_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(tasksList).toHaveBeenCalledTimes(2);
+      expect(cardPrState(container, "wt-1")).toBe("open");
+      // Recovery rides the failure backoff on the same stable set.
+      fail = false;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000 + 1_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(tasksList).toHaveBeenCalledTimes(3);
+      expect(cardPrState(container, "wt-1")).toBe("ready");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("a stored linkedPr falls back to one targeted show lookup", async () => {
