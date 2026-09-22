@@ -109,6 +109,51 @@ export const TIMED_SLEEPER_C_SOURCE =
   "#include <unistd.h>\n" +
   "int main(int argc, char **argv) { unsigned s = argc > 1 ? (unsigned)atoi(argv[1]) : 8; sleep(s); return 0; }\n";
 
+/**
+ * Known Mach-O magic numbers (all byte orders and widths `cc` can emit on
+ * macOS, including fat/universal headers): each entry is the 4-byte header
+ * as a lowercase hex string.
+ */
+export const MACH_O_MAGICS = new Set([
+  "cefaedfe", // MH_MAGIC (32-bit, little-endian)
+  "feedface", // MH_CIGAM (32-bit, big-endian)
+  "cffaedfe", // MH_MAGIC_64 (64-bit, little-endian)
+  "feedfacf", // MH_CIGAM_64 (64-bit, big-endian)
+  "cafebabe", // FAT_MAGIC (universal, big-endian)
+  "bebafeca", // FAT_CIGAM (universal, little-endian)
+  "cafebabf", // FAT_MAGIC_64 (universal 64-bit, big-endian)
+  "bfbafeca", // FAT_CIGAM_64 (universal 64-bit, little-endian)
+]);
+
+/** The ELF magic (`\x7fELF`), the native compiled format on Linux. */
+export const ELF_MAGIC_HEX = "7f454c46";
+
+/** The expected native compiled format name for a platform. */
+export function nativeSleeperFormatName(platform = process.platform) {
+  if (platform === "darwin") return "Mach-O";
+  if (platform === "linux") return "ELF";
+  return "native";
+}
+
+/**
+ * True when a 4-byte file header is the platform's own native compiled
+ * format: Mach-O on macOS, ELF on Linux. Scripts (`#!`), empty files and
+ * the other platform's format all read false on every supported platform,
+ * so a shell script under the fixture path can never pass this guard.
+ */
+export function isNativeCompiledSleeper(magic, platform = process.platform) {
+  let bytes;
+  if (Buffer.isBuffer(magic)) bytes = magic.subarray(0, 4);
+  else if (magic instanceof Uint8Array) bytes = magic.subarray(0, 4);
+  else if (Array.isArray(magic)) bytes = Buffer.from(magic.slice(0, 4));
+  else return false;
+  if (bytes.length < 4) return false;
+  const hex = Buffer.from(bytes).toString("hex");
+  if (platform === "darwin") return MACH_O_MAGICS.has(hex);
+  if (platform === "linux") return hex === ELF_MAGIC_HEX;
+  return false;
+}
+
 /** Single-quote a string for POSIX shell interpolation. */
 export function quoteShellWord(text) {
   return `'${String(text).replaceAll("'", "'\\''")}'`;
@@ -352,15 +397,15 @@ export async function runSidebarAgentTreeAcceptance() {
     await mkdir(path.join(binDir, "pidir"), { recursive: true });
     await symlink(path.join(versionsDir, "7.7.7"), path.join(binDir, "pidir", "pi"));
     // Guard the failure mode that cost a debugging round: the observation
-    // chain needs real Mach-O binaries (a shell script under the same path
-    // is exec'd as sh and never observed, which surfaces far away as a
-    // lineage timeout). Fail fast with the cause instead.
+    // chain needs real native binaries (Mach-O on macOS, ELF on Linux — a
+    // shell script under the same path is exec'd as sh and never observed,
+    // which surfaces far away as a lineage timeout). Fail fast with the
+    // cause instead.
     for (const binary of [path.join(versionsDir, "9.9.9"), path.join(versionsDir, "7.7.7")]) {
       const magic = (await readFile(binary)).subarray(0, 4);
       assert.ok(
-        magic.equals(Buffer.from([0xcf, 0xfa, 0xed, 0xfe])) ||
-          magic.equals(Buffer.from([0xca, 0xfe, 0xba, 0xbe])),
-        `${binary} is a compiled Mach-O sleeper, not a script`,
+        isNativeCompiledSleeper(magic),
+        `${binary} is a compiled ${nativeSleeperFormatName()} sleeper, not a script`,
       );
     }
     // The orchestration worker's harness: a fixture that only sleeps, so
