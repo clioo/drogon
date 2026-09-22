@@ -103,9 +103,12 @@ describe("WorktreeCard nested session rows", () => {
     try {
       // Harness session row: the harness label is the primary title now
       // (issue #622: the row reads what the session runs, not Terminal N),
-      // and the owner's design appends the row's own state.
+      // and the owner's design appends the row's own state. The sidebar
+      // reads the owner-authorized "Claude Code" branding, so the
+      // accessible name carries it too (label-in-name: it must contain the
+      // visible text).
       expect(
-        screen.getByRole("button", { name: "Claude - Working" }),
+        screen.getByRole("button", { name: "Claude Code - Working" }),
       ).toBeTruthy();
       // Fallback row for the session that never reported: tab title plus
       // the fork's freshness copy, never a bare missing row.
@@ -178,8 +181,10 @@ describe("WorktreeCard nested session rows", () => {
     try {
       // No `Claude - zsh`, never `Claude - Claude`: the harness label is
       // the whole row text for the observed session, followed by the state
-      // the owner's design puts on every row (here: working).
-      expect(screen.getByRole("button", { name: "Claude - Working" })).toBeTruthy();
+      // the owner's design puts on every row (here: working). Sidebar
+      // branding reads "Claude Code" (owner-authorized), carried in the
+      // accessible name per label-in-name.
+      expect(screen.getByRole("button", { name: "Claude Code - Working" })).toBeTruthy();
       expect(
         screen.getByRole("button", { name: "Terminal 2 - zsh - Working" }),
       ).toBeTruthy();

@@ -335,6 +335,34 @@ export async function runSidebarAgentTreeAcceptance() {
     await rm(path.join(versionsDir, "9.9.9.c"));
     await chmod(path.join(versionsDir, "9.9.9"), 0o755);
     await symlink(path.join(versionsDir, "9.9.9"), path.join(binDir, "claude"));
+    // F3 guide layout: the same sleeper under the other provider names, so
+    // a later multi-provider chain (Pi root, Codex child, Claude
+    // grandchild, standalone Codex) is observed honestly through argv[0],
+    // exactly like the claude chain above. `codex` is a free name; `pi` is
+    // NOT (the worker section below writes a `pi` sleep *script* into
+    // binDir, and writeFile follows symlinks — pointing bin/pi at the
+    // compiled sleeper would clobber the binary). The observed-pi entry
+    // therefore lives at bin/pidir/pi: its basename is still exactly `pi`,
+    // which is all the daemon's argv[0] match reads.
+    await symlink(path.join(versionsDir, "9.9.9"), path.join(binDir, "codex"));
+    await writeFile(path.join(versionsDir, "7.7.7.c"), TIMED_SLEEPER_C_SOURCE);
+    await exec("cc", ["-O2", "-o", path.join(versionsDir, "7.7.7"), path.join(versionsDir, "7.7.7.c")]);
+    await rm(path.join(versionsDir, "7.7.7.c"));
+    await chmod(path.join(versionsDir, "7.7.7"), 0o755);
+    await mkdir(path.join(binDir, "pidir"), { recursive: true });
+    await symlink(path.join(versionsDir, "7.7.7"), path.join(binDir, "pidir", "pi"));
+    // Guard the failure mode that cost a debugging round: the observation
+    // chain needs real Mach-O binaries (a shell script under the same path
+    // is exec'd as sh and never observed, which surfaces far away as a
+    // lineage timeout). Fail fast with the cause instead.
+    for (const binary of [path.join(versionsDir, "9.9.9"), path.join(versionsDir, "7.7.7")]) {
+      const magic = (await readFile(binary)).subarray(0, 4);
+      assert.ok(
+        magic.equals(Buffer.from([0xcf, 0xfa, 0xed, 0xfe])) ||
+          magic.equals(Buffer.from([0xca, 0xfe, 0xba, 0xbe])),
+        `${binary} is a compiled Mach-O sleeper, not a script`,
+      );
+    }
     // The orchestration worker's harness: a fixture that only sleeps, so
     // the worker-start check proves lineage with no model inference.
     await writeFile(path.join(binDir, "pi"), "#!/bin/sh\nsleep 120\n");
@@ -641,6 +669,113 @@ export async function runSidebarAgentTreeAcceptance() {
     await page.locator(".shell-worktree-card-fold").click();
     await until(async () => (await readCardDesign()).rowIds.length === 3, "the card chevron restores the tree");
     report.checks.push("the-card-chevron-folds-and-restores-the-whole-tree");
+
+    // F3 guide layout: provider width budget at the natural sidebar width.
+    // The leader's finding was provider names truncated to Cl.../C.../Cla...
+    // beside MAIN and the state at ~280px. These asserts measure real
+    // bounding boxes over CDP: every provider primary must read whole
+    // (scrollWidth within clientWidth), MAIN and the state must draw inside
+    // the card, and no row may clip horizontally. Recorded in the report
+    // outside CHECK_NAMES (which the companion test pins).
+    const measureGuideRows = (cardId) =>
+      page.evaluate((id) => {
+        const card = document.querySelector(`[data-worktree-card-id="${id}"]`);
+        const sidebar = document.querySelector(".workspace-sidebar");
+        const cardRect = card.getBoundingClientRect();
+        return {
+          sidebarWidth: sidebar ? Math.round(sidebar.getBoundingClientRect().width) : null,
+          cardRect: { left: cardRect.left, right: cardRect.right },
+          rows: [...card.querySelectorAll("[data-worktree-agent-row]")].map((row) => {
+            const rowRect = row.getBoundingClientRect();
+            const primary = row.querySelector("[data-worktree-agent-primary]");
+            const primaryRect = primary.getBoundingClientRect();
+            const badge = row.querySelector(".shell-worktree-agent-main-badge");
+            const badgeRect = badge ? badge.getBoundingClientRect() : null;
+            const state = row.querySelector("[data-worktree-agent-state]");
+            const stateRect = state ? state.getBoundingClientRect() : null;
+            const stateLabel = row.querySelector(".shell-worktree-agent-state-label");
+            return {
+              id: row.getAttribute("data-worktree-agent-row"),
+              primaryText: primary?.textContent ?? null,
+              primaryClientW: primary?.clientWidth ?? null,
+              primaryScrollW: primary?.scrollWidth ?? null,
+              badgeW: badgeRect ? Math.round(badgeRect.width) : null,
+              badgeRight: badgeRect ? Math.round(badgeRect.right) : null,
+              stateW: stateRect ? Math.round(stateRect.width) : null,
+              stateLeft: stateRect ? Math.round(stateRect.left) : null,
+              stateRight: stateRect ? Math.round(stateRect.right) : null,
+              stateTop: stateRect ? Math.round(stateRect.top) : null,
+              primaryBottom: Math.round(primaryRect.bottom),
+              rowClientW: row.clientWidth,
+              rowScrollW: row.scrollWidth,
+              rowTop: Math.round(rowRect.top),
+            };
+          }),
+        };
+      }, cardId);
+    const widthBudget = await measureGuideRows(worktreeId);
+    report.widthBudget280 = widthBudget;
+    assert.ok(
+      widthBudget.sidebarWidth >= 260 && widthBudget.sidebarWidth <= 300,
+      `the natural sidebar width is ~280px (saw ${widthBudget.sidebarWidth})`,
+    );
+    assert.equal(widthBudget.rows.length, 3, "three rows measured at natural width");
+    for (const row of widthBudget.rows) {
+      assert.ok(row.primaryText && row.primaryText.length > 2, `row ${row.id} names its provider (${row.primaryText})`);
+      assert.ok(
+        row.primaryScrollW <= row.primaryClientW + 1,
+        `row ${row.id} provider reads whole: "${row.primaryText}" scrolls ${row.primaryScrollW}px in ${row.primaryClientW}px`,
+      );
+      assert.ok(row.stateW > 0, `row ${row.id} keeps its own state visible`);
+      assert.ok(
+        row.stateLeft >= widthBudget.cardRect.left - 1 && row.stateRight <= widthBudget.cardRect.right + 1,
+        `row ${row.id} state draws inside the card`,
+      );
+      assert.ok(
+        row.rowScrollW <= row.rowClientW + 1,
+        `row ${row.id} never clips horizontally`,
+      );
+    }
+    const budgetMain = widthBudget.rows.find((row) => row.id === l1id);
+    assert.ok(budgetMain && budgetMain.badgeW > 0, "MAIN draws beside the root provider name");
+    assert.ok(
+      budgetMain.badgeRight <= widthBudget.cardRect.right + 1,
+      "MAIN draws inside the card",
+    );
+    report.guideBudget280 = "pass";
+
+    // Discrimination probe: the previous row layout (one shared truncating
+    // span for name + secondary beside non-shrinking MAIN/state) rebuilt
+    // with the same recipe inside a hidden box at the live row width. It
+    // must truncate there — otherwise the asserts above prove nothing about
+    // the fix. Recipe-faithful reconstruction, honestly labeled: the live
+    // document supplies the real Tailwind utilities and fonts.
+    const oldLayoutProbe = await page.evaluate((liveRowWidth) => {
+      const host = document.createElement("div");
+      host.setAttribute("aria-hidden", "true");
+      host.style.cssText = `position:fixed;left:-10000px;top:0;width:${liveRowWidth}px;`;
+      host.innerHTML =
+        `<div class="compact-agent-row flex h-6 min-w-0 items-center gap-1 overflow-hidden rounded-sm px-1 text-[11px] leading-none">` +
+        `<span class="size-4 shrink-0"></span>` +
+        `<span class="inline-flex shrink-0"><svg width="13" height="13"></svg></span>` +
+        `<span class="min-w-0 flex-1 truncate"><span>Claude</span><span> - Fix the sidebar card order for real</span></span>` +
+        `<span class="shell-worktree-agent-main-badge">MAIN</span>` +
+        `<span class="shell-worktree-agent-state shrink-0"><svg width="10" height="10"></svg><span class="shell-worktree-agent-state-label">No update in 0m</span></span>` +
+        `</div>`;
+      document.body.appendChild(host);
+      // The shared span is the truncation victim in the old layout: its
+      // scroll width is the whole "Claude - <preview>" line while its
+      // client width is what the shrink-0 tail leaves behind.
+      const shared = host.querySelector(".truncate");
+      const result = { clientW: shared.clientWidth, scrollW: shared.scrollWidth };
+      host.remove();
+      return result;
+    }, widthBudget.rows[0].rowClientW);
+    report.oldLayoutProbe = oldLayoutProbe;
+    assert.ok(
+      oldLayoutProbe.scrollW > oldLayoutProbe.clientW + 1,
+      `the previous layout truncates at the same width (scrolls ${oldLayoutProbe.scrollW}px in ${oldLayoutProbe.clientW}px), so the budget asserts discriminate`,
+    );
     checkCancelled();
 
     const expandedShot = path.join(output, "tree-expanded.png");
@@ -786,6 +921,230 @@ export async function runSidebarAgentTreeAcceptance() {
       cwd: fixture,
     });
     await until(async () => (await sessionRow(workerSessionId))?.verdict === "exited", "the worker session exited");
+
+    // F3 guide layout continued: a second folder project proves multi-card
+    // rhythm — first its no-session card, then a Pi root with Codex and
+    // Claude Code descendants plus a standalone Codex agent. Fixture-only
+    // sessions, explicitly labeled in the report; the rows render through
+    // the product's own WorktreeCard path, never a hand-drawn page.
+    const guide = { fixture: true, sessions: "observed sleeper binaries, no inference" };
+    const project2Dir = path.join(fixture, "guidebiz");
+    await mkdir(project2Dir, { recursive: true });
+    const project2 = await cliJson(["project", "add", project2Dir, "--name", "guidebiz"], { env, cwd: fixture });
+    const trees2 = await cliJson(["worktree", "list", "--project", project2.id], { env, cwd: fixture });
+    assert.equal(trees2.worktrees.length, 1, "a folder project has exactly its implicit worktree");
+    const worktree2Id = trees2.worktrees[0].id;
+    const workspace2Id = trees2.worktrees[0].workspaceId;
+    guide.projectId = project2.id;
+    guide.worktreeId = worktree2Id;
+    await until(async () => {
+      const sentence = await page.evaluate(
+        (id) => document.querySelector(`[data-worktree-card-id="${id}"] .shell-worktree-card-sentence`)?.textContent?.trim() ?? null,
+        worktree2Id,
+      );
+      return sentence === "NO SESSION" ? true : false;
+    }, "the second card states its empty condition");
+    guide.noSessionSentence = "NO SESSION";
+    const noSessionShot = path.join(output, "guide-layout-no-session.png");
+    await page.screenshot({ path: noSessionShot, animations: "disabled" });
+    report.screenshots.push(noSessionShot);
+
+    // Pi root -> Codex child -> Claude grandchild, all observed through
+    // argv[0] like the claude chain above, plus a standalone Codex root.
+    const guideGrandchildScript = path.join(fixture, "guide-grandchild.sh");
+    await writeFile(guideGrandchildScript, `#!/bin/sh\nexec ${quoteShellWord(path.join(binDir, "claude"))} 600\n`);
+    await chmod(guideGrandchildScript, 0o755);
+    const guideChildScript = path.join(fixture, "guide-child.sh");
+    await writeFile(
+      guideChildScript,
+      [
+        "#!/bin/sh",
+        `${quoteShellWord(cli)} --json terminal create --workspace "$DROGON_WORKSPACE_ID" -- /bin/sh ${quoteShellWord(guideGrandchildScript)} > ${quoteShellWord(path.join(fixture, "guide-grandchild.json"))} 2> ${quoteShellWord(path.join(fixture, "guide-grandchild.err"))}`,
+        `exec ${quoteShellWord(path.join(binDir, "codex"))} 600`,
+      ].join("\n") + "\n",
+    );
+    await chmod(guideChildScript, 0o755);
+    const guideRoot = await cliJson(["terminal", "create", "--workspace", workspace2Id, "--", "/bin/sh"], { env, cwd: fixture });
+    await cliJson(
+      ["terminal", "send", "--session", guideRoot.id, "--incarnation", guideRoot.incarnation, "--text",
+        `${quoteShellWord(cli)} --json terminal create --workspace "$DROGON_WORKSPACE_ID" -- /bin/sh ${quoteShellWord(guideChildScript)} > ${quoteShellWord(path.join(fixture, "guide-child.json"))} 2> ${quoteShellWord(path.join(fixture, "guide-child.err"))}; exec ${quoteShellWord(path.join(binDir, "pidir", "pi"))} 600\n`],
+      { env, cwd: fixture },
+    );
+    const guideLone = await cliJson(["terminal", "create", "--workspace", workspace2Id, "--", "/bin/sh"], { env, cwd: fixture });
+    await cliJson(
+      ["terminal", "send", "--session", guideLone.id, "--incarnation", guideLone.incarnation, "--text",
+        `exec ${quoteShellWord(path.join(binDir, "codex"))} 600\n`],
+      { env, cwd: fixture },
+    );
+    const guideChain = await until(async () => {
+      let childId = null;
+      let grandchildId = null;
+      try {
+        childId = JSON.parse(await readFile(path.join(fixture, "guide-child.json"), "utf8")).result.id;
+        grandchildId = JSON.parse(await readFile(path.join(fixture, "guide-grandchild.json"), "utf8")).result.id;
+      } catch {
+        return false;
+      }
+      const [r, c, g, lone] = await Promise.all([
+        sessionRow(guideRoot.id), sessionRow(childId), sessionRow(grandchildId), sessionRow(guideLone.id),
+      ]);
+      if (!r || !c || !g || !lone) return false;
+      if (r.observedHarnessId !== "pi" || (r.harnessId ?? null) !== null) return false;
+      if (c.observedHarnessId !== "codex" || c.parentSessionId !== guideRoot.id) return false;
+      if (g.observedHarnessId !== "claude" || g.parentSessionId !== childId) return false;
+      if (lone.observedHarnessId !== "codex" || (lone.parentSessionId ?? null) !== null) return false;
+      return { rootId: r.id, childId: c.id, grandchildId: g.id, loneId: lone.id };
+    }, "pi root with codex and claude descendants plus a standalone agent");
+    guide.chain = guideChain;
+    const guideMeasured = await until(async () => {
+      const measured = await measureGuideRows(worktree2Id);
+      return measured.rows.length === 4 ? measured : false;
+    }, "the guide card lists all four fixture rows");
+    report.guideMeasured = guideMeasured;
+    const primaryById = new Map(guideMeasured.rows.map((row) => [row.id, row]));
+    assert.equal(primaryById.get(guideChain.rootId)?.primaryText, "Pi", "the pi root reads Pi");
+    assert.equal(primaryById.get(guideChain.childId)?.primaryText, "Codex", "the codex child reads Codex");
+    assert.equal(primaryById.get(guideChain.grandchildId)?.primaryText, "Claude Code", "the claude grandchild reads Claude Code");
+    assert.equal(primaryById.get(guideChain.loneId)?.primaryText, "Codex", "the standalone agent reads Codex");
+    for (const row of guideMeasured.rows) {
+      assert.ok(
+        row.primaryScrollW <= row.primaryClientW + 1,
+        `guide row ${row.id} provider reads whole: "${row.primaryText}" scrolls ${row.primaryScrollW}px in ${row.primaryClientW}px`,
+      );
+      assert.ok(row.stateW > 0, `guide row ${row.id} keeps its own state visible`);
+      assert.ok(
+        row.rowScrollW <= row.rowClientW + 1,
+        `guide row ${row.id} never clips horizontally`,
+      );
+    }
+    const guideBadges = await page.evaluate(
+      (id) => [...document.querySelectorAll(`[data-worktree-card-id="${id}"] .shell-worktree-agent-main-badge`)]
+        .map((badge) => badge.closest("[data-worktree-agent-row]")?.getAttribute("data-worktree-agent-row")),
+      worktree2Id,
+    );
+    assert.deepEqual(guideBadges, [guideChain.rootId], "MAIN marks only the genuine root-with-children");
+    const loneDisclosure = await page.locator(`[data-worktree-agent-row="${guideChain.loneId}"]`).locator('button[aria-label*="child agent"]').count();
+    assert.equal(loneDisclosure, 0, "the standalone agent has no child disclosure");
+    // The fixture sessions report whatever the daemon derives for
+    // foreground sleepers (working while observed-busy, silence otherwise),
+    // so the expected sentence is derived from the live row states with the
+    // card's own rule — never hardcoded.
+    const guideCardState = await page.evaluate((id) => {
+      const card = document.querySelector(`[data-worktree-card-id="${id}"]`);
+      return {
+        sentence: card?.querySelector(".shell-worktree-card-sentence")?.textContent?.trim() ?? null,
+        states: [...card.querySelectorAll("[data-worktree-agent-row]")].map(
+          (row) => row.querySelector("[data-worktree-agent-state]")?.getAttribute("data-worktree-agent-state") ?? null,
+        ),
+      };
+    }, worktree2Id);
+    const guideSentence = guideCardState.sentence;
+    const guideStates = guideCardState.states;
+    const guideExpected = guideStates.includes("needs_input")
+      ? `${guideStates.filter((s) => s === "needs_input").length} AGENT${guideStates.filter((s) => s === "needs_input").length === 1 ? " NEEDS" : "S NEED"} INPUT`
+      : guideStates.includes("working")
+        ? `${guideStates.filter((s) => s === "working").length} AGENT${guideStates.filter((s) => s === "working").length === 1 ? "" : "S"} WORKING`
+        : guideStates.every((s) => s === "unknown")
+          ? `${guideStates.length} AGENT${guideStates.length === 1 ? "" : "S"} NOT REPORTING`
+          : "NO ACTIVE AGENTS";
+    assert.equal(guideSentence, guideExpected, `the guide card states its fixture condition (${guideSentence})`);
+    guide.liveStates = guideStates;
+    guide.sentence = guideSentence;
+    const multiShot = path.join(output, "guide-layout-multi.png");
+    await page.screenshot({ path: multiShot, animations: "disabled" });
+    report.screenshots.push(multiShot);
+
+    // Collapsed parent, folded card and selection on the guide card —
+    // scoped locators, so the first card's persisted folds are untouched.
+    await disclosureFor(guideChain.childId).click();
+    await until(async () => {
+      const measured = await measureGuideRows(worktree2Id);
+      return measured.rows.length === 3 && measured.rows.every((row) => row.id !== guideChain.grandchildId) ? true : false;
+    }, "collapsing the codex child hides the claude grandchild");
+    const collapsedParentShot = path.join(output, "guide-layout-collapsed-parent.png");
+    await page.screenshot({ path: collapsedParentShot, animations: "disabled" });
+    report.screenshots.push(collapsedParentShot);
+    await disclosureFor(guideChain.childId).click();
+    await until(async () => (await measureGuideRows(worktree2Id)).rows.length === 4, "the grandchild returns");
+    const card2Fold = page.locator(`[data-worktree-card-id="${worktree2Id}"] .shell-worktree-card-fold`);
+    await card2Fold.click();
+    await until(async () => (await measureGuideRows(worktree2Id)).rows.length === 0, "the guide card chevron folds its list");
+    const foldedSentence = await page.evaluate(
+      (id) => document.querySelector(`[data-worktree-card-id="${id}"] .shell-worktree-card-sentence`)?.textContent?.trim() ?? null,
+      worktree2Id,
+    );
+    assert.equal(foldedSentence, guideSentence, "a folded card still states its activity");
+    const cardFoldedShot = path.join(output, "guide-layout-card-folded.png");
+    await page.screenshot({ path: cardFoldedShot, animations: "disabled" });
+    report.screenshots.push(cardFoldedShot);
+    await card2Fold.click();
+    await until(async () => (await measureGuideRows(worktree2Id)).rows.length === 4, "the guide card restores its list");
+    const card2Select = page.locator(`[data-worktree-card-id="${worktree2Id}"] .shell-worktree-card-select`);
+    await card2Select.scrollIntoViewIfNeeded();
+    await card2Select.click();
+    const selectTrajectory = [];
+    let selected = false;
+    for (let sample = 0; sample < 40 && !selected; sample += 1) {
+      const state = await page.evaluate((id) => {
+        const card = document.querySelector(`[data-worktree-card-id="${id}"]`);
+        const button = card?.querySelector(".shell-worktree-card-select");
+        const rect = button?.getBoundingClientRect() ?? null;
+        const center = rect ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
+        return {
+          active: card?.getAttribute("data-active") ?? null,
+          ariaCurrent: button?.getAttribute("aria-current") ?? null,
+          disabled: button?.disabled ?? null,
+          centerTag: center ? `${center.tagName}.${String(center.className).split(" ")[0]}` : null,
+        };
+      }, worktree2Id);
+      selectTrajectory.push(state);
+      selected = state.active === "true";
+      if (!selected) await delay(500);
+    }
+    report.selectTrajectory = selectTrajectory;
+    assert.ok(selected, `the guide card selects (trajectory: ${JSON.stringify(selectTrajectory.slice(-4))})`);
+    const selectedShot = path.join(output, "guide-layout-selected.png");
+    await page.screenshot({ path: selectedShot, animations: "disabled" });
+    report.screenshots.push(selectedShot);
+
+    // Responsive component validation (test-only widths in this isolated
+    // instance through the product's own sidebar-width setting, never the
+    // developer's working app): 320 and 400 must keep every provider
+    // primary whole. The mandatory natural-width proof is above; these do
+    // not replace it.
+    report.guideWidths = { natural: guideMeasured };
+    for (const testWidth of [320, 400]) {
+      await page.evaluate((width) => {
+        window.localStorage.setItem("drogon:shell:sidebar-width", String(width));
+      }, testWidth);
+      await page.reload();
+      await page.getByRole("button", { name: "Select guidebiz", exact: true }).waitFor();
+      const measured = await until(async () => {
+        const next = await measureGuideRows(worktree2Id);
+        return next.rows.length === 4 ? next : false;
+      }, `the guide card renders again at ${testWidth}px`);
+      assert.ok(
+        Math.abs(measured.sidebarWidth - testWidth) <= 4,
+        `the isolated sidebar measures ~${testWidth}px (saw ${measured.sidebarWidth})`,
+      );
+      for (const row of measured.rows) {
+        assert.ok(
+          row.primaryScrollW <= row.primaryClientW + 1,
+          `guide row ${row.id} provider reads whole at ${testWidth}px: "${row.primaryText}"`,
+        );
+      }
+      report.guideWidths[String(testWidth)] = measured;
+      const widthShot = path.join(output, `guide-layout-${testWidth}.png`);
+      await page.screenshot({ path: widthShot, animations: "disabled" });
+      report.screenshots.push(widthShot);
+    }
+    await page.evaluate(() => {
+      window.localStorage.setItem("drogon:shell:sidebar-width", "280");
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "Select guidebiz", exact: true }).waitFor();
+    report.guide = guide;
+    checkCancelled();
     assert.deepEqual(report.pageErrors, [], "no renderer page errors");
     checkCancelled();
     report.status = "PASSED";

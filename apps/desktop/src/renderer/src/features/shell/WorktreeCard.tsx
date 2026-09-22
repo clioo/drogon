@@ -87,6 +87,10 @@ type AgentBranchContext = {
   disabled: boolean;
   onSelect: (sessionId: string) => void;
   depth?: number;
+  /** Explicit user renames by session id (tab strip titles). */
+  customTitles?: Record<string, string> | null;
+  /** Auto-generated prompt titles by session id. */
+  generatedTitles: Record<string, string>;
 };
 
 /**
@@ -127,6 +131,8 @@ function renderAgentBranch(
       row={row}
       disabled={context.disabled}
       onSelect={context.onSelect}
+      customTitle={context.customTitles?.[row.session.id] ?? null}
+      generatedTitle={context.generatedTitles[row.session.id] ?? null}
       childCount={hasChildAgents ? childRows.length : undefined}
       childrenExpanded={expanded}
       onToggleChildren={
@@ -596,6 +602,9 @@ export function WorktreeCard({
                 >
                   <CompactAgentSummaryButton
                     sessions={rowSessions}
+                    // The pill summary keeps F1's shared harness labels
+                    // (pinned by the lineage suite): sidebar "Claude Code"
+                    // branding applies to the visible row primary only.
                     labelFor={(session) =>
                       formatRowHarnessLabel(resolveRowHarnessId(session))
                     }
@@ -614,6 +623,8 @@ export function WorktreeCard({
                         anyRootHasChildren,
                         disabled,
                         onSelect: handleSelectSession,
+                        customTitles: tabStrip?.titles ?? null,
+                        generatedTitles,
                       }),
                     )}
                   </CompactAgentExpansion>
@@ -629,6 +640,8 @@ export function WorktreeCard({
                     anyRootHasChildren,
                     disabled,
                     onSelect: handleSelectSession,
+                    customTitles: tabStrip?.titles ?? null,
+                    generatedTitles,
                   }),
                 )
               )}
