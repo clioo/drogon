@@ -1654,12 +1654,51 @@ export async function runSidebarAgentTreeAcceptance() {
     );
     assert.equal(hookTurn.agentState, "working", "a real resumption hook opens a silent turn");
     assert.equal(hookTurn.agentStateAuthority, "hook", "the open turn carries hook proof");
+    // 3. The hook-proven turn renders: while the turn is open, the sidebar
+    // row for the harness session reads Working — the DOM proof the
+    // CLI-only lifecycle above never waited on.
+    const readHookRowState = (sessionId) =>
+      page.evaluate((sid) => {
+        const row = document.querySelector(`[data-worktree-agent-row="${sid}"]`);
+        if (!row) return null;
+        const state = row.querySelector("[data-worktree-agent-state]");
+        return {
+          cardId: row.closest("[data-worktree-card-id]")?.getAttribute("data-worktree-card-id") ?? null,
+          state: state?.getAttribute("data-worktree-agent-state") ?? null,
+          label: row.querySelector(".shell-worktree-agent-state-label")?.textContent?.trim() ?? null,
+        };
+      }, sessionId);
+    const hookWorkingRow = await until(async () => {
+      const row = await readHookRowState(hookLaunch.id);
+      return row && row.state === "working" ? row : false;
+    }, "the hook session row reads Working while the turn is open");
+    assert.equal(hookWorkingRow.cardId, worktree2Id, "the hook session nests under the guide card");
+    assert.equal(hookWorkingRow.label, "Working", "the open turn states Working in words");
+    hookTruth.workingRow = hookWorkingRow;
+    const hookWorkingShot = path.join(output, "guide-layout-hook-working.png");
+    await page.screenshot({ path: hookWorkingShot, animations: "disabled" });
+    report.screenshots.push(hookWorkingShot);
+    const hookWorkingCrop = path.join(output, "guide-layout-hook-working-crop.png");
+    await page.locator(".workspace-sidebar").screenshot({ path: hookWorkingCrop, animations: "disabled" });
+    report.screenshots.push(hookWorkingCrop);
     const hookEnd = await cliJson(
       ["rpc", "session.hook_event", "--params", JSON.stringify({ sessionId: hookLaunch.id, incarnation: hookLaunch.incarnation, event: "AgentEnd" })],
       { env, cwd: fixture },
     );
     assert.equal(hookEnd.agentState, "idle", "a real turn end concludes to idle");
     assert.equal(hookEnd.agentStateAuthority, "hook", "the concluded turn keeps hook proof");
+    // 4. The concluded turn renders: the same row reads Idle once AgentEnd
+    // lands — real Working/Idle DOM evidence for the hook lifecycle.
+    const hookIdleRow = await until(async () => {
+      const row = await readHookRowState(hookLaunch.id);
+      return row && row.state === "idle" ? row : false;
+    }, "the hook session row reads Idle after the turn ends");
+    assert.equal(hookIdleRow.cardId, worktree2Id, "the concluded turn stays under the guide card");
+    assert.equal(hookIdleRow.label, "Idle", "the concluded turn states Idle in words");
+    hookTruth.idleRow = hookIdleRow;
+    const hookIdleShot = path.join(output, "guide-layout-hook-idle.png");
+    await page.screenshot({ path: hookIdleShot, animations: "disabled" });
+    report.screenshots.push(hookIdleShot);
     hookTruth.turnRow = { agentState: hookTurn.agentState, agentStateAuthority: hookTurn.agentStateAuthority };
     hookTruth.endRow = { agentState: hookEnd.agentState, agentStateAuthority: hookEnd.agentStateAuthority };
     // The harness.start session stays listed until the fixture daemon
