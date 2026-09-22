@@ -68,15 +68,25 @@ export type ObservationLedger = {
   /** Records that `seq` wrote `key`. Callers check `shouldApply` first, so
    *  the stored proof only ever moves forward. */
   markApplied(key: string, seq: number): void;
+  /** Drops proof for keys outside `keep` (normally the live selected copy),
+   *  so retained state stays bounded by selection size instead of history.
+   *  Pruning an unselected key only costs one redundant fresh re-apply when
+   *  its workspace is next selected; it never lets a stale write win for a
+   *  live key because live keys are always kept. */
+  prune(keep: ReadonlySet<string>): void;
   readonly size: number;
 };
 
 /**
  * Per-session last-write proof for observation metadata. Eviction is oldest
- * first and fail-safe: forgetting a live key only re-arms it for one
- * redundant FRESH re-apply, never for a stale write (stale writes still
- * lose their `shouldApply` check against whatever newer proof remains, and
- * a re-apply applies only freshly-read rows).
+ * first: forgetting a key re-arms it for ANY seq, including a stale one, so
+ * callers must never rely on eviction being harmless on its own. In the
+ * shell this is safe for two structural reasons, both pinned by regression:
+ * globally stale polls/fetches are dropped by request order before they
+ * reach the ledger, and the adopt path prunes to the live selected copy so
+ * a live key is never the eviction victim while its row can still be
+ * overwritten. A re-apply after prune/eviction still applies only
+ * freshly-read rows.
  */
 export function createObservationLedger(
   maxEntries: number = OBSERVATION_LEDGER_MAX_ENTRIES,
@@ -101,6 +111,11 @@ export function createObservationLedger(
         applied.delete(key);
       }
       applied.set(key, seq);
+    },
+    prune(keep) {
+      for (const key of [...applied.keys()]) {
+        if (!keep.has(key)) applied.delete(key);
+      }
     },
     get size() {
       return applied.size;

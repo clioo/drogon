@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import type { Session } from "../../../../shared/session-contract";
 import {
   SIDEBAR_SCOPED_READ_BATCH,
+  SIDEBAR_SCOPED_READ_MAX_WORKSPACES,
   createSidebarSessionCollector,
   pollSidebarSessions,
 } from "./sidebar-session-source";
@@ -249,6 +250,59 @@ describe("one sidebar poll", () => {
       "ws-1-session",
       "ws-2-session",
     ]);
+  });
+});
+
+describe("degraded bounds (R3 preserves 8/512)", () => {
+  test("the scoped workspace set never grows past the cap", () => {
+    expect(SIDEBAR_SCOPED_READ_BATCH).toBe(8);
+    expect(SIDEBAR_SCOPED_READ_MAX_WORKSPACES).toBe(512);
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWideFailure();
+    const many = Array.from({ length: 600 }, (_, index) => `ws-${index}`);
+    const batch = collector.planScopedReads(many);
+    expect(batch).toHaveLength(SIDEBAR_SCOPED_READ_BATCH);
+    // The deleted-workspace prune keeps only wanted ids: a later view with a
+    // small wanted set drops the rest instead of growing without bound.
+    expect(collector.planScopedReads(["ws-1"])).toEqual(["ws-1"]);
+    expect(collector.view().sessions).toEqual([]);
+  });
+});
+
+describe("poll rejection and host changes (R3 epoch isolation)", () => {
+  test("a rejecting fetcher leaves the shared collector untouched", async () => {
+    const shared = createSidebarSessionCollector();
+    shared.noteHostWide([session("committed", "ws-1")]);
+    const fork = shared.fork();
+    await expect(
+      pollSidebarSessions({
+        collector: fork,
+        workspaceIds: ["ws-1"],
+        fetchHostWide: async () => {
+          throw new Error("boom");
+        },
+        fetchScoped: async () => ({ ok: false }),
+      }),
+    ).rejects.toThrow("boom");
+    // The fork may have been touched, but the committed truth never was:
+    // the shell drops a rejected epoch's fork outright.
+    expect(shared.view().sessions.map((row) => row.id)).toEqual(["committed"]);
+    expect(shared.isDegraded()).toBe(false);
+  });
+
+  test("a reconnect (new host truth) replaces the committed view", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([session("old", "ws-1")]);
+    const view = await pollSidebarSessions({
+      collector,
+      workspaceIds: ["ws-1"],
+      fetchHostWide: async () => ({ ok: true, sessions: [session("new", "ws-1")] }),
+      fetchScoped: async () => ({ ok: false }),
+    });
+    expect(view.sessions.map((row) => row.id)).toEqual(["new"]);
+    expect(view.freshKeys).toEqual(
+      new Set([observationKeyOf(session("new", "ws-1"))]),
+    );
   });
 });
 

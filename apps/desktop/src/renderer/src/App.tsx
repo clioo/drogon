@@ -690,19 +690,23 @@ export function planAdoptOutOfBandSessions(
     const item = result[index]!;
     const fresh = freshByKey.get(`${item.hostId}:${item.id}`);
     if (!fresh || fresh.incarnation !== item.incarnation) continue;
+    const key = observationKeyOf(fresh);
     if (
       freshKeys !== undefined &&
       (seq === undefined || ledger === undefined
-        ? !freshKeys.has(observationKeyOf(fresh))
-        : !freshKeys.has(observationKeyOf(fresh)) ||
-          !ledger.shouldApply(observationKeyOf(fresh), seq))
+        ? !freshKeys.has(key)
+        : !freshKeys.has(key) || !ledger.shouldApply(key, seq))
     )
       continue;
+    // R3: every sufficiently ordered successful read is new proof, even a
+    // byte-identical one — null clears and foreground flips carry no
+    // timestamp of their own, so the request order IS the evidence. Commit
+    // before the value comparison so an equal read still advances the ledger;
+    // the array keeps its identity below when nothing moved.
+    if (seq !== undefined && ledger !== undefined) appliedKeys.push(key);
     const snapshot = readObservationSnapshot(fresh);
     if (sameObservation(readObservationSnapshot(item), snapshot)) continue;
     if (result === current) result = current.slice();
-    if (seq !== undefined && ledger !== undefined)
-      appliedKeys.push(observationKeyOf(fresh));
     result[index] = {
       ...item,
       observedHarnessId: snapshot.observedHarnessId,
@@ -735,12 +739,18 @@ export function adoptOutOfBandSessions(
 }
 
 /**
- * A queued adopt: the immutable decisions of one `planAdoptOutOfBandSessions`
- * run, captured OUTSIDE React at queue time (proof is committed once, there),
- * for pure projection onto the actual current sessions inside the functional
- * updater. The updater reads no ledger and mutates no outbox, so replay with
- * identical inputs — StrictMode double-invoke, or a replay after a later
- * proof commit — always agrees and can never lose metadata.
+ * A queued adopt: immutable successful-read facts admitted OUTSIDE React at
+ * queue time (proof is committed once, there), for pure projection onto the
+ * ACTUAL current sessions inside the functional updater. Admission never
+ * consults a React mirror and never compares displayed values: every fresh,
+ * sufficiently ordered fact is admitted — including a byte-identical
+ * re-read, whose request order is the only evidence for null clears and
+ * foreground flips — and the admitted batch is frozen. The updater reads
+ * only the frozen facts plus the actual current rows (no ledger reads, no
+ * external writes), so replay with identical inputs — StrictMode
+ * double-invoke, or a replay after a later proof commit — always agrees.
+ * Ordering across queues comes from React's updater order plus the ledger's
+ * per-key proof captured here, never from a read inside the updater.
  */
 export type QueuedAdoptProjection = {
   /** Full rows to append when their host+id is still unknown (plan order). */
@@ -752,35 +762,45 @@ export type QueuedAdoptProjection = {
 };
 
 export function planQueuedAdopt(
-  mirror: Session[],
   hostWide: readonly Session[],
   workspaceId: string,
   isHidden: (session: Session) => boolean,
   provenance: ObservationProvenance,
 ): QueuedAdoptProjection {
-  const plan = planAdoptOutOfBandSessions(
-    mirror,
-    hostWide,
-    workspaceId,
-    isHidden,
-    provenance,
+  const freshKeys = provenance.freshKeys;
+  const seq = provenance.seq;
+  const ledger = provenance.ledger;
+  const ordered = (key: string): boolean => {
+    if (freshKeys !== undefined && !freshKeys.has(key)) return false;
+    if (seq !== undefined && ledger !== undefined)
+      return ledger.shouldApply(key, seq);
+    return true;
+  };
+  // Adopted rows: target workspace, not dismissed, actually read, ordered.
+  // Observation facts: every ordered target read, dismissed or not (the
+  // existing adopt refreshes listed rows even when the fresh row is
+  // dismissal-filtered for adoption). Both lists are frozen here; the
+  // projection decides append vs overwrite against the actual rows.
+  const admitted = hostWide.filter(
+    (item) => item.workspaceId === workspaceId && ordered(observationKeyOf(item)),
   );
-  const known = new Set(
-    mirror.map((item) => `${item.hostId}:${item.id}`),
-  );
-  const adopted = plan.sessions.filter(
-    (item) => !known.has(`${item.hostId}:${item.id}`),
-  );
-  const byKey = new Map(
-    plan.sessions.map((item) => [observationKeyOf(item), item]),
-  );
+  const adopted = admitted
+    .filter((item) => !isHidden(item))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const seen = new Set<string>();
   const observations: QueuedAdoptProjection["observations"] = [];
-  for (const key of plan.appliedKeys) {
-    const row = byKey.get(key);
-    if (!row) continue;
-    observations.push({ key, snapshot: readObservationSnapshot(row) });
+  const appliedKeys: string[] = [];
+  for (const item of admitted) {
+    const key = observationKeyOf(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    observations.push({ key, snapshot: readObservationSnapshot(item) });
+    if (seq !== undefined && ledger !== undefined) appliedKeys.push(key);
   }
-  return { adopted, observations, appliedKeys: plan.appliedKeys };
+  // Adopted rows carry full state for the append path; observations carry
+  // the frozen trio for the same keys (a freshly appended row reconciles
+  // its own observation as a no-op).
+  return { adopted, observations, appliedKeys };
 }
 
 /**
@@ -2776,14 +2796,14 @@ export function App() {
     freshKeys: ReadonlySet<string>;
   }>({ seq: 0, freshKeys: new Set() });
   // R3 selected-copy reconciliation, shared by the adopt effect below and
-  // the poll settlement further down. Immutable decisions are captured
-  // outside React (`planQueuedAdopt` against the mirror) and their proof is
-  // committed once, here — the functional updater below (`applyQueuedAdopt`)
-  // reads no ledger and mutates no outbox, so replay with identical inputs
-  // (StrictMode double-invoke, or a replay after a later proof commit)
-  // always agrees and can never lose metadata. Projecting onto the ACTUAL
-  // current sessions means a lagging mirror can never discard queued local
-  // updates (push state, renames, sizing). `active` is deliberately left
+  // the poll settlement further down. Immutable successful-read facts are
+  // admitted outside React (`planQueuedAdopt` over the poll rows, never a
+  // React mirror) and their proof is committed once, here — the functional
+  // updater below (`applyQueuedAdopt`) reads only the frozen facts plus the
+  // actual current rows, so replay with identical inputs (StrictMode
+  // double-invoke, or a replay after a later proof commit) always agrees.
+  // Projecting onto the ACTUAL current sessions means queued local updates
+  // (push state, renames, sizing) survive. `active` is deliberately left
   // alone: adopting a session must never steal the tab the owner is
   // looking at.
   const queueSelectedAdopt = useCallback(() => {
@@ -2795,7 +2815,6 @@ export function App() {
     const provenance = sidebarObservationProvenance.current;
     const ledger = observationLedger.current;
     const projection = planQueuedAdopt(
-      sessionsRef.current,
       allBotSessionsRef.current,
       workspaceId,
       isHidden,

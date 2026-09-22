@@ -94,11 +94,46 @@ describe("createObservationLedger", () => {
     expect(ledger.size).toBe(2);
     ledger.markApplied("h1:c:1", 3);
     expect(ledger.size).toBe(2);
-    // Evicting a live key only costs one redundant fresh re-apply, never a
-    // stale write: the evicted key reads as never-seen again.
+    // Eviction re-arms the evicted key for ANY seq — including a stale one.
+    // The shell never relies on eviction being harmless: globally stale
+    // polls/fetches are dropped by request order before they reach the
+    // ledger (see isStalePollSettlement), and the adopt path prunes to the
+    // live selected copy so a live key is never the victim.
     expect(ledger.shouldApply("h1:a:1", 4)).toBe(true);
     expect(ledger.shouldApply("h1:b:1", 2)).toBe(false);
     expect(OBSERVATION_LEDGER_MAX_ENTRIES).toBeGreaterThan(2);
+  });
+
+  test("an evicted key re-arms for a stale seq: the global order gate must block it first", () => {
+    // Regression: with a tiny bound, admitting a newer fact for a live key
+    // and then evicting it with unrelated keys lets an older seq win again.
+    // Production never lets that older seq reach the ledger when a newer
+    // poll already settled (request order < last settled is dropped).
+    const ledger = createObservationLedger(2);
+    ledger.markApplied("h1:live:1", 6);
+    expect(ledger.shouldApply("h1:live:1", 5)).toBe(false);
+    ledger.markApplied("h1:other:1", 7);
+    ledger.markApplied("h1:third:1", 8);
+    expect(ledger.size).toBe(2);
+    // The live proof was the oldest eviction victim: the stale seq wins the
+    // ledger check again — which is why the shell drops seq 5 globally once
+    // seq 8 settled, before consulting the ledger.
+    expect(ledger.shouldApply("h1:live:1", 5)).toBe(true);
+    expect(isStalePollSettlement(5, 8)).toBe(true);
+  });
+
+  test("prune keeps live selected proof and drops only unselected history", () => {
+    const ledger = createObservationLedger();
+    ledger.markApplied("h1:live:1", 6);
+    ledger.markApplied("h1:gone:1", 6);
+    expect(ledger.size).toBe(2);
+    ledger.prune(new Set(["h1:live:1"]));
+    expect(ledger.size).toBe(1);
+    // Live proof survives: a stale write still loses.
+    expect(ledger.shouldApply("h1:live:1", 5)).toBe(false);
+    expect(ledger.shouldApply("h1:live:1", 7)).toBe(true);
+    // Pruned history only costs one redundant fresh re-apply.
+    expect(ledger.shouldApply("h1:gone:1", 7)).toBe(true);
   });
 });
 

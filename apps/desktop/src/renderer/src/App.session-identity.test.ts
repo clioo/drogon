@@ -1100,14 +1100,14 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
   });
 
   test("a queued local sizing update survives a following observation adoption", () => {
-    // The shell's queue, through PRODUCTION code: decisions captured outside
-    // React (`planQueuedAdopt` against the lagging mirror), proof committed
-    // once, pure projection (`applyQueuedAdopt`) through the functional
-    // updater form onto the ACTUAL current sessions — never a value computed
-    // from a lagging mirror, so queued local updates (push state, renames,
-    // sizing) are never discarded. No outbox is mutated inside the updater,
-    // so replay with identical inputs always agrees, even after the proof
-    // committed.
+    // The shell's queue, through PRODUCTION code: successful-read facts
+    // admitted outside React (`planQueuedAdopt` over the poll rows, never a
+    // React mirror), proof committed once, pure projection
+    // (`applyQueuedAdopt`) through the functional updater form onto the
+    // ACTUAL current sessions — so queued local updates (push state,
+    // renames, sizing) are never discarded. No ledger is read and no outbox
+    // mutated inside the updater, so replay with identical inputs always
+    // agrees, even after the proof committed or a later admission landed.
     const ledger = createObservationLedger();
     const keys = new Set([observationKeyOf(target())]);
     const hostWidePi = [target(freshPi)];
@@ -1117,14 +1117,15 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
         item.id === "s1" ? { ...item, cols: 120, command: "/bin/zsh" } : item,
       );
     // React applies queued updaters in order against actual current state.
-    // The mirror the queue captures against still predates the local update.
-    const base = [target({ hasForegroundChild: false })];
-    const afterLocal = localSizing(base);
-    const projection = planQueuedAdopt(base, hostWidePi, "w1", never, {
+    // Admission never sees this actual state: the frozen facts below heal it
+    // even when a lagging mirror already equaled the fresh read.
+    const afterLocal = localSizing([target({ hasForegroundChild: false })]);
+    const projection = planQueuedAdopt(hostWidePi, "w1", never, {
       freshKeys: keys,
       seq: 6,
       ledger,
     });
+    expect(projection.appliedKeys).toEqual([observationKeyOf(target())]);
     commitObservationProof(ledger, projection.appliedKeys, 6);
     const first = applyQueuedAdopt(afterLocal, projection);
     // Replay with identical inputs agrees — including AFTER the proof
@@ -1138,25 +1139,196 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     expect(first[0].command).toBe("/bin/zsh");
     expect(first[0].observedHarnessId).toBe("pi");
     expect(first[0].hasForegroundChild).toBe(true);
+    // Replay stays pure after a LATER admission committed different proof:
+    // identical inputs still agree (ordering across queues comes from React's
+    // updater order, never from a read inside the updater).
+    const later = planQueuedAdopt(
+      [target({ hasForegroundChild: false })],
+      "w1",
+      never,
+      { freshKeys: keys, seq: 7, ledger },
+    );
+    commitObservationProof(ledger, later.appliedKeys, 7);
+    expect(applyQueuedAdopt(afterLocal, projection)).toEqual(first);
     // A second queueing of the same proof (effect + poll settlement both
     // firing) is deduped by the ledger: nothing left to apply or commit.
-    const again = planQueuedAdopt(first, hostWidePi, "w1", never, {
+    const again = planQueuedAdopt(hostWidePi, "w1", never, {
       freshKeys: keys,
       seq: 6,
       ledger,
     });
     expect(again.appliedKeys).toEqual([]);
+    expect(again.observations).toEqual([]);
     expect(applyQueuedAdopt(first, again)).toBe(first);
-    // A stale poll queued after the commit cannot move what seq 6 wrote.
+    // A stale poll queued after the commit cannot move what seq 7 wrote.
     const stale = planQueuedAdopt(
-      first,
       [target({ hasForegroundChild: false })],
       "w1",
       never,
       { freshKeys: keys, seq: 5, ledger },
     );
     expect(stale.appliedKeys).toEqual([]);
+    expect(stale.observations).toEqual([]);
     expect(applyQueuedAdopt(first, stale)).toBe(first);
+  });
+
+  test("an equal-valued successful read still admits proof and heals a diverged actual", () => {
+    // The central invariant: a read with identical values is still newer
+    // evidence (null clears and foreground flips carry no timestamp). The
+    // old mirror-diff admission dropped it; the frozen-facts admission keeps
+    // it, so a stale actual the mirror never saw still heals.
+    const ledger = createObservationLedger();
+    const keys = new Set([observationKeyOf(target())]);
+    const fresh = [target(freshPi)];
+    const first = planQueuedAdopt(fresh, "w1", never, {
+      freshKeys: keys,
+      seq: 6,
+      ledger,
+    });
+    expect(first.appliedKeys).toHaveLength(1);
+    commitObservationProof(ledger, first.appliedKeys, 6);
+    // Byte-identical re-read at a newer order: proof advances even though no
+    // displayed value changed.
+    const reread = [target({ ...freshPi })];
+    const second = planQueuedAdopt(reread, "w1", never, {
+      freshKeys: keys,
+      seq: 7,
+      ledger,
+    });
+    expect(second.appliedKeys).toHaveLength(1);
+    expect(second.observations).toHaveLength(1);
+    commitObservationProof(ledger, second.appliedKeys, 7);
+    expect(ledger.shouldApply(observationKeyOf(target()), 7)).toBe(false);
+    expect(ledger.shouldApply(observationKeyOf(target()), 8)).toBe(true);
+    // A stale actual (idle) the mirror never showed still heals from the
+    // frozen second batch, even though the mirror already equaled it.
+    const healed = applyQueuedAdopt(
+      [target({ hasForegroundChild: false })],
+      second,
+    );
+    expect(healed[0].observedHarnessId).toBe("pi");
+    expect(healed[0].hasForegroundChild).toBe(true);
+    // The same equal-read path through the legacy planner also advances
+    // proof without minting a new array.
+    const planLedger = createObservationLedger();
+    const idle = [target({ hasForegroundChild: false })];
+    const gained = planAdoptOutOfBandSessions(idle, fresh, "w1", never, {
+      freshKeys: keys,
+      seq: 6,
+      ledger: planLedger,
+    });
+    commitObservationProof(planLedger, gained.appliedKeys, 6);
+    const equal = planAdoptOutOfBandSessions(gained.sessions, fresh, "w1", never, {
+      freshKeys: keys,
+      seq: 7,
+      ledger: planLedger,
+    });
+    expect(equal.appliedKeys).toHaveLength(1);
+    expect(equal.sessions).toBe(gained.sessions);
+    commitObservationProof(planLedger, equal.appliedKeys, 7);
+    expect(planLedger.shouldApply(observationKeyOf(target()), 7)).toBe(false);
+  });
+
+  test("poll and selected fetch settle in either order without losing the newer observation", () => {
+    // Production queue simulation: both paths commit proof outside React and
+    // project through functional updaters, so React's updater order plus the
+    // frozen facts decide — never a whole-snapshot drop.
+    const runOrders = (pollSeq: number, fetchSeq: number) => {
+      const ledger = createObservationLedger();
+      const keys = new Set([observationKeyOf(target())]);
+      const start = [target({ hasForegroundChild: false })];
+      // Poll observes Pi; fetch observes idle (older read).
+      const pollProjection = planQueuedAdopt([target(freshPi)], "w1", never, {
+        freshKeys: keys,
+        seq: pollSeq,
+        ledger,
+      });
+      commitObservationProof(ledger, pollProjection.appliedKeys, pollSeq);
+      const fetchPlan = planSelectedFetch(
+        [target({ hasForegroundChild: false })],
+        fetchSeq,
+        ledger,
+      );
+      commitObservationProof(ledger, fetchPlan.appliedKeys, fetchSeq);
+      const pollUpdate = (items: Session[]) => applyQueuedAdopt(items, pollProjection);
+      const fetchUpdate = (items: Session[]) => applySelectedFetch(items, fetchPlan);
+      // Poll queued first, fetch second (late fetch settles after the poll).
+      const pollFirst = fetchUpdate(pollUpdate(start));
+      // Fetch queued first, poll second (poll settles after the fetch).
+      const fetchFirst = pollUpdate(fetchUpdate(start));
+      return { pollFirst, fetchFirst };
+    };
+    // Newer poll (8) beats older fetch (5) in both queue orders.
+    const newerPoll = runOrders(8, 5);
+    expect(newerPoll.pollFirst[0].observedHarnessId).toBe("pi");
+    expect(newerPoll.fetchFirst[0].observedHarnessId).toBe("pi");
+    // Newer fetch (8) beats older poll (5) in both queue orders: the fetch is
+    // a successful selected read at its own order, and the older poll cannot
+    // revive the clear it never saw.
+    const newerFetchLedger = createObservationLedger();
+    const keys = new Set([observationKeyOf(target())]);
+    const start = [target(freshPi)];
+    const oldPoll = planQueuedAdopt([target(freshPi)], "w1", never, {
+      freshKeys: keys,
+      seq: 5,
+      ledger: newerFetchLedger,
+    });
+    commitObservationProof(newerFetchLedger, oldPoll.appliedKeys, 5);
+    const afterOldPoll = applyQueuedAdopt(start, oldPoll);
+    const newFetch = planSelectedFetch(
+      [target({ hasForegroundChild: false })],
+      8,
+      newerFetchLedger,
+    );
+    commitObservationProof(newerFetchLedger, newFetch.appliedKeys, 8);
+    const final = applySelectedFetch(afterOldPoll, newFetch);
+    expect(final[0].observedHarnessId ?? null).toBeNull();
+  });
+
+  test("an unrelated workspace success while a selected load is pending leaves the target alone", async () => {
+    // Degraded poll reads only w2; the selected w1 target row is retained
+    // (renders) but not fresh, so its observation must not move. A selected
+    // fetch requested before the poll (older order) settles after it: the
+    // global poll order already passed it, so the shell drops it before the
+    // ledger is even consulted.
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([target(), other("o1")]);
+    const selectedRequestSeq = 5;
+    const view = await pollSidebarSessions({
+      collector,
+      workspaceIds: ["w1", "w2"],
+      fetchHostWide: async () => ({ ok: false }),
+      fetchScoped: async (workspaceId) =>
+        workspaceId === "w2"
+          ? { ok: true, sessions: [other("o1"), other("o2")] }
+          : { ok: false },
+    });
+    expect(view.degraded).toBe(true);
+    expect(view.freshKeys.has(observationKeyOf(target()))).toBe(false);
+    const ledger = createObservationLedger();
+    const selected = [target(freshPi)];
+    const pollSeq = 6;
+    const projection = planQueuedAdopt(view.sessions, "w1", never, {
+      freshKeys: view.freshKeys,
+      seq: pollSeq,
+      ledger,
+    });
+    expect(projection.appliedKeys).toEqual([]);
+    expect(projection.observations).toEqual([]);
+    commitObservationProof(ledger, projection.appliedKeys, pollSeq);
+    expect(applyQueuedAdopt(selected, projection)).toBe(selected);
+    // The older selected load settles late: globally stale past the poll, so
+    // the shell drops the snapshot outright.
+    expect(isStalePollSettlement(selectedRequestSeq, pollSeq)).toBe(true);
+    // Even planned at its own order it could not move the newer proof: the
+    // poll above committed nothing for the target, but a newer selected
+    // truth (seq 8 Pi) still blocks the older idle.
+    const defended = planAdoptOutOfBandSessions(selected, view.sessions, "w1", never, {
+      freshKeys: view.freshKeys,
+      seq: pollSeq,
+      ledger,
+    });
+    expect(defended.sessions).toBe(selected);
   });
 
   test("a selected fetch reconciles per identity instead of dropping the snapshot", () => {
