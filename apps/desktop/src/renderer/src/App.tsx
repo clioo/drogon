@@ -287,6 +287,7 @@ import {
   readObservationSnapshot,
   sameObservation,
   type ObservationLedger,
+  type ObservationSnapshot,
 } from "./features/shell/sidebar-session-observation";
 import {
   planBrowserRehydrate,
@@ -731,6 +732,179 @@ export function adoptOutOfBandSessions(
     isHidden,
     provenance,
   ).sessions;
+}
+
+/**
+ * A queued adopt: the immutable decisions of one `planAdoptOutOfBandSessions`
+ * run, captured OUTSIDE React at queue time (proof is committed once, there),
+ * for pure projection onto the actual current sessions inside the functional
+ * updater. The updater reads no ledger and mutates no outbox, so replay with
+ * identical inputs — StrictMode double-invoke, or a replay after a later
+ * proof commit — always agrees and can never lose metadata.
+ */
+export type QueuedAdoptProjection = {
+  /** Full rows to append when their host+id is still unknown (plan order). */
+  adopted: Session[];
+  /** Per-identity observation overwrites, keyed by exact host+id+incarnation. */
+  observations: { key: string; snapshot: ObservationSnapshot }[];
+  /** Exact observation keys the caller commits with `commitObservationProof`. */
+  appliedKeys: string[];
+};
+
+export function planQueuedAdopt(
+  mirror: Session[],
+  hostWide: readonly Session[],
+  workspaceId: string,
+  isHidden: (session: Session) => boolean,
+  provenance: ObservationProvenance,
+): QueuedAdoptProjection {
+  const plan = planAdoptOutOfBandSessions(
+    mirror,
+    hostWide,
+    workspaceId,
+    isHidden,
+    provenance,
+  );
+  const known = new Set(
+    mirror.map((item) => `${item.hostId}:${item.id}`),
+  );
+  const adopted = plan.sessions.filter(
+    (item) => !known.has(`${item.hostId}:${item.id}`),
+  );
+  const byKey = new Map(
+    plan.sessions.map((item) => [observationKeyOf(item), item]),
+  );
+  const observations: QueuedAdoptProjection["observations"] = [];
+  for (const key of plan.appliedKeys) {
+    const row = byKey.get(key);
+    if (!row) continue;
+    observations.push({ key, snapshot: readObservationSnapshot(row) });
+  }
+  return { adopted, observations, appliedKeys: plan.appliedKeys };
+}
+
+/**
+ * Pure projection of a queued adopt onto the actual current sessions: queued
+ * local updates (push state, renames, sizing) survive because every other
+ * field is carried over untouched, and only the captured observation trio
+ * moves — on an exact host+id+incarnation match. Returns the input array
+ * itself when there is nothing to apply, so a no-op plan commits nothing.
+ */
+export function applyQueuedAdopt(
+  current: Session[],
+  projection: QueuedAdoptProjection,
+): Session[] {
+  let result = current;
+  if (projection.adopted.length > 0) {
+    const known = new Set(
+      current.map((item) => `${item.hostId}:${item.id}`),
+    );
+    const missing = projection.adopted.filter(
+      (item) => !known.has(`${item.hostId}:${item.id}`),
+    );
+    if (missing.length > 0) result = [...current, ...missing];
+  }
+  for (const { key, snapshot } of projection.observations) {
+    const index = result.findIndex((item) => observationKeyOf(item) === key);
+    if (index === -1) continue;
+    if (sameObservation(readObservationSnapshot(result[index]!), snapshot))
+      continue;
+    if (result === current) result = current.slice();
+    result[index] = {
+      ...result[index]!,
+      observedHarnessId: snapshot.observedHarnessId,
+      observedHarnessAt: snapshot.observedHarnessAt,
+      hasForegroundChild: snapshot.hasForegroundChild,
+    };
+  }
+  return result;
+}
+
+/**
+ * A settled selected fetch: the fetch's own rows (dismissal-filtered, fetch
+ * order — the membership authority for this scoped read) plus the per-key
+ * ledger verdict captured at settle time. Observation from the fetch wins a
+ * row only when no newer proof already wrote it; everything else merges
+ * per identity inside the functional updater, never as a whole-snapshot
+ * drop — so queued local updates and newer observation metadata survive.
+ */
+export type SelectedFetchPlan = {
+  rows: Session[];
+  fetchWinsObservation: ReadonlyMap<string, boolean>;
+  appliedKeys: string[];
+};
+
+export function planSelectedFetch(
+  visible: readonly Session[],
+  requestSeq: number,
+  ledger: ObservationLedger | undefined,
+): SelectedFetchPlan {
+  const rows = [...visible];
+  const fetchWinsObservation = new Map<string, boolean>();
+  const appliedKeys: string[] = [];
+  for (const row of rows) {
+    const key = observationKeyOf(row);
+    const wins = ledger === undefined || ledger.shouldApply(key, requestSeq);
+    fetchWinsObservation.set(key, wins);
+    if (wins) appliedKeys.push(key);
+  }
+  return { rows, fetchWinsObservation, appliedKeys };
+}
+
+/**
+ * Pure per-identity reconciliation of a settled selected fetch onto the
+ * actual current sessions. Rows the fetch no longer lists are closed (the
+ * scoped read is authoritative for membership); a listed row keeps its
+ * incarnation truth wholesale on restart, and on an exact
+ * host+id+incarnation match merges: observation from the fetch only where
+ * it still holds the proof, push state newest-wins via the shared push
+ * merge, every other daemon field from the fetch. Returns the input array
+ * itself when field-equal, so an unchanged fetch commits nothing.
+ */
+export function applySelectedFetch(
+  current: Session[],
+  plan: SelectedFetchPlan,
+): Session[] {
+  const actualByKey = new Map(
+    current.map((item) => [observationKeyOf(item), item]),
+  );
+  // Membership follows the fetch: an actual row the fetch no longer lists is
+  // closed, so it is dropped by simply never entering `next`.
+  const next: Session[] = [];
+  for (const row of plan.rows) {
+    const key = observationKeyOf(row);
+    const actual = actualByKey.get(key);
+    if (!actual) {
+      next.push(row);
+      continue;
+    }
+    let merged = row;
+    if (plan.fetchWinsObservation.get(key) !== true)
+      merged = { ...merged, ...readObservationSnapshot(actual) };
+    const probe = applySessionStatePush([actual], {
+      sessionId: row.id,
+      workspaceId: row.workspaceId,
+      agentState: row.agentState ?? "unknown",
+      agentStateAt: row.agentStateAt ?? null,
+      agentStateAuthority: row.agentStateAuthority ?? null,
+      ...(row.agentPromptPreview !== undefined
+        ? { agentPromptPreview: row.agentPromptPreview }
+        : {}),
+      ...(row.cacheIdleAt !== undefined ? { cacheIdleAt: row.cacheIdleAt } : {}),
+    });
+    const decided = probe.sessions[0]!;
+    merged = {
+      ...merged,
+      agentState: decided.agentState,
+      agentStateAt: decided.agentStateAt,
+      agentStateAuthority: decided.agentStateAuthority,
+      agentPromptPreview: decided.agentPromptPreview,
+      cacheIdleAt: decided.cacheIdleAt,
+    };
+    next.push(merged);
+  }
+  if (next.length !== current.length) return next;
+  return sameSessions(current, next) ? current : next;
 }
 
 export type SidebarPollSettlement = {
@@ -2601,29 +2775,18 @@ export function App() {
     seq: number;
     freshKeys: ReadonlySet<string>;
   }>({ seq: 0, freshKeys: new Set() });
-  // R3 proof outbox: the adopt updater below is pure (it reads the ledger
-  // but never writes it, so replay with identical inputs agrees), and
-  // records applied keys here. The next queue flushes them into the ledger
-  // before any later shouldApply read, so ordering still holds. Drained in
-  // place (never replaced): an updater queued before the flush still pushes
-  // into this same map at render time.
-  const pendingObservationProof = useRef(new Map<string, number>());
   // R3 selected-copy reconciliation, shared by the adopt effect below and
-  // the poll settlement further down. Immutable facts (host-wide rows +
-  // proof) are snapshotted outside React; the pure plan projects them onto
-  // the ACTUAL current sessions through the functional updater form, so a
-  // lagging mirror can never discard queued local updates (push state,
-  // renames, sizing). `active` is deliberately left alone: adopting a
-  // session must never steal the tab the owner is looking at.
+  // the poll settlement further down. Immutable decisions are captured
+  // outside React (`planQueuedAdopt` against the mirror) and their proof is
+  // committed once, here — the functional updater below (`applyQueuedAdopt`)
+  // reads no ledger and mutates no outbox, so replay with identical inputs
+  // (StrictMode double-invoke, or a replay after a later proof commit)
+  // always agrees and can never lose metadata. Projecting onto the ACTUAL
+  // current sessions means a lagging mirror can never discard queued local
+  // updates (push state, renames, sizing). `active` is deliberately left
+  // alone: adopting a session must never steal the tab the owner is
+  // looking at.
   const queueSelectedAdopt = useCallback(() => {
-    // Flush the previous render's applied keys first: the updater about to
-    // be queued must observe proof that includes them.
-    const pending = pendingObservationProof.current;
-    if (pending.size > 0) {
-      const ledger = observationLedger.current;
-      for (const [key, seq] of pending) ledger.markApplied(key, seq);
-      pending.clear();
-    }
     const workspaceId = selectedRef.current;
     if (!workspaceId) return;
     const dismissed = loadDismissedSessions();
@@ -2631,25 +2794,24 @@ export function App() {
       isSessionDismissed(dismissed, item.hostId, item);
     const provenance = sidebarObservationProvenance.current;
     const ledger = observationLedger.current;
-    const hostWide = allBotSessionsRef.current;
-    const { freshKeys, seq } = provenance;
-    setSessions((items) => {
-      const plan = planAdoptOutOfBandSessions(items, hostWide, workspaceId, isHidden, {
-        freshKeys,
-        seq,
+    const projection = planQueuedAdopt(
+      sessionsRef.current,
+      allBotSessionsRef.current,
+      workspaceId,
+      isHidden,
+      {
+        freshKeys: provenance.freshKeys,
+        seq: provenance.seq,
         ledger,
-      });
-      // Scratch only, not applied proof: deduped at the next flush, and
-      // re-pushing the same keys on replay changes neither the result nor
-      // the eventual commit.
-      if (seq !== undefined) {
-        for (const key of plan.appliedKeys) {
-          const prev = pending.get(key);
-          if (prev === undefined || seq > prev) pending.set(key, seq);
-        }
-      }
-      return plan.sessions;
-    });
+      },
+    );
+    if (
+      projection.adopted.length === 0 &&
+      projection.observations.length === 0
+    )
+      return;
+    commitObservationProof(ledger, projection.appliedKeys, provenance.seq);
+    setSessions((items) => applyQueuedAdopt(items, projection));
   }, []);
   useEffect(() => {
     // A session this shell did not start — `drogon-cli terminal create`, a
@@ -2712,13 +2874,22 @@ export function App() {
         // workspace's rows — record its proof at its request order, so a
         // retained row (or an older poll settling late) cannot roll the
         // snapshot it delivers back. A newer poll still proves past it.
+        // Reconciled per identity through the functional updater form, never
+        // as a whole-snapshot drop: queued local updates survive, and
+        // observation the ledger already proved newer is kept, not rolled
+        // back. The per-key verdict is captured here, once, so the updater
+        // itself stays pure (replay always agrees).
+        const fetchPlan = planSelectedFetch(
+          visible,
+          requestSeq,
+          observationLedger.current,
+        );
         commitObservationProof(
           observationLedger.current,
-          visible.map(observationKeyOf),
+          fetchPlan.appliedKeys,
           requestSeq,
         );
-        sessionsRef.current = visible;
-        setSessions(visible);
+        setSessions((items) => applySelectedFetch(items, fetchPlan));
         setActive((value) =>
           visible.some((item) => item.id === value)
             ? value
@@ -2847,7 +3018,7 @@ export function App() {
         // (its inputs are identical), so queue the same pure projection here
         // against the fresh proof: a stale selected fetch may have replaced
         // the selected copy since the last commit, and only this poll's
-        // order can heal it. A no-op plan queues an identity update.
+        // order can heal it. A no-op plan queues nothing.
         queueSelectedAdopt();
       } finally {
         inFlight = false;

@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, test } from "vitest";
 import {
   adoptOutOfBandSessions,
+  applyQueuedAdopt,
+  applySelectedFetch,
   commitObservationProof,
   planAdoptOutOfBandSessions,
+  planQueuedAdopt,
+  planSelectedFetch,
   appendOrReplaceSession,
   applyConfirmedClose,
   capabilityDigest,
@@ -1096,55 +1100,156 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
   });
 
   test("a queued local sizing update survives a following observation adoption", () => {
-    // The shell's queue: immutable facts snapshotted outside React, pure
-    // projection through the functional updater form onto the ACTUAL
-    // current sessions — never a value computed from a lagging mirror, so
-    // queued local updates (push state, renames, sizing) are never
-    // discarded. The pure plan reads the ledger but only records into the
-    // pending outbox; the flush between queueings is what commits proof.
+    // The shell's queue, through PRODUCTION code: decisions captured outside
+    // React (`planQueuedAdopt` against the lagging mirror), proof committed
+    // once, pure projection (`applyQueuedAdopt`) through the functional
+    // updater form onto the ACTUAL current sessions — never a value computed
+    // from a lagging mirror, so queued local updates (push state, renames,
+    // sizing) are never discarded. No outbox is mutated inside the updater,
+    // so replay with identical inputs always agrees, even after the proof
+    // committed.
     const ledger = createObservationLedger();
     const keys = new Set([observationKeyOf(target())]);
     const hostWidePi = [target(freshPi)];
-    const pending = new Map<string, number>();
-    const flush = () => {
-      for (const [key, seq] of pending) ledger.markApplied(key, seq);
-      pending.clear();
-    };
-    const queueAdopt =
-      (seq: number) =>
-      (items: Session[]): Session[] => {
-        const plan = planAdoptOutOfBandSessions(items, hostWidePi, "w1", never, {
-          freshKeys: keys,
-          seq,
-          ledger,
-        });
-        for (const key of plan.appliedKeys) {
-          const prev = pending.get(key);
-          if (prev === undefined || seq > prev) pending.set(key, seq);
-        }
-        return plan.sessions;
-      };
     // A queued local update from elsewhere in the shell (sizing/push).
     const localSizing = (items: Session[]): Session[] =>
       items.map((item) =>
         item.id === "s1" ? { ...item, cols: 120, command: "/bin/zsh" } : item,
       );
     // React applies queued updaters in order against actual current state.
+    // The mirror the queue captures against still predates the local update.
     const base = [target({ hasForegroundChild: false })];
     const afterLocal = localSizing(base);
-    const first = queueAdopt(6)(afterLocal);
-    const replayed = queueAdopt(6)(afterLocal);
+    const projection = planQueuedAdopt(base, hostWidePi, "w1", never, {
+      freshKeys: keys,
+      seq: 6,
+      ledger,
+    });
+    commitObservationProof(ledger, projection.appliedKeys, 6);
+    const first = applyQueuedAdopt(afterLocal, projection);
+    // Replay with identical inputs agrees — including AFTER the proof
+    // committed above (the updater reads no ledger, mutates no outbox).
+    const replayed = applyQueuedAdopt(afterLocal, projection);
     expect(replayed).toEqual(first);
     expect(replayed[0].observedHarnessId).toBe("pi");
     expect(replayed[0].cols).toBe(120);
-    flush();
     // The committed state carries BOTH the local update and the adoption.
     expect(first[0].cols).toBe(120);
     expect(first[0].command).toBe("/bin/zsh");
     expect(first[0].observedHarnessId).toBe("pi");
     expect(first[0].hasForegroundChild).toBe(true);
-    // A stale poll queued after the flush cannot move what seq 6 wrote.
-    expect(queueAdopt(5)(first)).toBe(first);
-    expect(pending.size).toBe(0);
+    // A second queueing of the same proof (effect + poll settlement both
+    // firing) is deduped by the ledger: nothing left to apply or commit.
+    const again = planQueuedAdopt(first, hostWidePi, "w1", never, {
+      freshKeys: keys,
+      seq: 6,
+      ledger,
+    });
+    expect(again.appliedKeys).toEqual([]);
+    expect(applyQueuedAdopt(first, again)).toBe(first);
+    // A stale poll queued after the commit cannot move what seq 6 wrote.
+    const stale = planQueuedAdopt(
+      first,
+      [target({ hasForegroundChild: false })],
+      "w1",
+      never,
+      { freshKeys: keys, seq: 5, ledger },
+    );
+    expect(stale.appliedKeys).toEqual([]);
+    expect(applyQueuedAdopt(first, stale)).toBe(first);
+  });
+
+  test("a selected fetch reconciles per identity instead of dropping the snapshot", () => {
+    // Production fetch path: `planSelectedFetch` at settle, proof committed
+    // once, `applySelectedFetch` through the functional updater form.
+    const ledger = createObservationLedger();
+    const live = target({
+      cols: 120,
+      command: "/bin/zsh",
+      agentState: "working",
+      agentStateAt: "2026-01-01T00:03:00Z",
+      agentStateAuthority: "hook",
+      ...freshPi,
+    });
+    const closed = session("s9", { workspaceId: "w1" });
+    const current = [live, closed];
+    // The fetch read the daemon before the local sizing and the newer push
+    // landed: older sizing, an older push stamp, the same observation — plus
+    // a brand-new session. The closed session is gone from the daemon.
+    const fetched = [
+      target({
+        agentState: "working",
+        agentStateAt: "2026-01-01T00:01:00Z",
+        ...freshPi,
+      }),
+      session("s2", { workspaceId: "w1", createdAt: "2026-01-01T00:04:00Z" }),
+    ];
+    const plan = planSelectedFetch(fetched, 9, ledger);
+    expect(plan.appliedKeys).toHaveLength(2);
+    commitObservationProof(ledger, plan.appliedKeys, 9);
+    const next = applySelectedFetch(current, plan);
+    // Membership follows the fetch: the new session joins, the closed one
+    // leaves, fetch order wins.
+    expect(next.map((item) => item.id)).toEqual(["s1", "s2"]);
+    const kept = next[0]!;
+    // Daemon truth from the fetch for the fields it owns …
+    expect(kept.cols).toBe(80);
+    expect(kept.command).toBe("/bin/sh");
+    expect(kept.observedHarnessId).toBe("pi");
+    expect(kept.hasForegroundChild).toBe(true);
+    // … but the newer queued push still wins over the fetch's older stamp.
+    expect(kept.agentState).toBe("working");
+    expect(kept.agentStateAt).toBe("2026-01-01T00:03:00Z");
+    expect(kept.agentStateAuthority).toBe("hook");
+  });
+
+  test("a fetch older than committed proof keeps the newer observation", () => {
+    // Two overlapping selected fetches: the newer read settles first. The
+    // older fetch still passes the global stale check (fetches never advance
+    // the poll settlement order), so only the per-key proof may save the
+    // metadata it would otherwise roll back.
+    const ledger = createObservationLedger();
+    const newer = target(freshPi);
+    const older = target({ hasForegroundChild: false });
+    const firstPlan = planSelectedFetch([newer], 9, ledger);
+    commitObservationProof(ledger, firstPlan.appliedKeys, 9);
+    const selected = applySelectedFetch(
+      [target({ hasForegroundChild: false })],
+      firstPlan,
+    );
+    expect(selected[0].observedHarnessId).toBe("pi");
+    const latePlan = planSelectedFetch([older], 8, ledger);
+    expect(latePlan.appliedKeys).toEqual([]);
+    commitObservationProof(ledger, latePlan.appliedKeys, 8);
+    const kept = applySelectedFetch(selected, latePlan);
+    expect(kept[0].observedHarnessId).toBe("pi");
+    expect(kept[0].hasForegroundChild).toBe(true);
+  });
+
+  test("a restarted incarnation is fetch truth wholesale", () => {
+    const ledger = createObservationLedger();
+    const current = [target(freshPi)];
+    const restarted = target({
+      incarnation: "inc-2",
+      hasForegroundChild: false,
+    });
+    const plan = planSelectedFetch([restarted], 9, ledger);
+    commitObservationProof(ledger, plan.appliedKeys, 9);
+    const next = applySelectedFetch(current, plan);
+    expect(next).toHaveLength(1);
+    expect(next[0].incarnation).toBe("inc-2");
+    expect(next[0].observedHarnessId ?? null).toBeNull();
+    expect(next[0].hasForegroundChild).toBe(false);
+  });
+
+  test("an unchanged fetch commits nothing new", () => {
+    const ledger = createObservationLedger();
+    const rows = [target(freshPi)];
+    const plan = planSelectedFetch(rows, 9, ledger);
+    commitObservationProof(ledger, plan.appliedKeys, 9);
+    const input = [target(freshPi)];
+    // Field-equal: the input array keeps its identity, so the shell does
+    // not re-render on an idle fetch.
+    expect(applySelectedFetch(input, plan)).toBe(input);
   });
 });
