@@ -1685,11 +1685,15 @@ footer[data-testid="status-bar"] {
   gap: 4px;
   padding-top: 1px;
 }
-/* The branch marker keeps the branch's own accent on the sidebar ring
-   token — the sidebar's branch-colour token (the reference tints this
-   glyph with the repo accent; Drogon carries no per-project colour). */
-.shell-worktree-card-affordance-branch {
-  color: var(--worktree-sidebar-ring);
+/* Owner's guide: creator provenance (Drogon CLI / Automation) is a compact
+   secondary pill, never a full-strength line — the fact stays visible and
+   toggleable without repeating dominating metadata on every card. */
+.shell-worktree-card-provenance {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
 }
 .shell-worktree-card-top {
   display: flex;
@@ -1699,7 +1703,10 @@ footer[data-testid="status-bar"] {
 }
 /* The activity sentence (owner's design): one uppercase line under the card
    title, the reference's DetailHeader recipe (11px semibold, 0.05em
-   tracking, uppercase) so it reads as the product's own metadata voice. */
+   tracking, uppercase) so it reads as the product's own metadata voice.
+   Owner's guide: the sentence carries a muted blue tint (checked ≥4.5:1 on
+   the sidebar surface in both themes) so activity reads apart from the
+   neutral metadata around it. */
 .shell-worktree-card-sentence {
   display: block;
   margin-top: 1px;
@@ -1708,7 +1715,10 @@ footer[data-testid="status-bar"] {
   letter-spacing: 0.05em;
   line-height: 1.2;
   text-transform: uppercase;
-  color: var(--muted-foreground);
+  color: color-mix(in srgb, var(--muted-foreground) 55%, #3b62a8);
+}
+.dark .shell-worktree-card-sentence {
+  color: color-mix(in srgb, var(--muted-foreground) 55%, #8fb3e8);
 }
 .shell-worktree-card-name {
   flex: 1;
@@ -1802,6 +1812,47 @@ footer[data-testid="status-bar"] {
   line-height: 1;
   white-space: nowrap;
   color: var(--muted-foreground);
+}
+/* Row width budget (owner's guide: the provider name stays readable at the
+   natural 280px sidebar width, MAIN sits outside truncation, every row keeps
+   its own state). Scoped to the worktree agent rows only — the chats list
+   reuses `.compact-agent-row` with its own single-line recipe and is
+   untouched. The identity group never shrinks: a short provider name always
+   reads whole, a long rename truncates inside the group with the full title
+   in the tooltip. The secondary rides flex-basis 0 so it collapses toward
+   nothing before anything else gives. The tail never shrinks: when even the
+   collapsed secondary leaves no room, the row wraps and the state rides a
+   second line, right-aligned, instead of eating the identity. */
+[data-worktree-agent-row] {
+  flex-wrap: wrap;
+}
+.shell-worktree-agent-identity {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+.shell-worktree-agent-primary {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-worktree-agent-secondary {
+  flex: 1 1 0%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-worktree-agent-tail {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
 }
 /* A root row that owns subagents carries the badge; the guide's MAIN pill is
    a quiet outline, never a solid chip, so it sits beside the row's name
@@ -2018,6 +2069,17 @@ footer[data-testid="status-bar"] {
 .compact-agent-child-disclosure-button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--ring) 60%, transparent);
+}
+
+/* Owner's guide: the fold chevrons rotate via Tailwind transitions, so they
+   need their own reduced-motion escape — folding stays instant for users
+   who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .shell-worktree-card-fold svg,
+  .compact-agent-child-disclosure-button svg,
+  .compact-agent-summary-button svg {
+    transition: none;
+  }
 }
 /* Agent-state glyphs moved to the fork-literal `.agent-working-spinner`
    section appended at the end of this file (R16-I); the retired
