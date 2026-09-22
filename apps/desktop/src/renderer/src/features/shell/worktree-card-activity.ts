@@ -10,9 +10,11 @@ import { resolveRowHarnessId } from "./worktree-agent-rows";
 /**
  * The card's activity class, in the owner's design order: an agent waiting
  * on the user wins over work in progress, which wins over a quiet card; a
- * card whose sessions never reported is "not reporting", never "no active
- * agents". A card with no known agent at all (plain terminals only) is its
- * own class: its sessions are not agents, so no agent noun may name them.
+ * card with a known agent that never reported is "not reporting", never
+ * "no active agents" — one silent known agent is not quieted by other
+ * quiet sessions beside it. A card with no known agent at all (plain
+ * terminals only) is its own class: its sessions are not agents, so no
+ * agent noun may name them.
  */
 export type WorktreeActivityClass =
   | "needs-input"
@@ -40,11 +42,13 @@ export function worktreeActivityClass(
   // Plain shells cannot report these states (harness-less `working` reads
   // `unknown`; `needs_input` requires hooks, which require a launch), so
   // the counts above are agent counts without further filtering.
-  if (knownAgentSessions(sessions).length === 0) return "terminal-session";
-  const notReporting = sessions.filter(
-    (session) => sessionAgentState(session) === "unknown",
-  ).length;
-  if (notReporting === sessions.length) return "not-reporting";
+  const known = knownAgentSessions(sessions);
+  if (known.length === 0) return "terminal-session";
+  // Unknown is not evidence of inactivity: any known agent still silent
+  // keeps the card at not-reporting, even beside quiet (idle/exited) or
+  // plain-terminal sessions. Plain shells never count here.
+  if (known.some((session) => sessionAgentState(session) === "unknown"))
+    return "not-reporting";
   return "no-active-agents";
 }
 

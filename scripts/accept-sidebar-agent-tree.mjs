@@ -1699,6 +1699,19 @@ export async function runSidebarAgentTreeAcceptance() {
     const hookIdleShot = path.join(output, "guide-layout-hook-idle.png");
     await page.screenshot({ path: hookIdleShot, animations: "disabled" });
     report.screenshots.push(hookIdleShot);
+    // R1 consistency: after AgentEnd the proven Pi row reads Idle while the
+    // four other fixture agents never reported — unknown is not evidence of
+    // inactivity, so the card states the four silent agents, never NO ACTIVE.
+    const mixedUnknownSentence = await until(async () => {
+      const sentence = await page.evaluate(
+        (id) => document.querySelector(`[data-worktree-card-id="${id}"] .shell-worktree-card-sentence`)?.textContent?.trim() ?? null,
+        worktree2Id,
+      );
+      return sentence === "4 AGENTS NOT REPORTING" ? sentence : false;
+    }, "the mixed unknown+idle guide card states not-reporting, never no-active-agents");
+    assert.equal(mixedUnknownSentence, "4 AGENTS NOT REPORTING", "four silent fixture agents beside one proven Idle read as not reporting");
+    hookTruth.mixedUnknownSentence = mixedUnknownSentence;
+    report.checks.push("mixed-unknown-idle-card-states-not-reporting");
     hookTruth.turnRow = { agentState: hookTurn.agentState, agentStateAuthority: hookTurn.agentStateAuthority };
     hookTruth.endRow = { agentState: hookEnd.agentState, agentStateAuthority: hookEnd.agentStateAuthority };
     // The harness.start session stays listed until the fixture daemon

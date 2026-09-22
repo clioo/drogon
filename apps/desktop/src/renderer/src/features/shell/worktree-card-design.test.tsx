@@ -154,6 +154,22 @@ describe("card activity sentence", () => {
       [session({ id: "a", agentState: undefined, agentStateAt: null })],
       "1 AGENT NOT REPORTING",
     ],
+    // R1 consistency: one silent known agent beside a quiet one is never
+    // certified inactive — the card names the silent agent, never NO ACTIVE.
+    [
+      [
+        session({ id: "a", agentState: undefined, agentStateAt: null }),
+        session({ id: "b", agentState: "idle" }),
+      ],
+      "1 AGENT NOT REPORTING",
+    ],
+    [
+      [
+        session({ id: "a", agentState: undefined, agentStateAt: null }),
+        session({ id: "b", agentState: "exited", verdict: "exited", exitCode: 0 }),
+      ],
+      "1 AGENT NOT REPORTING",
+    ],
   ] as const)("states %s sessions as %s", (sessions, sentence) => {
     const { container } = renderCard({ sessions: [...sessions] });
     expect(
