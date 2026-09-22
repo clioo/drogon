@@ -34,7 +34,7 @@ import { memo, useCallback } from "react";
 import { ChevronRight, Terminal } from "lucide-react";
 import { AgentStateIcon } from "./AgentStateIcon";
 import { AgentCacheTimer } from "./AgentCacheTimer";
-import { HarnessMenuIcon } from "./TabCreateMenuIcons";
+import { SidebarProviderGlyph } from "./WorktreeAgentGlyph";
 import { agentStateLabel } from "./agent-state";
 import {
   formatRowHarnessLabel,
@@ -325,7 +325,7 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
       title={formatRowHarnessLabel(resolvedHarnessId)}
     >
       {resolvedHarnessId ? (
-        <HarnessMenuIcon
+        <SidebarProviderGlyph
           harnessId={resolvedHarnessId}
           displayName={formatRowHarnessLabel(resolvedHarnessId)}
           size={13}

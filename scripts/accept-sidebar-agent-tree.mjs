@@ -682,23 +682,77 @@ export async function runSidebarAgentTreeAcceptance() {
         const card = document.querySelector(`[data-worktree-card-id="${id}"]`);
         const sidebar = document.querySelector(".workspace-sidebar");
         const cardRect = card.getBoundingClientRect();
+        const fold = card.querySelector(".shell-worktree-card-fold");
+        const foldRect = fold ? fold.getBoundingClientRect() : null;
+        const title = card.querySelector(".shell-worktree-card-name");
+        const titleRect = title ? title.getBoundingClientRect() : null;
+        // R1 finisher: connector geometry per tree node. Each node draws
+        // its own vertical guide (::before) and elbow (::after) positioned
+        // relative to itself, so the absolute line extents are the node
+        // edge plus the pseudo offset — measured here, asserted inside the
+        // card below.
+        const treeConnectors = [...card.querySelectorAll("[data-lineage-depth]")].map((node) => {
+          const nodeRect = node.getBoundingClientRect();
+          const extentOf = (pseudo, rect) => {
+            if (!pseudo || pseudo.content === "none") return null;
+            const left = Number.parseFloat(pseudo.left);
+            const width = Number.parseFloat(pseudo.width);
+            if (!Number.isFinite(left) || !Number.isFinite(width)) return null;
+            return {
+              left: Math.round(rect.left + left),
+              right: Math.round(rect.left + left + width),
+            };
+          };
+          return {
+            depth: Number(node.getAttribute("data-lineage-depth")),
+            vertical: extentOf(getComputedStyle(node, "::before"), nodeRect),
+            elbow: extentOf(getComputedStyle(node, "::after"), nodeRect),
+          };
+        });
         return {
           sidebarWidth: sidebar ? Math.round(sidebar.getBoundingClientRect().width) : null,
           cardRect: { left: cardRect.left, right: cardRect.right },
+          cardFoldLeft: foldRect ? Math.round(foldRect.left) : null,
+          cardTitleLeft: titleRect ? Math.round(titleRect.left) : null,
+          treeConnectors,
           rows: [...card.querySelectorAll("[data-worktree-agent-row]")].map((row) => {
             const rowRect = row.getBoundingClientRect();
             const primary = row.querySelector("[data-worktree-agent-primary]");
             const primaryRect = primary.getBoundingClientRect();
+            const firstChild = row.firstElementChild;
+            const firstRect = firstChild ? firstChild.getBoundingClientRect() : null;
             const badge = row.querySelector(".shell-worktree-agent-main-badge");
             const badgeRect = badge ? badge.getBoundingClientRect() : null;
             const state = row.querySelector("[data-worktree-agent-state]");
             const stateRect = state ? state.getBoundingClientRect() : null;
             const stateLabel = row.querySelector(".shell-worktree-agent-state-label");
+            const stateText = stateLabel?.textContent?.trim() ?? null;
+            const tail = row.querySelector(".shell-worktree-agent-tail");
+            const tailRect = tail ? tail.getBoundingClientRect() : null;
+            const depthNode = row.closest("[data-lineage-depth]");
             return {
               id: row.getAttribute("data-worktree-agent-row"),
               primaryText: primary?.textContent ?? null,
               primaryClientW: primary?.clientWidth ?? null,
               primaryScrollW: primary?.scrollWidth ?? null,
+              // R1 density: indent of this row's left edge from the card,
+              // its lineage depth, and its full line box — root indent
+              // proves the tree starts near the card edge (not squeezed
+              // behind the header chrome), depth steps prove real nesting,
+              // and the wrapped flag proves ordinary rows hold one line.
+              depth: depthNode ? Number(depthNode.getAttribute("data-lineage-depth")) : null,
+              rowLeft: Math.round(rowRect.left),
+              rowRight: Math.round(rowRect.right),
+              rowH: Math.round(rowRect.height),
+              // R1 finisher: the row's leading slot (disclosure chevron on
+              // parents, reserved gutter on lone roots) and the provider
+              // text edge — nested relative to the card fold and title.
+              disclosureLeft: firstRect ? Math.round(firstRect.left) : null,
+              primaryLeft: Math.round(primaryRect.left),
+              primaryRight: Math.round(primaryRect.right),
+              tailRight: tailRect ? Math.round(tailRect.right) : null,
+              wrapped: stateRect ? Math.round(stateRect.top) > Math.round(primaryRect.bottom) + 2 : null,
+              stateText,
               badgeW: badgeRect ? Math.round(badgeRect.width) : null,
               badgeRight: badgeRect ? Math.round(badgeRect.right) : null,
               stateW: stateRect ? Math.round(stateRect.width) : null,
@@ -743,6 +797,99 @@ export async function runSidebarAgentTreeAcceptance() {
       "MAIN draws inside the card",
     );
     report.guideBudget280 = "pass";
+
+    // R1 density: indent + line-box proof at the natural width. The root
+    // starts near the card edge (the old header-squeezed column started
+    // ~55px in), children step right per depth (real nesting with the
+    // connector offsets intact), ordinary Idle/Working rows hold one line,
+    // and a long not-reporting label may legitimately wrap at depth.
+    const indentOf = (row, cardRect) => row.rowLeft - Math.round(cardRect.left);
+    report.indent280 = Object.fromEntries(
+      widthBudget.rows.map((row) => [row.id, indentOf(row, widthBudget.cardRect)]),
+    );
+    const rootRow280 = widthBudget.rows.find((row) => row.id === l1id);
+    assert.ok(
+      rootRow280 && indentOf(rootRow280, widthBudget.cardRect) <= 32,
+      `the root starts near the card edge (indent ${rootRow280 ? indentOf(rootRow280, widthBudget.cardRect) : "?"}px)`,
+    );
+    const byDepth280 = [...widthBudget.rows].sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
+    for (let index = 1; index < byDepth280.length; index += 1) {
+      assert.ok(
+        indentOf(byDepth280[index], widthBudget.cardRect) > indentOf(byDepth280[index - 1], widthBudget.cardRect),
+        `depth ${byDepth280[index].depth} steps right of depth ${byDepth280[index - 1].depth}`,
+      );
+    }
+    for (const row of widthBudget.rows) {
+      assert.ok(
+        row.tailRight !== null && row.tailRight <= Math.round(widthBudget.cardRect.right) + 1,
+        `row ${row.id} actions draw inside the card`,
+      );
+      // Ordinary short states (Idle/Working/Exited) must hold one line at
+      // the natural width; a long freshness sentence may wrap instead of
+      // eating the provider name.
+      if (row.stateText !== null && row.stateText.length <= 10) {
+        assert.equal(row.wrapped, false, `row ${row.id} ("${row.primaryText}" ${row.stateText}) holds one line`);
+      }
+    }
+    report.density280 = "pass";
+
+    // R1 finisher: the tree nests genuinely instead of outdenting. The root
+    // holds a real gutter inside the card (the R1 overcorrection sat 9px
+    // in with its connectors clipped at the card edge; the old squeezed
+    // column started ~55px in), the root disclosure sits right of the card
+    // fold, the root provider text starts right of the workspace title,
+    // every connector — including pseudo-element geometry — draws inside
+    // the card, and depth steps read ~12px. Recorded outside CHECK_NAMES
+    // (which the companion test pins).
+    const cardLeft280 = Math.round(widthBudget.cardRect.left);
+    const cardRight280 = Math.round(widthBudget.cardRect.right);
+    const rootNest280 = widthBudget.rows.find((row) => row.id === l1id);
+    const rootIndent280 = indentOf(rootNest280, widthBudget.cardRect);
+    assert.ok(
+      rootIndent280 >= 20 && rootIndent280 <= 40,
+      `the root nests in a genuine gutter (indent ${rootIndent280}px)`,
+    );
+    assert.ok(
+      widthBudget.cardFoldLeft !== null &&
+        rootNest280.disclosureLeft !== null &&
+        rootNest280.disclosureLeft > widthBudget.cardFoldLeft,
+      `the root disclosure nests right of the card fold (${rootNest280.disclosureLeft} vs ${widthBudget.cardFoldLeft})`,
+    );
+    assert.ok(
+      widthBudget.cardTitleLeft !== null &&
+        rootNest280.primaryLeft > widthBudget.cardTitleLeft,
+      `the root provider text starts right of the workspace title (${rootNest280.primaryLeft} vs ${widthBudget.cardTitleLeft})`,
+    );
+    assert.ok(
+      widthBudget.treeConnectors.length === widthBudget.rows.length,
+      `every row owns its connector node (${widthBudget.treeConnectors.length} nodes for ${widthBudget.rows.length} rows)`,
+    );
+    for (const connector of widthBudget.treeConnectors) {
+      for (const [name, extent] of [["guide", connector.vertical], ["elbow", connector.elbow]]) {
+        if (!extent) continue;
+        assert.ok(
+          extent.left >= cardLeft280 - 1 && extent.right <= cardRight280 + 1,
+          `depth ${connector.depth} ${name} connector draws inside the card (${extent.left}..${extent.right} in ${cardLeft280}..${cardRight280})`,
+        );
+      }
+    }
+    const chain280 = [l1id, l2id, l3id].map((id) => widthBudget.rows.find((row) => row.id === id));
+    assert.ok(chain280.every(Boolean), "the full chain is measured at natural width");
+    for (let index = 1; index < chain280.length; index += 1) {
+      const step = indentOf(chain280[index], widthBudget.cardRect) - indentOf(chain280[index - 1], widthBudget.cardRect);
+      assert.ok(
+        step >= 8 && step <= 20,
+        `depth ${chain280[index].depth} steps ~12px right of its parent (step ${step}px)`,
+      );
+    }
+    report.nesting280 = {
+      rootIndent: rootIndent280,
+      rootDisclosureLeft: rootNest280.disclosureLeft,
+      cardFoldLeft: widthBudget.cardFoldLeft,
+      rootPrimaryLeft: rootNest280.primaryLeft,
+      cardTitleLeft: widthBudget.cardTitleLeft,
+      connectors: widthBudget.treeConnectors,
+    };
 
     // Discrimination probe: the previous row layout (one shared truncating
     // span for name + secondary beside non-shrinking MAIN/state) rebuilt
@@ -1017,6 +1164,86 @@ export async function runSidebarAgentTreeAcceptance() {
         `guide row ${row.id} never clips horizontally`,
       );
     }
+    // R1 density on the multi-provider card: same indent + line-box proof
+    // along the genuine Pi -> Codex -> Claude Code chain (the standalone
+    // root shares depth 0, so the step assert follows the chain, not the
+    // row order).
+    const guideIndentOf = (row) => row.rowLeft - Math.round(guideMeasured.cardRect.left);
+    report.indentGuide = Object.fromEntries(
+      guideMeasured.rows.map((row) => [row.id, guideIndentOf(row)]),
+    );
+    const guideChainRows = [guideChain.rootId, guideChain.childId, guideChain.grandchildId].map(
+      (id) => primaryById.get(id),
+    );
+    assert.ok(
+      guideIndentOf(guideChainRows[0]) <= 32,
+      `the pi root starts near the card edge (indent ${guideIndentOf(guideChainRows[0])}px)`,
+    );
+    assert.ok(
+      guideIndentOf(guideChainRows[1]) > guideIndentOf(guideChainRows[0]) &&
+        guideIndentOf(guideChainRows[2]) > guideIndentOf(guideChainRows[1]),
+      "the codex child and claude grandchild step right down the chain",
+    );
+    for (const row of guideMeasured.rows) {
+      assert.ok(
+        row.tailRight !== null && row.tailRight <= Math.round(guideMeasured.cardRect.right) + 1,
+        `guide row ${row.id} actions draw inside the card`,
+      );
+      if (row.stateText !== null && row.stateText.length <= 10) {
+        assert.equal(row.wrapped, false, `guide row ${row.id} ("${row.primaryText}" ${row.stateText}) holds one line`);
+      }
+    }
+    report.densityGuide = "pass";
+    // R1 finisher: the same nesting proof on the genuine Pi -> Codex ->
+    // Claude Code chain — genuine gutter, disclosure right of the card
+    // fold, provider text right of the workspace title, connectors (with
+    // pseudo geometry) inside the card, ~12px steps down the chain.
+    const guideCardLeft = Math.round(guideMeasured.cardRect.left);
+    const guideCardRight = Math.round(guideMeasured.cardRect.right);
+    const guideRootIndent = guideIndentOf(guideChainRows[0]);
+    assert.ok(
+      guideRootIndent >= 20 && guideRootIndent <= 40,
+      `the pi root nests in a genuine gutter (indent ${guideRootIndent}px)`,
+    );
+    assert.ok(
+      guideMeasured.cardFoldLeft !== null &&
+        guideChainRows[0].disclosureLeft !== null &&
+        guideChainRows[0].disclosureLeft > guideMeasured.cardFoldLeft,
+      `the pi disclosure nests right of the card fold (${guideChainRows[0].disclosureLeft} vs ${guideMeasured.cardFoldLeft})`,
+    );
+    assert.ok(
+      guideMeasured.cardTitleLeft !== null &&
+        guideChainRows[0].primaryLeft > guideMeasured.cardTitleLeft,
+      `the pi provider text starts right of the workspace title (${guideChainRows[0].primaryLeft} vs ${guideMeasured.cardTitleLeft})`,
+    );
+    assert.ok(
+      guideMeasured.treeConnectors.length === guideMeasured.rows.length,
+      `every guide row owns its connector node (${guideMeasured.treeConnectors.length} nodes for ${guideMeasured.rows.length} rows)`,
+    );
+    for (const connector of guideMeasured.treeConnectors) {
+      for (const [name, extent] of [["guide", connector.vertical], ["elbow", connector.elbow]]) {
+        if (!extent) continue;
+        assert.ok(
+          extent.left >= guideCardLeft - 1 && extent.right <= guideCardRight + 1,
+          `guide depth ${connector.depth} ${name} connector draws inside the card (${extent.left}..${extent.right} in ${guideCardLeft}..${guideCardRight})`,
+        );
+      }
+    }
+    for (let index = 1; index < guideChainRows.length; index += 1) {
+      const step = guideIndentOf(guideChainRows[index]) - guideIndentOf(guideChainRows[index - 1]);
+      assert.ok(
+        step >= 8 && step <= 20,
+        `guide depth ${guideChainRows[index].depth} steps ~12px right of its parent (step ${step}px)`,
+      );
+    }
+    report.nestingGuide = {
+      rootIndent: guideRootIndent,
+      rootDisclosureLeft: guideChainRows[0].disclosureLeft,
+      cardFoldLeft: guideMeasured.cardFoldLeft,
+      rootPrimaryLeft: guideChainRows[0].primaryLeft,
+      cardTitleLeft: guideMeasured.cardTitleLeft,
+      connectors: guideMeasured.treeConnectors,
+    };
     const guideBadges = await page.evaluate(
       (id) => [...document.querySelectorAll(`[data-worktree-card-id="${id}"] .shell-worktree-agent-main-badge`)]
         .map((badge) => badge.closest("[data-worktree-agent-row]")?.getAttribute("data-worktree-agent-row")),
@@ -1053,6 +1280,11 @@ export async function runSidebarAgentTreeAcceptance() {
     const multiShot = path.join(output, "guide-layout-multi.png");
     await page.screenshot({ path: multiShot, animations: "disabled" });
     report.screenshots.push(multiShot);
+    // R1 finisher: the guide-comparable crop — the sidebar column alone,
+    // framed like the owner's reference, beside the full frame above.
+    const multiCrop = path.join(output, "guide-layout-multi-crop.png");
+    await page.locator(".workspace-sidebar").screenshot({ path: multiCrop, animations: "disabled" });
+    report.screenshots.push(multiCrop);
 
     // Collapsed parent, folded card and selection on the guide card —
     // scoped locators, so the first card's persisted folds are untouched.
@@ -1107,6 +1339,99 @@ export async function runSidebarAgentTreeAcceptance() {
     await page.screenshot({ path: selectedShot, animations: "disabled" });
     report.screenshots.push(selectedShot);
 
+    // R1 density: the selected card reads blue-tinted, not flat gray. The
+    // cascaded colors come from the live stylesheet (getComputedStyle, not
+    // source text): a gray wash resolves with equal red/blue channels while
+    // the blue wash resolves blue-above-red. Measured against an unselected
+    // card in the same capture, so the assert discriminates relatively.
+    const readSelectionTint = () =>
+      page.evaluate((id) => {
+        const parse = (value) => {
+          const text = String(value ?? "");
+          const rgb = text.match(/rgba?\(([^)]+)\)/);
+          if (rgb) {
+            const [r, g, b] = rgb[1].split(",").map((part) => Number(part.trim()));
+            if ([r, g, b].every(Number.isFinite)) return { kind: "rgb", r, g, b };
+          }
+          // Chromium resolves color-mix() to color(srgb …), not rgb().
+          const srgb = text.match(/color\(\s*srgb\s+([0-9.eE+-]+)\s+([0-9.eE+-]+)\s+([0-9.eE+-]+)/);
+          if (srgb) {
+            return {
+              kind: "rgb",
+              r: Number(srgb[1]) * 255,
+              g: Number(srgb[2]) * 255,
+              b: Number(srgb[3]) * 255,
+            };
+          }
+          // …or to oklab()/lab() (the light blue-600 wash arrives that way):
+          // a blue tint reads b << 0 on the yellow-blue axis, gray ≈ 0.
+          const lab = text.match(/(?:oklab|lab)\(([^)]+)\)/);
+          if (lab) {
+            const parts = lab[1].split("/")[0].trim().split(/\s+/).map(Number);
+            if (parts.length >= 3 && parts.every(Number.isFinite)) {
+              return { kind: "lab", l: parts[0], a: parts[1], b: parts[2] };
+            }
+          }
+          return null;
+        };
+        const selectedCard = document.querySelector(`[data-worktree-card-id="${id}"][data-active="true"]`);
+        const plainCard = document.querySelector("[data-worktree-card-id]:not([data-active='true'])");
+        const selectedStyle = selectedCard ? getComputedStyle(selectedCard) : null;
+        const plainStyle = plainCard ? getComputedStyle(plainCard) : null;
+        return {
+          selectedBackground: parse(selectedStyle?.backgroundColor),
+          selectedBorder: parse(selectedStyle?.borderColor),
+          plainBackground: parse(plainStyle?.backgroundColor),
+          selectedBackgroundRaw: String(selectedStyle?.backgroundColor ?? ""),
+          selectedBorderRaw: String(selectedStyle?.borderColor ?? ""),
+        };
+      }, worktree2Id);
+    // Node-side tint verdicts over the plain parsed colors above (kept out
+    // of the page closure: they run here, against the report values).
+    // Blue excess over red (rgb serializations) or blue-axis depth (lab
+    // serializations); a gray wash reads ~0 in both.
+    const tintExcess = (color) => {
+      if (!color) return null;
+      if (color.kind === "lab") return { kind: "lab", excess: color.b };
+      return { kind: "rgb", excess: color.b - color.r };
+    };
+    const isBlueWash = (color, { rgb = 8, lab = -0.02 } = {}) => {
+      const measured = tintExcess(color);
+      if (!measured) return false;
+      return measured.kind === "lab" ? measured.excess <= lab : measured.excess >= rgb;
+    };
+    const tint = await readSelectionTint();
+    report.selectionTint = tint;
+    assert.ok(tint.selectedBackground && tint.selectedBorder, "the selected card resolves a background and border color");
+    assert.ok(
+      isBlueWash(tint.selectedBackground, { rgb: 8 }),
+      `the selected wash is blue-tinted (${tint.selectedBackgroundRaw})`,
+    );
+    assert.ok(
+      isBlueWash(tint.selectedBorder, { rgb: 20 }),
+      `the selected border is blue-tinted (${tint.selectedBorderRaw})`,
+    );
+    if (tint.plainBackground && tint.selectedBackground?.kind === tint.plainBackground.kind) {
+      const selectedExcess = tintExcess(tint.selectedBackground).excess;
+      const plainExcess = tintExcess(tint.plainBackground).excess;
+      const bluer =
+        tint.selectedBackground.kind === "lab" ? selectedExcess < plainExcess : selectedExcess > plainExcess;
+      assert.ok(bluer, "the selected card is bluer than its unselected sibling in the same capture");
+    }
+    report.selectionTinted = "pass";
+
+    // R1 density: the card fold works from the keyboard alone — focus the
+    // chevron and drive it with Enter, the way a keyboard-only user folds
+    // the tree. Collapsed and restored through key presses, never clicks.
+    const card2FoldButton = page.locator(`[data-worktree-card-id="${worktree2Id}"] .shell-worktree-card-fold`);
+    await card2FoldButton.focus();
+    assert.equal(await card2FoldButton.getAttribute("aria-expanded"), "true", "the fold starts expanded for keyboard input");
+    await page.keyboard.press("Enter");
+    await until(async () => (await measureGuideRows(worktree2Id)).rows.length === 0, "Enter on the fold hides the tree");
+    await page.keyboard.press("Enter");
+    await until(async () => (await measureGuideRows(worktree2Id)).rows.length === 4, "Enter again restores the tree");
+    report.keyboardFold = "pass";
+
     // Responsive component validation (test-only widths in this isolated
     // instance through the product's own sidebar-width setting, never the
     // developer's working app): 320 and 400 must keep every provider
@@ -1141,6 +1466,125 @@ export async function runSidebarAgentTreeAcceptance() {
     await page.evaluate(() => {
       window.localStorage.setItem("drogon:shell:sidebar-width", "280");
     });
+    await page.reload();
+    await page.getByRole("button", { name: "Select guidebiz", exact: true }).waitFor();
+    // R1 density: the same production card in the light theme — the theme
+    // flips by removing the `.dark` root class (theme.ts), verified live
+    // before capture. Provider names stay whole, states stay inside, and
+    // the selected wash still reads blue-tinted with light contrast.
+    // R1 density: the same production card in the light theme. An explicit
+    // "light" choice goes through the app's own settings envelope
+    // (drogon:settings:ui, settings-store.ts) and is applied by the app
+    // itself on reload — a manual class removal gets clobbered by the
+    // native theme relay, so the suite uses the product path. The previous
+    // choice is restored afterwards, leaving no trace in the fixture.
+    const themeKey = "drogon:settings:ui";
+    const themeBefore = await page.evaluate((key) => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(key) ?? "null");
+        return parsed?.settings?.theme ?? null;
+      } catch {
+        return null;
+      }
+    }, themeKey);
+    await page.evaluate((key) => {
+      let envelope = {};
+      try {
+        envelope = JSON.parse(window.localStorage.getItem(key) ?? "null") ?? {};
+      } catch {
+        envelope = {};
+      }
+      if (typeof envelope !== "object" || envelope === null || Array.isArray(envelope)) envelope = {};
+      const settings =
+        envelope.settings && typeof envelope.settings === "object" && !Array.isArray(envelope.settings)
+          ? envelope.settings
+          : {};
+      window.localStorage.setItem(key, JSON.stringify({ ...envelope, settings: { ...settings, theme: "light" } }));
+    }, themeKey);
+    await page.reload();
+    await page.getByRole("button", { name: "Select guidebiz", exact: true }).waitFor();
+    const lightState = await page.evaluate(() => ({
+      dark: document.documentElement.classList.contains("dark"),
+      sidebar: getComputedStyle(document.querySelector(".workspace-sidebar"))?.backgroundColor ?? null,
+    }));
+    report.lightCaptureState = { ...lightState, themeBefore };
+    assert.equal(lightState.dark, false, "the app applies the light theme itself");
+    // The reload can outrun selection hydration (the select button renders
+    // before the active workspace restores), so reselect the guide card
+    // explicitly — the tint proof needs a selected card, and the click is
+    // the product's own selection path, not a state injection.
+    const reselectGuide = page.locator(`[data-worktree-card-id="${worktree2Id}"] .shell-worktree-card-select`);
+    await reselectGuide.scrollIntoViewIfNeeded();
+    await reselectGuide.click();
+    await until(async () => {
+      const active = await page.evaluate(
+        (id) => document.querySelector(`[data-worktree-card-id="${id}"]`)?.getAttribute("data-active"),
+        worktree2Id,
+      );
+      return active === "true" ? true : false;
+    }, "the guide card reselects for the light capture");
+    const lightMeasured = await until(async () => {
+      const next = await measureGuideRows(worktree2Id);
+      return next.rows.length === 4 ? next : false;
+    }, "the guide card renders again in the light theme");
+    for (const row of lightMeasured.rows) {
+      assert.ok(
+        row.primaryScrollW <= row.primaryClientW + 1,
+        `light row ${row.id} provider reads whole: "${row.primaryText}"`,
+      );
+      assert.ok(row.rowScrollW <= row.rowClientW + 1, `light row ${row.id} never clips horizontally`);
+      assert.ok(
+        row.stateLeft >= lightMeasured.cardRect.left - 1 && row.stateRight <= lightMeasured.cardRect.right + 1,
+        `light row ${row.id} state draws inside the card`,
+      );
+    }
+    const lightTint = await readSelectionTint();
+    report.lightSelectionTint = lightTint;
+    assert.ok(
+      lightTint.selectedBackground && isBlueWash(lightTint.selectedBackground, { rgb: 8 }),
+      `the selected wash stays blue-tinted in the light theme (${lightTint.selectedBackgroundRaw})`,
+    );
+    const lightShot = path.join(output, "guide-layout-light.png");
+    await page.screenshot({ path: lightShot, animations: "disabled" });
+    report.screenshots.push(lightShot);
+    const lightCrop = path.join(output, "guide-layout-light-crop.png");
+    await page.locator(".workspace-sidebar").screenshot({ path: lightCrop, animations: "disabled" });
+    report.screenshots.push(lightCrop);
+    report.lightTheme = "pass";
+    await page.evaluate(([key, theme]) => {
+      let envelope = {};
+      try {
+        envelope = JSON.parse(window.localStorage.getItem(key) ?? "null") ?? {};
+      } catch {
+        envelope = {};
+      }
+      if (typeof envelope !== "object" || envelope === null || Array.isArray(envelope)) envelope = {};
+      const settings =
+        envelope.settings && typeof envelope.settings === "object" && !Array.isArray(envelope.settings)
+          ? { ...envelope.settings }
+          : {};
+      if (theme === null || theme === undefined) delete settings.theme;
+      else settings.theme = theme;
+      window.localStorage.setItem(key, JSON.stringify({ ...envelope, settings }));
+    }, [themeKey, themeBefore]);
+    await page.reload();
+    await page.getByRole("button", { name: "Select guidebiz", exact: true }).waitFor();
+    // R1 density: reduced motion — the tree must render identically with
+    // transitions suppressed (content is never gated on a reveal class),
+    // proven by reloaded rows plus a capture under emulation.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.reload();
+    await page.getByRole("button", { name: "Select guidebiz", exact: true }).waitFor();
+    const reducedMeasured = await until(async () => {
+      const next = await measureGuideRows(worktree2Id);
+      return next.rows.length === 4 ? next : false;
+    }, "the guide card renders again under reduced motion");
+    assert.equal(reducedMeasured.rows.length, 4, "reduced motion keeps every fixture row");
+    const reducedShot = path.join(output, "guide-layout-reduced-motion.png");
+    await page.screenshot({ path: reducedShot, animations: "disabled" });
+    report.screenshots.push(reducedShot);
+    report.reducedMotion = "pass";
+    await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.reload();
     await page.getByRole("button", { name: "Select guidebiz", exact: true }).waitFor();
     report.guide = guide;
@@ -1210,12 +1654,51 @@ export async function runSidebarAgentTreeAcceptance() {
     );
     assert.equal(hookTurn.agentState, "working", "a real resumption hook opens a silent turn");
     assert.equal(hookTurn.agentStateAuthority, "hook", "the open turn carries hook proof");
+    // 3. The hook-proven turn renders: while the turn is open, the sidebar
+    // row for the harness session reads Working — the DOM proof the
+    // CLI-only lifecycle above never waited on.
+    const readHookRowState = (sessionId) =>
+      page.evaluate((sid) => {
+        const row = document.querySelector(`[data-worktree-agent-row="${sid}"]`);
+        if (!row) return null;
+        const state = row.querySelector("[data-worktree-agent-state]");
+        return {
+          cardId: row.closest("[data-worktree-card-id]")?.getAttribute("data-worktree-card-id") ?? null,
+          state: state?.getAttribute("data-worktree-agent-state") ?? null,
+          label: row.querySelector(".shell-worktree-agent-state-label")?.textContent?.trim() ?? null,
+        };
+      }, sessionId);
+    const hookWorkingRow = await until(async () => {
+      const row = await readHookRowState(hookLaunch.id);
+      return row && row.state === "working" ? row : false;
+    }, "the hook session row reads Working while the turn is open");
+    assert.equal(hookWorkingRow.cardId, worktree2Id, "the hook session nests under the guide card");
+    assert.equal(hookWorkingRow.label, "Working", "the open turn states Working in words");
+    hookTruth.workingRow = hookWorkingRow;
+    const hookWorkingShot = path.join(output, "guide-layout-hook-working.png");
+    await page.screenshot({ path: hookWorkingShot, animations: "disabled" });
+    report.screenshots.push(hookWorkingShot);
+    const hookWorkingCrop = path.join(output, "guide-layout-hook-working-crop.png");
+    await page.locator(".workspace-sidebar").screenshot({ path: hookWorkingCrop, animations: "disabled" });
+    report.screenshots.push(hookWorkingCrop);
     const hookEnd = await cliJson(
       ["rpc", "session.hook_event", "--params", JSON.stringify({ sessionId: hookLaunch.id, incarnation: hookLaunch.incarnation, event: "AgentEnd" })],
       { env, cwd: fixture },
     );
     assert.equal(hookEnd.agentState, "idle", "a real turn end concludes to idle");
     assert.equal(hookEnd.agentStateAuthority, "hook", "the concluded turn keeps hook proof");
+    // 4. The concluded turn renders: the same row reads Idle once AgentEnd
+    // lands — real Working/Idle DOM evidence for the hook lifecycle.
+    const hookIdleRow = await until(async () => {
+      const row = await readHookRowState(hookLaunch.id);
+      return row && row.state === "idle" ? row : false;
+    }, "the hook session row reads Idle after the turn ends");
+    assert.equal(hookIdleRow.cardId, worktree2Id, "the concluded turn stays under the guide card");
+    assert.equal(hookIdleRow.label, "Idle", "the concluded turn states Idle in words");
+    hookTruth.idleRow = hookIdleRow;
+    const hookIdleShot = path.join(output, "guide-layout-hook-idle.png");
+    await page.screenshot({ path: hookIdleShot, animations: "disabled" });
+    report.screenshots.push(hookIdleShot);
     hookTruth.turnRow = { agentState: hookTurn.agentState, agentStateAuthority: hookTurn.agentStateAuthority };
     hookTruth.endRow = { agentState: hookEnd.agentState, agentStateAuthority: hookEnd.agentStateAuthority };
     // The harness.start session stays listed until the fixture daemon
