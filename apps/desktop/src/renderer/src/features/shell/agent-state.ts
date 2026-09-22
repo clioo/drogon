@@ -55,6 +55,26 @@ export function agentStateOf(session: Session): AgentState {
 }
 
 /**
+ * The agent-activity state for card sentences and rows (owner report
+ * 2026-09-21, F1): a daemon predating the producer gate derives `working`
+ * for a harness-less shell from any PTY output within its window (echo,
+ * redraw, a hosted idle TUI repainting with no hooks firing), so old wire
+ * can carry `working` where no turn is proven. That unproven `working`
+ * reads `unknown` here — neither a
+ * Working claim nor a manufactured Idle — while a `harness.start` launch
+ * keeps its `working` (its whole PTY is the agent). An observed harness
+ * keeps its identity (row title, glyph) through `resolveRowHarnessId`;
+ * only its turn reads unknown. New daemons never emit harness-less
+ * `working`, so this is a no-op for them. Every other state passes through
+ * untouched, and the durable `needs_input` wait keeps its meaning.
+ */
+export function sessionAgentState(session: Session): AgentState {
+  const state = sessionDotState(session);
+  if (state === "working" && session.harnessId == null) return "unknown";
+  return state;
+}
+
+/**
  * The single agent-dot derivation for the whole shell (journey J1),
  * ported from the fork's `getAgentDotState` →
  * `agentRowDotState` (`src/renderer/src/components/sidebar/

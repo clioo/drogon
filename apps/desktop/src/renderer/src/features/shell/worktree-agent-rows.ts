@@ -12,8 +12,9 @@
    by pane over zustand tabs, with subagent children, orchestration workers
    and retained done snapshots. This repo's contract has none of that: the
    daemon reports one `agentState` per Session (R16-AE #206 unified the
-   derivation in `sessionDotState`, reused here unchanged), so one Session
-   is exactly one row — a session that never reported still gets its
+   derivation in `sessionDotState`, read here through the shell-aware
+   `sessionAgentState` so old-daemon shell `working` never reaches a row),
+   so one Session is exactly one row — a session that never reported still gets its
    fallback row (unknown dot, harness/shell icon, tab title, freshness
    secondary) instead of collapsing the card to a bare summary count.
    Title resolution reuses the tab strip's own functions so a row reads
@@ -23,7 +24,7 @@ import type {
   HarnessId,
   Session,
 } from "../../../../shared/session-contract";
-import { agentStateLabel, sessionDotState } from "./agent-state";
+import { agentStateLabel, sessionAgentState } from "./agent-state";
 import { defaultTerminalTabTitle } from "./tab-title";
 import {
   partitionPinnedOrder,
@@ -145,7 +146,7 @@ export function resolveRowSecondary(
   now: number,
   primaryTitle = "",
 ): string {
-  const state = sessionDotState(session);
+  const state = sessionAgentState(session);
   if (state === "unknown") return agentNoUpdateLabel(rowEvidenceMs(session), now);
   const preview = resolveRowMessagePreview(session, primaryTitle);
   if (preview) return preview;
@@ -188,7 +189,11 @@ export function resolveRowStateLabel(
 
 export type WorktreeAgentRow = {
   session: Session;
-  /** Dot state via the shared `sessionDotState` derivation. */
+  /**
+   * Dot state via the shared `sessionAgentState` derivation (shell-aware
+   * over `sessionDotState`): a harness-less shell's PTY `working` reads
+   * `unknown`, so the row never claims an unproven turn is agent work.
+   */
   state: AgentState;
   /** Tab title, resolved exactly like the strip (rename wins). */
   title: string;
@@ -267,10 +272,10 @@ export function buildWorktreeAgentRows(
     });
     return {
       session,
-      state: sessionDotState(session),
+      state: sessionAgentState(session),
       title,
       secondary: resolveRowSecondary(session, now, title),
-      stateLabel: resolveRowStateLabel(session, sessionDotState(session), now),
+      stateLabel: resolveRowStateLabel(session, sessionAgentState(session), now),
       relativeTime: evidenceMs > 0 ? formatShortTimeAgo(evidenceMs, now) : "",
       focused: session.id === inputs.activeSessionId,
     };

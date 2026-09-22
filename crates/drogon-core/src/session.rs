@@ -1815,12 +1815,23 @@ fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, O
     } else {
         handle.hook_turn_fact()
     };
-    let state = agent_state::derive(
+    let derived = agent_state::derive(
         verdict == "exited",
         activity,
         needs_input_at.is_some(),
         hook_turn,
     );
+    // F1 sidebar truth (owner report 2026-09-21, coordinator guardrail
+    // "recognition is not turn evidence"): activity-clock `Working` for a
+    // harness-less session is shell output (echo, redraw, a hosted idle TUI
+    // repainting without hooks) — unproven as a turn whether or not the
+    // foreground observation names a harness, so it downgrades to `Unknown`
+    // (session kept, no turn claimed). A `harness.start` launch's whole PTY
+    // is the agent, so its activity clock stays authoritative; hook-backed
+    // turns never reach the gate as unproven (`Active` bypasses it).
+    // Identity observation still runs below in `to_json` — a hosted harness
+    // stays recognized there, only its turn reads unknown.
+    let state = agent_state::gate_shell_activity(derived, hook_turn, handle.harness_id.is_some());
     let at = match state {
         AgentState::Working | AgentState::Idle => state_at,
         AgentState::NeedsInput => needs_input_at,

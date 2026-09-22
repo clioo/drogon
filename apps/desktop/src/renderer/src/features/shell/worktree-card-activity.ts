@@ -4,14 +4,14 @@
    (`workspace-status-ring.tsx`); the activity the ring used to carry lives
    in two honest places instead: this module's one-line sentence under the
    card title, and each row's own state dot + label
-   (`worktree-agent-rows.ts`). Both read `sessionDotState`, the single
-   derivation the tab badge and the card already share, so no surface can
-   disagree about what an agent is doing.
+   (`worktree-agent-rows.ts`). Both read `sessionAgentState` (the
+   shell-aware layer over the shared `sessionDotState` derivation), so no
+   surface can disagree about what an agent is doing.
    The ring's own vocabulary (working / no active agents / no session) is
    therefore expressed as text here, never as a second, competing colour.
    Pure functions, unit-tested. */
 import type { AgentState, Session } from "../../../../shared/session-contract";
-import { sessionDotState } from "./agent-state";
+import { sessionAgentState } from "./agent-state";
 
 /**
  * The card's activity class, in the owner's design order: an agent waiting
@@ -26,9 +26,15 @@ export type WorktreeActivityClass =
   | "not-reporting"
   | "no-session";
 
-/** How many sessions sit in the class the sentence names. */
+/**
+ * How many sessions sit in the class the sentence names. States come from
+ * `sessionAgentState`: a harness-less shell's PTY `working` (old-daemon
+ * wire) reads `unknown` there — unproven as a turn with or without an
+ * observed harness — so shell echo/redraw and idle repaints can never
+ * count as agent work, while a `harness.start` launch still counts.
+ */
 function countInState(sessions: readonly Session[], state: AgentState): number {
-  return sessions.filter((session) => sessionDotState(session) === state).length;
+  return sessions.filter((session) => sessionAgentState(session) === state).length;
 }
 
 export function worktreeActivityClass(
@@ -38,7 +44,7 @@ export function worktreeActivityClass(
   if (countInState(sessions, "needs_input") > 0) return "needs-input";
   if (countInState(sessions, "working") > 0) return "working";
   const notReporting = sessions.filter(
-    (session) => sessionDotState(session) === "unknown",
+    (session) => sessionAgentState(session) === "unknown",
   ).length;
   if (notReporting === sessions.length) return "not-reporting";
   return "no-active-agents";

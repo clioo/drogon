@@ -282,6 +282,33 @@ pub(crate) fn classify_hook_event_for_harness(
 /// of silence"), not derived from any measurement.
 pub(crate) const ACTIVITY_WINDOW: Duration = Duration::from_secs(3);
 
+/// Owner report 2026-09-21 (F1 sidebar truth), coordinator guardrail:
+/// recognition is not turn evidence. PTY redraw bytes and keystroke echo
+/// are not evidence of active inference, and neither is a harness identity
+/// on its own: an observed Pi hosted inside a `session.start` shell can
+/// repaint an idle composer with no hooks firing, so activity-clock
+/// `Working` without an authoritative hook turn is unproven whether or not
+/// a harness was launched or observed. [`derive`] reports that unproven
+/// `Working` for ANY session with fresh output; without a launch harness
+/// (`harness.start` — the session's whole PTY is the agent, so its bytes
+/// are the agent's) it is downgraded to `Unknown` here: the session still
+/// exists (never hidden, never exited), but no turn is claimed. A
+/// hook-reported turn ([`HookTurn::Active`]) is authoritative and keeps
+/// `Working` through silence; `NeedsInput`/`Exited`/`Idle`/`Unknown` pass
+/// through — a durable wait, an exit, quiet, and never-observed mean what
+/// they mean with or without a harness.
+pub(crate) fn gate_shell_activity(
+    state: AgentState,
+    hook_turn: HookTurn,
+    launched_harness: bool,
+) -> AgentState {
+    if state == AgentState::Working && !matches!(hook_turn, HookTurn::Active) && !launched_harness {
+        AgentState::Unknown
+    } else {
+        state
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AgentState {
     Working,
@@ -542,6 +569,67 @@ mod tests {
             derive(true, Activity::NeverObserved, false, HookTurn::Active),
             AgentState::Exited
         );
+    }
+
+    #[test]
+    fn shell_output_without_a_launch_is_unknown_never_working_nor_idle() {
+        // Owner report 2026-09-21 (F1), coordinator guardrail "recognition
+        // is not turn evidence": an idle Pi hosted inside a plain shell
+        // read as Working from PTY echo/redraw bytes — and an observed
+        // harness repaints an idle composer the same way. Untracked
+        // activity is unproven as a turn, so it reads `Unknown`: neither a
+        // Working claim nor a manufactured Idle. Covers untracked shells
+        // and hook-governed sessions whose turn fact was lost.
+        for hook_turn in [HookTurn::Untracked, HookTurn::Inactive] {
+            assert_eq!(
+                gate_shell_activity(AgentState::Working, hook_turn, false),
+                AgentState::Unknown
+            );
+        }
+    }
+
+    #[test]
+    fn launched_harness_sessions_keep_activity_clock_working() {
+        // A `harness.start` launch's whole PTY is the agent, so its bytes
+        // are the agent's: activity-clock Working stays Working there.
+        for hook_turn in [HookTurn::Untracked, HookTurn::Inactive] {
+            assert_eq!(
+                gate_shell_activity(AgentState::Working, hook_turn, true),
+                AgentState::Working
+            );
+        }
+    }
+
+    #[test]
+    fn hook_authoritative_turns_and_other_states_pass_through() {
+        // A hook-reported turn stays Working even with no launch flag (an
+        // Active fact can only exist where hooks were admitted, which
+        // already requires a launch harness); every non-Working state is
+        // untouched with or without a launch.
+        assert_eq!(
+            gate_shell_activity(AgentState::Working, HookTurn::Active, false),
+            AgentState::Working
+        );
+        for state in [
+            AgentState::Idle,
+            AgentState::NeedsInput,
+            AgentState::Exited,
+            AgentState::Unknown,
+        ] {
+            for hook_turn in [
+                HookTurn::Untracked,
+                HookTurn::Inactive,
+                HookTurn::Active,
+                HookTurn::Ended,
+            ] {
+                for launched_harness in [false, true] {
+                    assert_eq!(
+                        gate_shell_activity(state, hook_turn, launched_harness),
+                        state
+                    );
+                }
+            }
+        }
     }
 
     #[test]
