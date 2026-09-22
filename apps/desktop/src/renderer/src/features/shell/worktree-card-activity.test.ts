@@ -106,6 +106,59 @@ describe("worktree card activity", () => {
     );
   });
 
+  test("a silent known agent beside an exited agent is not claimed as inactive", () => {
+    const sessions = [session(undefined), session("exited", "exited")];
+    expect(worktreeActivityClass(sessions)).toBe("not-reporting");
+    expect(worktreeActivitySentence(sessions)).toBe("1 AGENT NOT REPORTING");
+    expect(worktreeActivityGlyph(sessions)).toBeNull();
+  });
+
+  test("a silent known agent beside a hook-proven idle agent stays not reporting", () => {
+    const sessions = [session(undefined), session("idle")];
+    expect(worktreeActivityClass(sessions)).toBe("not-reporting");
+    expect(worktreeActivitySentence(sessions)).toBe("1 AGENT NOT REPORTING");
+    expect(worktreeActivityGlyph(sessions)).toBeNull();
+  });
+
+  test("a silent known agent beside a retained exited terminal counts only the agent", () => {
+    const sessions = [session(undefined), shellSession("exited", "exited")];
+    expect(worktreeActivityClass(sessions)).toBe("not-reporting");
+    expect(worktreeActivitySentence(sessions)).toBe("1 AGENT NOT REPORTING");
+    expect(worktreeActivityGlyph(sessions)).toBeNull();
+  });
+
+  test("a hook-idle agent beside a fresh silent shell stays quiet without inventing agents", () => {
+    const sessions = [session("idle"), shellSession(undefined)];
+    expect(worktreeActivityClass(sessions)).toBe("no-active-agents");
+    expect(worktreeActivitySentence(sessions)).toBe("NO ACTIVE AGENTS");
+    expect(worktreeActivityGlyph(sessions)).toBeNull();
+  });
+
+  test("proven turns still win over a silent known agent", () => {
+    expect(worktreeActivitySentence([session(undefined), session("working")])).toBe(
+      "1 AGENT WORKING",
+    );
+    expect(
+      worktreeActivitySentence([session(undefined), session("needs_input")]),
+    ).toBe("1 AGENT NEEDS INPUT");
+    expect(
+      worktreeActivityClass([session(undefined), session("idle"), session("working")]),
+    ).toBe("working");
+  });
+
+  test("four silent fixture agents beside one proven idle read as four not reporting", () => {
+    const sessions = [
+      session(undefined),
+      session(undefined),
+      session(undefined),
+      session(undefined),
+      session("idle"),
+    ];
+    expect(worktreeActivityClass(sessions)).toBe("not-reporting");
+    expect(worktreeActivitySentence(sessions)).toBe("4 AGENTS NOT REPORTING");
+    expect(worktreeActivityGlyph(sessions)).toBeNull();
+  });
+
   test("an unverifiable working verdict reads as not reporting, not as working", () => {
     const sessions = [session("working", "unverifiable")];
     expect(worktreeActivitySentence(sessions)).toBe("1 AGENT NOT REPORTING");
