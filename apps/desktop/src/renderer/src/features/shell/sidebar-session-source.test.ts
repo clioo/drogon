@@ -8,6 +8,7 @@ import {
   createSidebarSessionCollector,
   pollSidebarSessions,
 } from "./sidebar-session-source";
+import { observationKeyOf } from "./sidebar-session-observation";
 
 function session(id: string, workspaceId: string): Session {
   return {
@@ -159,6 +160,75 @@ describe("one sidebar poll", () => {
     expect(recovered.sessions.map((row) => row.id)).toEqual(["fresh"]);
   });
 
+});
+
+describe("observation freshness provenance (R3)", () => {
+  test("a host-wide success marks every delivered row fresh", () => {
+    const collector = createSidebarSessionCollector();
+    const rows = [session("a", "ws-1"), session("b", "ws-2")];
+    collector.noteHostWide(rows);
+    const view = collector.view();
+    expect(view.degraded).toBe(false);
+    expect(view.freshKeys).toEqual(new Set(rows.map(observationKeyOf)));
+  });
+
+  test("a degraded poll marks only the workspaces it actually read fresh", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([session("target", "ws-1"), session("other", "ws-2")]);
+    const view = await pollSidebarSessions({
+      collector,
+      workspaceIds: ["ws-1", "ws-2"],
+      fetchHostWide: async () => ({ ok: false }),
+      // The target's read fails; the other workspace progresses.
+      fetchScoped: async (id) =>
+        id === "ws-2"
+          ? { ok: true, sessions: [session("other", "ws-2"), session("other-new", "ws-2")] }
+          : { ok: false },
+    });
+    expect(view.degraded).toBe(true);
+    // The retained target row still renders (no blanking) but is NOT fresh.
+    expect(view.sessions.map((row) => row.id).sort()).toEqual([
+      "other",
+      "other-new",
+      "target",
+    ]);
+    expect(view.freshKeys.has(observationKeyOf(session("other-new", "ws-2")))).toBe(true);
+    expect(view.freshKeys.has(observationKeyOf(session("target", "ws-1")))).toBe(false);
+  });
+
+  test("the next degraded poll resets freshness to what it read", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWideFailure();
+    collector.noteScoped("ws-1", [session("one", "ws-1")]);
+    expect(collector.view().freshKeys.has(observationKeyOf(session("one", "ws-1")))).toBe(
+      true,
+    );
+    collector.noteHostWideFailure();
+    collector.noteScoped("ws-2", [session("two", "ws-2")]);
+    const fresh = collector.view().freshKeys;
+    expect(fresh.has(observationKeyOf(session("two", "ws-2")))).toBe(true);
+    expect(fresh.has(observationKeyOf(session("one", "ws-1")))).toBe(false);
+  });
+
+  test("recovering host-wide replaces the fresh set with the full truth", () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWideFailure();
+    collector.noteScoped("ws-1", [session("one", "ws-1")]);
+    collector.noteHostWide([session("fresh", "ws-2")]);
+    expect(collector.view().freshKeys).toEqual(
+      new Set([observationKeyOf(session("fresh", "ws-2"))]),
+    );
+  });
+
+  test("fresh keys are exact host+id+incarnation matches", () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([session("a", "ws-1")]);
+    const staleIncarnation = { ...session("a", "ws-1"), incarnation: "2" };
+    expect(collector.view().freshKeys.has(observationKeyOf(staleIncarnation))).toBe(false);
+  });
+});
+
+describe("one sidebar poll", () => {
   test("one workspace's failure keeps its own last list, not a blank card", async () => {
     const collector = createSidebarSessionCollector();
     let wsTwoFails = false;

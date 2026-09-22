@@ -14,6 +14,16 @@ import {
 } from "./App";
 import type { BotsLoadResult } from "./bots-loader";
 import type { Session } from "../../shared/session-contract";
+import {
+  createSidebarSessionCollector,
+  pollSidebarSessions,
+  type SidebarSessionCollector,
+} from "./features/shell/sidebar-session-source";
+import {
+  createObservationLedger,
+  isStalePollSettlement,
+  observationKeyOf,
+} from "./features/shell/sidebar-session-observation";
 
 const session = (id: string, overrides: Partial<Session> = {}): Session => ({
   id,
@@ -699,5 +709,245 @@ describe("PERF-03b session poll fast tick", () => {
     ];
     const merged = adoptOutOfBandSessions(tabStrip, hostWide, "w1", () => false);
     expect(merged.map((item) => item.id)).toEqual(["s1", "cli-created"]);
+  });
+});
+
+describe("R3 observation freshness (retained rows are not new facts)", () => {
+  // Every composition below runs the REAL collector (retained rows on
+  // failure, rotating scoped reads) into the REAL adopt: the stale-fact
+  // path the reviewer found, not a mock of it. Provenance (which rows a
+  // poll actually read, and that poll's request order) rides alongside.
+  const never = () => false;
+  const target = (overrides: Partial<Session> = {}) =>
+    session("s1", { workspaceId: "w1", ...overrides });
+  const other = (id: string, overrides: Partial<Session> = {}) =>
+    session(id, { workspaceId: "w2", ...overrides });
+  const freshPi = {
+    observedHarnessId: "pi" as const,
+    observedHarnessAt: "2026-01-01T00:02:00Z",
+    hasForegroundChild: true,
+  };
+
+  // A degraded poll whose target workspace failed while another progressed.
+  // Returns the view the shell would commit (retained target + fresh other).
+  async function degradedViewWithStuckTarget(): Promise<
+    ReturnType<SidebarSessionCollector["view"]>
+  > {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([target(), other("o1")]);
+    await pollSidebarSessions({
+      collector,
+      workspaceIds: ["w1", "w2"],
+      fetchHostWide: async () => ({ ok: false }),
+      fetchScoped: async (workspaceId) =>
+        workspaceId === "w2"
+          ? { ok: true, sessions: [other("o1"), other("o2")] }
+          : { ok: false },
+    });
+    return collector.view();
+  }
+
+  test("a retained target row cannot erase a fresher selected Pi while another workspace progresses", async () => {
+    const view = await degradedViewWithStuckTarget();
+    expect(view.degraded).toBe(true);
+    // The selected list moved on via its own fresh read (newer Pi stamp).
+    const selected = [target(freshPi)];
+    const ledger = createObservationLedger();
+    const result = adoptOutOfBandSessions(selected, view.sessions, "w1", never, {
+      freshKeys: view.freshKeys,
+      seq: 7,
+      ledger,
+    });
+    expect(result).toBe(selected);
+    expect(result[0].observedHarnessId).toBe("pi");
+    expect(result[0].observedHarnessAt).toBe("2026-01-01T00:02:00Z");
+    expect(result[0].hasForegroundChild).toBe(true);
+  });
+
+  test("a retained old Pi cannot revive a fresh explicit clear", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([target(freshPi), other("o1")]);
+    await pollSidebarSessions({
+      collector,
+      workspaceIds: ["w1", "w2"],
+      fetchHostWide: async () => ({ ok: false }),
+      fetchScoped: async (workspaceId) =>
+        workspaceId === "w2"
+          ? { ok: true, sessions: [other("o1"), other("o2")] }
+          : { ok: false },
+    });
+    const view = collector.view();
+    // The daemon positively cleared the observation on the selected read.
+    const selected = [target({ hasForegroundChild: false })];
+    const ledger = createObservationLedger();
+    const result = adoptOutOfBandSessions(selected, view.sessions, "w1", never, {
+      freshKeys: view.freshKeys,
+      seq: 7,
+      ledger,
+    });
+    expect(result).toBe(selected);
+    expect(result[0].observedHarnessId ?? null).toBeNull();
+    expect(result[0].observedHarnessAt ?? null).toBeNull();
+  });
+
+  test("a retained idle flag cannot downgrade a fresh foreground true", async () => {
+    const view = await degradedViewWithStuckTarget();
+    const selected = [target({ hasForegroundChild: true })];
+    const ledger = createObservationLedger();
+    const result = adoptOutOfBandSessions(selected, view.sessions, "w1", never, {
+      freshKeys: view.freshKeys,
+      seq: 7,
+      ledger,
+    });
+    expect(result).toBe(selected);
+    expect(result[0].hasForegroundChild).toBe(true);
+  });
+
+  test("an older poll arriving after a newer one cannot roll the selection back", () => {
+    const ledger = createObservationLedger();
+    const idle = [target({ hasForegroundChild: false })];
+    const newerKeys = new Set([observationKeyOf(target(freshPi))]);
+    const gained = adoptOutOfBandSessions(idle, [target(freshPi)], "w1", never, {
+      freshKeys: newerKeys,
+      seq: 6,
+      ledger,
+    });
+    expect(gained[0].observedHarnessId).toBe("pi");
+    // The older response settles late with a stale positive AND a stale
+    // null; neither may move the selection that already saw seq 6.
+    const olderKeys = new Set([observationKeyOf(target())]);
+    const rolled = adoptOutOfBandSessions(gained, [target()], "w1", never, {
+      freshKeys: olderKeys,
+      seq: 5,
+      ledger,
+    });
+    expect(rolled).toBe(gained);
+    expect(rolled[0].observedHarnessId).toBe("pi");
+    const olderPositive = adoptOutOfBandSessions(
+      gained,
+      [
+        target({
+          observedHarnessId: "codex",
+          observedHarnessAt: "2026-01-01T00:01:00Z",
+        }),
+      ],
+      "w1",
+      never,
+      { freshKeys: olderKeys, seq: 5, ledger },
+    );
+    expect(olderPositive).toBe(gained);
+    // A genuinely newer poll still moves the selection afterwards.
+    const moved = adoptOutOfBandSessions(
+      gained,
+      [target({ hasForegroundChild: false })],
+      "w1",
+      never,
+      { freshKeys: newerKeys, seq: 8, ledger },
+    );
+    expect(moved).not.toBe(gained);
+    expect(moved[0].observedHarnessId ?? null).toBeNull();
+    expect(moved[0].hasForegroundChild).toBe(false);
+  });
+
+  test("fresh gains, changes, clears and foreground flips still apply under provenance", () => {
+    const ledger = createObservationLedger();
+    const keys = new Set([observationKeyOf(target())]);
+    const at = (n: string) => `2026-01-01T00:0${n}:00Z`;
+    // Gain.
+    const gained = adoptOutOfBandSessions([target()], [target(freshPi)], "w1", never, {
+      freshKeys: keys,
+      seq: 1,
+      ledger,
+    });
+    expect(gained[0].observedHarnessId).toBe("pi");
+    // Change.
+    const changed = adoptOutOfBandSessions(
+      gained,
+      [target({ observedHarnessId: "codex", observedHarnessAt: at("3") })],
+      "w1",
+      never,
+      { freshKeys: keys, seq: 2, ledger },
+    );
+    expect(changed[0].observedHarnessId).toBe("codex");
+    // Clear (null carries no timestamp; the poll order is the proof).
+    const cleared = adoptOutOfBandSessions(changed, [target()], "w1", never, {
+      freshKeys: keys,
+      seq: 3,
+      ledger,
+    });
+    expect(cleared[0].observedHarnessId ?? null).toBeNull();
+    // Foreground enter and leave (no timestamp at all).
+    const entered = adoptOutOfBandSessions(
+      cleared,
+      [target({ hasForegroundChild: true })],
+      "w1",
+      never,
+      { freshKeys: keys, seq: 4, ledger },
+    );
+    expect(entered[0].hasForegroundChild).toBe(true);
+    const left = adoptOutOfBandSessions(
+      entered,
+      [target({ hasForegroundChild: false })],
+      "w1",
+      never,
+      { freshKeys: keys, seq: 5, ledger },
+    );
+    expect(left[0].hasForegroundChild).toBe(false);
+  });
+
+  test("stale, wrong-host and wrong-incarnation rows never apply under provenance", () => {
+    const ledger = createObservationLedger();
+    const selected = [target(freshPi)];
+    const keys = new Set([observationKeyOf(target())]);
+    // Not actually read by this poll (retained): skipped even with a seq.
+    expect(
+      adoptOutOfBandSessions(selected, [target()], "w1", never, {
+        freshKeys: new Set(),
+        seq: 9,
+        ledger,
+      }),
+    ).toBe(selected);
+    // A coincident id from another host is adopted alongside, never merged.
+    const otherHost = adoptOutOfBandSessions(
+      selected,
+      [target({ hostId: "h2", ...freshPi })],
+      "w1",
+      never,
+      {
+        freshKeys: new Set([observationKeyOf(target({ hostId: "h2" }))]),
+        seq: 9,
+        ledger,
+      },
+    );
+    expect(otherHost).toHaveLength(2);
+    expect(otherHost[0].observedHarnessId).toBe("pi");
+    // A same-id/different-incarnation row is neither adopted over nor merged.
+    expect(
+      adoptOutOfBandSessions(selected, [target({ incarnation: "inc-old" })], "w1", never, {
+        freshKeys: keys,
+        seq: 9,
+        ledger,
+      }),
+    ).toBe(selected);
+  });
+
+  test("a retained unknown id is not adopted as news, and no-op keeps the array", async () => {
+    const view = await degradedViewWithStuckTarget();
+    const ledger = createObservationLedger();
+    // o2 is fresh (just read) but belongs to w2: never adopted into w1.
+    // The retained w1 target row carries no observation news either.
+    const selected = [target()];
+    const result = adoptOutOfBandSessions(selected, view.sessions, "w1", never, {
+      freshKeys: view.freshKeys,
+      seq: 7,
+      ledger,
+    });
+    expect(result).toBe(selected);
+  });
+
+  test("out-of-order settlement is stale past the last settled poll", () => {
+    expect(isStalePollSettlement(5, 6)).toBe(true);
+    expect(isStalePollSettlement(6, 6)).toBe(false);
+    expect(isStalePollSettlement(7, 6)).toBe(false);
   });
 });

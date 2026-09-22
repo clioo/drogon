@@ -280,6 +280,14 @@ import {
   pollSidebarSessions,
 } from "./features/shell/sidebar-session-source";
 import {
+  createObservationLedger,
+  isStalePollSettlement,
+  observationKeyOf,
+  readObservationSnapshot,
+  sameObservation,
+  type ObservationLedger,
+} from "./features/shell/sidebar-session-observation";
+import {
   planBrowserRehydrate,
   windowBrowserBridge,
 } from "./features/browser/browser-bridge";
@@ -572,18 +580,43 @@ export function sameBotsLoadResult(
   }
 }
 
+/**
+ * R3 provenance for `adoptOutOfBandSessions`: which rows the poll that
+ * produced `hostWide` actually read, and that poll's request order. Absent
+ * entirely, every exact-match row counts as fresh (the R2 contract the
+ * older tests pin). Present, only rows the poll really delivered may move
+ * the selected copy — retained collector rows still render unselected
+ * last-known cards but are NOT new facts — and only past the ledger's
+ * per-session proof, so an older poll settling after a newer one cannot
+ * roll the selection back. A null clear and a foreground flip carry no
+ * usable timestamp of their own; the poll order IS their ordering proof.
+ */
+export type ObservationProvenance = {
+  freshKeys?: ReadonlySet<string>;
+  seq?: number;
+  ledger?: ObservationLedger;
+};
+
 export function adoptOutOfBandSessions(
   current: Session[],
   hostWide: readonly Session[],
   workspaceId: string,
   isHidden: (session: Session) => boolean,
+  provenance?: ObservationProvenance,
 ): Session[] {
   const known = new Set(current.map((item) => `${item.hostId}:${item.id}`));
+  const freshKeys = provenance?.freshKeys;
+  const seq = provenance?.seq;
+  const ledger = provenance?.ledger;
+  // R3: a retained row is last-known rendering, never news — an id the
+  // selected list never saw cannot join it from a row no successful read
+  // delivered.
   const adopted = hostWide.filter(
     (item) =>
       item.workspaceId === workspaceId &&
       !known.has(`${item.hostId}:${item.id}`) &&
-      !isHidden(item),
+      !isHidden(item) &&
+      (freshKeys === undefined || freshKeys.has(observationKeyOf(item))),
   );
   // R2 selected-copy reconciliation: an already-listed row keeps the
   // selected list's push state, names and sizing — but its observed
@@ -597,36 +630,49 @@ export function adoptOutOfBandSessions(
   // and ONLY these three fields are ever touched: the poll snapshot is
   // continuous but can lag a selection refetch, so it must never
   // overwrite push state, sizing, or anything else.
+  // R3: "the fresh row" must be an ACTUAL successful observation. Under
+  // provenance a retained row for the target (kept across failures while
+  // another workspace progressed) or an older poll settling late must not
+  // erase a newer Pi, revive a cleared observation, or downgrade a fresh
+  // foreground true.
   const freshByKey = new Map<string, Session>();
   for (const item of hostWide)
     freshByKey.set(`${item.hostId}:${item.id}`, item);
   let result = current;
-  if (adopted.length > 0)
+  if (adopted.length > 0) {
     result = [
       ...current,
       ...[...adopted].sort((left, right) =>
         left.createdAt.localeCompare(right.createdAt),
       ),
     ];
+    // An adopted row arrives with the poll's own fresh observation: record
+    // its proof so a later stale poll cannot move what it just wrote.
+    if (seq !== undefined && ledger !== undefined)
+      for (const item of adopted) ledger.markApplied(observationKeyOf(item), seq);
+  }
   for (let index = 0; index < current.length; index += 1) {
     const item = result[index]!;
     const fresh = freshByKey.get(`${item.hostId}:${item.id}`);
     if (!fresh || fresh.incarnation !== item.incarnation) continue;
-    const observedHarnessId = fresh.observedHarnessId ?? null;
-    const observedHarnessAt = fresh.observedHarnessAt ?? null;
-    const hasForegroundChild = fresh.hasForegroundChild ?? false;
     if (
-      (item.observedHarnessId ?? null) === observedHarnessId &&
-      (item.observedHarnessAt ?? null) === observedHarnessAt &&
-      (item.hasForegroundChild ?? false) === hasForegroundChild
+      freshKeys !== undefined &&
+      (seq === undefined || ledger === undefined
+        ? !freshKeys.has(observationKeyOf(fresh))
+        : !freshKeys.has(observationKeyOf(fresh)) ||
+          !ledger.shouldApply(observationKeyOf(fresh), seq))
     )
       continue;
+    const snapshot = readObservationSnapshot(fresh);
+    if (sameObservation(readObservationSnapshot(item), snapshot)) continue;
     if (result === current) result = current.slice();
+    if (seq !== undefined && ledger !== undefined)
+      ledger.markApplied(observationKeyOf(fresh), seq);
     result[index] = {
       ...item,
-      observedHarnessId,
-      observedHarnessAt,
-      hasForegroundChild,
+      observedHarnessId: snapshot.observedHarnessId,
+      observedHarnessAt: snapshot.observedHarnessAt,
+      hasForegroundChild: snapshot.hasForegroundChild,
     };
   }
   return result;
@@ -1707,6 +1753,11 @@ export function App() {
   // full host-wide session list (`window.drogon.sessions()` with no
   // `workspaceId`) on its own cadence, independent of `selected`.
   const [allBotSessions, setAllBotSessions] = useState<Session[]>([]);
+  // R3: synchronous mirror of the last COMMITTED host-wide list, so the
+  // poll can pair the adopt proof with the exact array it describes
+  // (a `useState` updater runs at render time, too late to pair).
+  const allBotSessionsRef = useRef<Session[]>([]);
+  allBotSessionsRef.current = allBotSessions;
   // PERF-03: the focused Bot session's live pid + Started clock live in
   // BotSessionInspectorLive's own subtree now (see above), not here — App
   // keeps only the identity (`botSessions` map) it records synchronously.
@@ -2445,6 +2496,22 @@ export function App() {
     tasksProjectBridge,
     projectReloadTick,
   ]);
+  // R3 observation freshness: poll request order is the only proof that can
+  // order a null clear or a foreground flip (neither carries a usable
+  // timestamp). The clock numbers every host-wide poll start; the ledger
+  // remembers per exact session which number last wrote the selected copy;
+  // the provenance ref holds the fresh set of the last COMMITTED view for
+  // the adopt effect below. Refs, not state, like the collector: none of
+  // this may restart the effects below, and a workspace switch never
+  // resets them.
+  const sidebarPollClock = useRef(0);
+  const sidebarSettledSeq = useRef(0);
+  const sidebarPollInFlight = useRef(false);
+  const observationLedger = useRef<ObservationLedger>(createObservationLedger());
+  const sidebarObservationProvenance = useRef<{
+    seq: number;
+    freshKeys: ReadonlySet<string>;
+  }>({ seq: 0, freshKeys: new Set() });
   useEffect(() => {
     // A session this shell did not start — `drogon-cli terminal create`, a
     // Bot's own session, another window — reaches the selected workspace's
@@ -2453,9 +2520,23 @@ export function App() {
     // steal the tab the owner is looking at.
     if (!selected) return;
     const dismissed = loadDismissedSessions();
+    // R3: the poll's own proof rides along — retained rows (kept so
+    // unselected cards never blank) must not move the selected copy, and
+    // an older poll settling late must not roll back a newer one. The ref
+    // was stored synchronously with the commit that produced this
+    // `allBotSessions` value, so the pairing holds.
+    const provenance = sidebarObservationProvenance.current;
     setSessions((items) =>
-      adoptOutOfBandSessions(items, allBotSessions, selected, (item) =>
-        isSessionDismissed(dismissed, item.hostId, item),
+      adoptOutOfBandSessions(
+        items,
+        allBotSessions,
+        selected,
+        (item) => isSessionDismissed(dismissed, item.hostId, item),
+        {
+          freshKeys: provenance.freshKeys,
+          seq: provenance.seq,
+          ledger: observationLedger.current,
+        },
       ),
     );
   }, [allBotSessions, selected]);
@@ -2497,6 +2578,13 @@ export function App() {
         const visible = response.result.sessions.filter(
           (item) => !isSessionDismissed(dismissed, item.hostId, item),
         );
+        // R3: this scoped read is a successful observation of the selected
+        // workspace's rows — record its proof at the current poll clock so
+        // a retained row (or an older poll settling late) cannot roll the
+        // snapshot it delivers back. A newer poll still proves past it.
+        const snapshotSeq = sidebarPollClock.current;
+        for (const item of visible)
+          observationLedger.current.markApplied(observationKeyOf(item), snapshotSeq);
         setSessions(visible);
         setActive((value) =>
           visible.some((item) => item.id === value)
@@ -2544,7 +2632,10 @@ export function App() {
     if (statusHostId === null) {
       // Identity-stable clear: an already-empty list keeps its array so
       // disconnected re-runs never re-render the shell.
-      setAllBotSessions((previous) => (previous.length === 0 ? previous : []));
+      if (allBotSessionsRef.current.length !== 0) {
+        allBotSessionsRef.current = [];
+        setAllBotSessions([]);
+      }
       return;
     }
     let cancelled = false;
@@ -2557,30 +2648,56 @@ export function App() {
     // sidebar actually shows in rotating batches, so the cards keep their
     // agents either way. Unchanged replies still commit nothing.
     const poll = async () => {
-      lastPollMs = Date.now();
-      const view = await pollSidebarSessions({
-        collector: sidebarSessionsSource.current,
-        workspaceIds: sidebarWorkspaceIds.current,
-        fetchHostWide: async () => {
-          const result = await window.drogon.sessions();
-          return result.ok
-            ? { ok: true, sessions: result.result.sessions }
-            : { ok: false };
-        },
-        fetchScoped: async (workspaceId) => {
-          const result = await window.drogon.sessions(workspaceId);
-          return result.ok
-            ? { ok: true, sessions: result.result.sessions }
-            : { ok: false };
-        },
-      });
-      if (cancelled) return;
-      // PERF-03: keep the previous array when the content is unchanged, so
-      // the 3s tick commits nothing while idle. Merge semantics untouched:
-      // any field-level difference still replaces the list.
-      setAllBotSessions((previous) =>
-        sameSessions(previous, view.sessions) ? previous : view.sessions,
-      );
+      // R3 singleflight: overlapping polls share one collector and settle
+      // out of order, letting an older response replace a newer commit. One
+      // poll at a time keeps request order == read order; a skipped tick
+      // retries 3s later, so nothing is lost.
+      if (sidebarPollInFlight.current) return;
+      sidebarPollInFlight.current = true;
+      // R3: the request number is this poll's ordering proof (a null clear
+      // and a foreground flip carry no timestamp of their own).
+      const requestSeq = (sidebarPollClock.current += 1);
+      try {
+        lastPollMs = Date.now();
+        const view = await pollSidebarSessions({
+          collector: sidebarSessionsSource.current,
+          workspaceIds: sidebarWorkspaceIds.current,
+          fetchHostWide: async () => {
+            const result = await window.drogon.sessions();
+            return result.ok
+              ? { ok: true, sessions: result.result.sessions }
+              : { ok: false };
+          },
+          fetchScoped: async (workspaceId) => {
+            const result = await window.drogon.sessions(workspaceId);
+            return result.ok
+              ? { ok: true, sessions: result.result.sessions }
+              : { ok: false };
+          },
+        });
+        if (cancelled) return;
+        // R3: an older request settling after a newer one (reconnect race,
+        // a hung batch) must not replace the rendering OR the adopt proof.
+        if (isStalePollSettlement(requestSeq, sidebarSettledSeq.current)) return;
+        sidebarSettledSeq.current = requestSeq;
+        // PERF-03: keep the previous array when the content is unchanged, so
+        // the 3s tick commits nothing while idle. Merge semantics untouched:
+        // any field-level difference still replaces the list. The adopt
+        // proof is stored only with a commit, compared against the mirror
+        // synchronously so it pairs with the exact array it describes; an
+        // unchanged success carries no new facts, so there is no newer
+        // proof to lose.
+        if (!sameSessions(allBotSessionsRef.current, view.sessions)) {
+          allBotSessionsRef.current = view.sessions;
+          sidebarObservationProvenance.current = {
+            seq: requestSeq,
+            freshKeys: view.freshKeys,
+          };
+          setAllBotSessions(view.sessions);
+        }
+      } finally {
+        sidebarPollInFlight.current = false;
+      }
     };
     const tick = () => {
       // PERF-03b: no consumer gate here — the tab-strip adopt effect below
@@ -2596,6 +2713,10 @@ export function App() {
     const timer = window.setInterval(tick, 3000);
     return () => {
       cancelled = true;
+      // A hung in-flight poll must not wedge the next connection epoch's
+      // first tick behind singleflight; its late settlement is still
+      // dropped by `cancelled` (and by request order above).
+      sidebarPollInFlight.current = false;
       window.clearInterval(timer);
     };
     // PERF-04: connectivity primitives + reconnect epoch, never `status`.

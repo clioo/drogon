@@ -16,6 +16,7 @@
    The daemon-side bound belongs to the protocol (a separate change); this is
    the shell's own honest degradation. Pure state machine, unit-tested. */
 import type { Session } from "../../../../shared/session-contract";
+import { observationKeyOf } from "./sidebar-session-observation";
 
 /** Workspaces one degraded tick may read: enough to cover a normal sidebar
  *  in a few ticks without turning a 3 s poll into a fan-out. */
@@ -33,6 +34,15 @@ export type SidebarSessionSourceView = {
    * keeps the cards populated. Callers may surface it; nothing here hides it.
    */
   degraded: boolean;
+  /**
+   * R3: exact host+id+incarnation keys the latest poll phase ACTUALLY read
+   * successfully. A host-wide success marks the whole truth; a degraded
+   * poll marks only the workspaces its scoped reads delivered. Retained
+   * rows (kept so cards never blank) are present in `sessions` but absent
+   * here: they are last-known rendering, never new facts, so the selected
+   * copy's observation metadata must not adopt them.
+   */
+  freshKeys: ReadonlySet<string>;
 };
 
 export type SidebarSessionCollector = {
@@ -101,6 +111,11 @@ export function createSidebarSessionCollector(): SidebarSessionCollector {
   // Insertion order is the rotation: the oldest-read workspace is the next
   // one to refresh, so a degraded sidebar still converges on fresh rows.
   let cursor = 0;
+  // R3: keys actually delivered by the latest poll phase (see `freshKeys`
+  // above). Reset when a new degraded phase begins; each successful scoped
+  // delivery adds its own workspace's keys, so a batch accumulates exactly
+  // what it read and nothing it retained.
+  let fresh = new Set<string>();
 
   const merged = (): Session[] => {
     const byId = new Map<string, Session>();
@@ -116,11 +131,14 @@ export function createSidebarSessionCollector(): SidebarSessionCollector {
       hostWide = [...sessions];
       byWorkspaceId.clear();
       cursor = 0;
+      fresh = new Set(sessions.map(observationKeyOf));
     },
     noteHostWideFailure() {
       healthy = false;
       // Keep `hostWide` as the last known full list: a transient failure must
-      // not blank the sidebar (the shell's own poll contract).
+      // not blank the sidebar (the shell's own poll contract). The fresh set
+      // restarts: only the scoped reads of THIS poll phase prove anything.
+      fresh = new Set();
     },
     planScopedReads(workspaceIds, batchSize = SIDEBAR_SCOPED_READ_BATCH) {
       const wanted = [...new Set(workspaceIds)].slice(
@@ -143,14 +161,18 @@ export function createSidebarSessionCollector(): SidebarSessionCollector {
     noteScoped(workspaceId, sessions) {
       byWorkspaceId.delete(workspaceId);
       byWorkspaceId.set(workspaceId, [...sessions]);
+      for (const session of sessions) fresh.add(observationKeyOf(session));
     },
     view() {
-      if (healthy) return { sessions: hostWide, degraded: false };
+      // A copy per view: callers hold the set across async adopt commits,
+      // and later polls must never mutate a committed proof.
+      if (healthy) return { sessions: hostWide, degraded: false, freshKeys: new Set(fresh) };
       const scoped = merged();
       // Nothing scoped has landed yet: the last full list still beats blank.
       return {
         sessions: scoped.length > 0 ? [...scoped, ...hostWide.filter((s) => !scoped.some((row) => row.id === s.id))] : hostWide,
         degraded: true,
+        freshKeys: new Set(fresh),
       };
     },
     isDegraded() {
