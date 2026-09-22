@@ -872,6 +872,89 @@ describe("full-width tree line (R1 density)", () => {
       container.querySelector('[data-worktree-agent-row="a"]'),
     ).not.toBeNull();
   });
+});
+
+describe("nested tree gutter (R1 finisher)", () => {
+  // Structural half of the nesting proof: jsdom cannot measure pixels, so
+  // these tests pin the wrapper shape the gutter CSS keys off (depth
+  // attributes in chain order, disclosure on parents, reserved gutter on
+  // lone roots) while the rendered half — real bounding boxes, connector
+  // extents inside the card, ~12px depth steps — is asserted over CDP in
+  // scripts/accept-sidebar-agent-tree.mjs.
+  function nestingCard() {
+    return renderCard({
+      sessions: [
+        session({ id: "root", harnessId: "pi", agentState: "working" }),
+        session({
+          id: "child",
+          parentSessionId: "root",
+          harnessId: "codex",
+          agentState: "idle",
+        }),
+        session({
+          id: "grandchild",
+          parentSessionId: "child",
+          harnessId: null,
+          observedHarnessId: "claude",
+          agentState: undefined,
+          agentStateAt: "2026-09-08T11:00:00.000Z",
+        }),
+        session({ id: "lone", harnessId: "pi", agentState: "idle" }),
+      ],
+    });
+  }
+
+  test("the chain nests depth 0, 1 and 2 in order inside the card", () => {
+    const { container } = nestingCard();
+    const card = container.querySelector(".shell-worktree-card") as HTMLElement;
+    const rows = container.querySelector(".shell-worktree-card-rows") as HTMLElement;
+    expect(rows.parentElement).toBe(card);
+    const depths = [...rows.querySelectorAll("[data-lineage-depth]")].map((node) =>
+      node.getAttribute("data-lineage-depth"),
+    );
+    // Depth wrappers in document order: both roots, then down the chain.
+    expect(depths).toEqual(["0", "0", "1", "2"]);
+    const levels = [...rows.querySelectorAll('[role="treeitem"]')].map((node) =>
+      node.getAttribute("aria-level"),
+    );
+    expect(levels).toEqual(["1", "1", "2", "3"]);
+    // Each wrapper owns exactly its row; connectors key off the wrapper.
+    for (const depth of ["0", "1", "2"]) {
+      const wrapper = rows.querySelector(
+        `[data-lineage-depth="${depth}"]`,
+      ) as HTMLElement;
+      expect(wrapper.querySelector("[data-worktree-agent-row]")).not.toBeNull();
+    }
+  });
+
+  test("parents disclose, lone roots reserve the gutter, children nest", () => {
+    const { container } = nestingCard();
+    const disclosureOf = (id: string) =>
+      container.querySelector(
+        `[data-worktree-agent-row="${id}"]`,
+      ) as HTMLElement;
+    expect(
+      disclosureOf("root").querySelector(".compact-agent-child-disclosure-button"),
+    ).not.toBeNull();
+    expect(
+      disclosureOf("child").querySelector(".compact-agent-child-disclosure-button"),
+    ).not.toBeNull();
+    // A lone root beside a parent keeps the leaf alignment slot without a
+    // disclosure of its own.
+    const lone = disclosureOf("lone");
+    expect(lone.querySelector(".compact-agent-child-disclosure-button")).toBeNull();
+    const gutter = lone.querySelector('span.size-4[aria-hidden="true"]');
+    expect(gutter).not.toBeNull();
+    // Depth rows carry the child chrome the connector group indents.
+    for (const id of ["child", "grandchild"]) {
+      expect(
+        disclosureOf(id).className,
+      ).toContain("worktree-agent-lineage-child-row");
+    }
+    expect(
+      container.querySelector(".worktree-agent-lineage-children"),
+    ).not.toBeNull();
+  });
 
   test("a selected card marks itself for the tinted treatment", () => {
     const { container } = renderCard({

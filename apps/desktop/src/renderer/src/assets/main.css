@@ -1781,10 +1781,15 @@ footer[data-testid="status-bar"] {
   flex-direction: column;
   gap: 2px;
 }
-/* The fork's compact agent list outdents into the card gutter. */
+/* R1 finisher: the tree is a full-width flex line of its own now, so the
+   fork's outdent into the card gutter is wrong here — it dragged the root
+   connectors off the card's left edge (measured at 280px: root indent 9px,
+   connector line at ~0px, clipped at the viewport edge). The list keeps the
+   card's own width; the nesting gutter lives on .shell-worktree-card-rows
+   below, where every connector stays inside the card. */
 [data-compact-agent-list="true"] {
-  margin-inline-start: -0.5rem;
-  width: calc(100% + 0.5rem);
+  margin-inline-start: 0;
+  width: 100%;
 }
 .worktree-agent-row-hover:hover:not(:disabled) {
   background: color-mix(in srgb, var(--foreground) 4%, transparent);
@@ -1961,7 +1966,9 @@ footer[data-testid="status-bar"] {
 
 .worktree-agent-lineage-children {
   /* One level of indent per depth: wide enough to read the elbow, tight
-     enough that a depth-3 row's name still has room beside its state. */
+     enough that a depth-3 row's name still has room beside its state. The
+     0.5rem + 0.25rem step is 12px per depth, pinned by the sidebar-tree
+     acceptance's nesting asserts — keep both halves in step. */
   margin-left: 0.5rem;
   padding-left: 0.25rem;
   display: flex;
@@ -2535,6 +2542,14 @@ footer[data-testid="status-bar"] {
   order: 6;
   flex: 1 1 100%;
   min-width: 0;
+  /* R1 finisher: the genuine tree gutter. Measured at 280px the R1 root
+     sat 9px inside the card while the guide nests the root clearly right
+     of the card fold with its connectors wholly inside. The card carries
+     16px of left padding, so 0.75rem (12px) of tree gutter lands the root
+     ~28px in — roughly +19px of real nesting — while the right side stays
+     flush on the full-width line. The root connector offset (-0.55rem)
+     then draws at ~19px, inside the card in both themes. */
+  padding-inline-start: 0.75rem;
 }
 .shell-worktree-card-select {
   display: flex;

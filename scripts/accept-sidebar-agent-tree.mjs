@@ -682,13 +682,45 @@ export async function runSidebarAgentTreeAcceptance() {
         const card = document.querySelector(`[data-worktree-card-id="${id}"]`);
         const sidebar = document.querySelector(".workspace-sidebar");
         const cardRect = card.getBoundingClientRect();
+        const fold = card.querySelector(".shell-worktree-card-fold");
+        const foldRect = fold ? fold.getBoundingClientRect() : null;
+        const title = card.querySelector(".shell-worktree-card-name");
+        const titleRect = title ? title.getBoundingClientRect() : null;
+        // R1 finisher: connector geometry per tree node. Each node draws
+        // its own vertical guide (::before) and elbow (::after) positioned
+        // relative to itself, so the absolute line extents are the node
+        // edge plus the pseudo offset — measured here, asserted inside the
+        // card below.
+        const treeConnectors = [...card.querySelectorAll("[data-lineage-depth]")].map((node) => {
+          const nodeRect = node.getBoundingClientRect();
+          const extentOf = (pseudo, rect) => {
+            if (!pseudo || pseudo.content === "none") return null;
+            const left = Number.parseFloat(pseudo.left);
+            const width = Number.parseFloat(pseudo.width);
+            if (!Number.isFinite(left) || !Number.isFinite(width)) return null;
+            return {
+              left: Math.round(rect.left + left),
+              right: Math.round(rect.left + left + width),
+            };
+          };
+          return {
+            depth: Number(node.getAttribute("data-lineage-depth")),
+            vertical: extentOf(getComputedStyle(node, "::before"), nodeRect),
+            elbow: extentOf(getComputedStyle(node, "::after"), nodeRect),
+          };
+        });
         return {
           sidebarWidth: sidebar ? Math.round(sidebar.getBoundingClientRect().width) : null,
           cardRect: { left: cardRect.left, right: cardRect.right },
+          cardFoldLeft: foldRect ? Math.round(foldRect.left) : null,
+          cardTitleLeft: titleRect ? Math.round(titleRect.left) : null,
+          treeConnectors,
           rows: [...card.querySelectorAll("[data-worktree-agent-row]")].map((row) => {
             const rowRect = row.getBoundingClientRect();
             const primary = row.querySelector("[data-worktree-agent-primary]");
             const primaryRect = primary.getBoundingClientRect();
+            const firstChild = row.firstElementChild;
+            const firstRect = firstChild ? firstChild.getBoundingClientRect() : null;
             const badge = row.querySelector(".shell-worktree-agent-main-badge");
             const badgeRect = badge ? badge.getBoundingClientRect() : null;
             const state = row.querySelector("[data-worktree-agent-state]");
@@ -712,6 +744,11 @@ export async function runSidebarAgentTreeAcceptance() {
               rowLeft: Math.round(rowRect.left),
               rowRight: Math.round(rowRect.right),
               rowH: Math.round(rowRect.height),
+              // R1 finisher: the row's leading slot (disclosure chevron on
+              // parents, reserved gutter on lone roots) and the provider
+              // text edge — nested relative to the card fold and title.
+              disclosureLeft: firstRect ? Math.round(firstRect.left) : null,
+              primaryLeft: Math.round(primaryRect.left),
               primaryRight: Math.round(primaryRect.right),
               tailRight: tailRect ? Math.round(tailRect.right) : null,
               wrapped: stateRect ? Math.round(stateRect.top) > Math.round(primaryRect.bottom) + 2 : null,
@@ -795,6 +832,64 @@ export async function runSidebarAgentTreeAcceptance() {
       }
     }
     report.density280 = "pass";
+
+    // R1 finisher: the tree nests genuinely instead of outdenting. The root
+    // holds a real gutter inside the card (the R1 overcorrection sat 9px
+    // in with its connectors clipped at the card edge; the old squeezed
+    // column started ~55px in), the root disclosure sits right of the card
+    // fold, the root provider text starts right of the workspace title,
+    // every connector — including pseudo-element geometry — draws inside
+    // the card, and depth steps read ~12px. Recorded outside CHECK_NAMES
+    // (which the companion test pins).
+    const cardLeft280 = Math.round(widthBudget.cardRect.left);
+    const cardRight280 = Math.round(widthBudget.cardRect.right);
+    const rootNest280 = widthBudget.rows.find((row) => row.id === l1id);
+    const rootIndent280 = indentOf(rootNest280, widthBudget.cardRect);
+    assert.ok(
+      rootIndent280 >= 20 && rootIndent280 <= 40,
+      `the root nests in a genuine gutter (indent ${rootIndent280}px)`,
+    );
+    assert.ok(
+      widthBudget.cardFoldLeft !== null &&
+        rootNest280.disclosureLeft !== null &&
+        rootNest280.disclosureLeft > widthBudget.cardFoldLeft,
+      `the root disclosure nests right of the card fold (${rootNest280.disclosureLeft} vs ${widthBudget.cardFoldLeft})`,
+    );
+    assert.ok(
+      widthBudget.cardTitleLeft !== null &&
+        rootNest280.primaryLeft > widthBudget.cardTitleLeft,
+      `the root provider text starts right of the workspace title (${rootNest280.primaryLeft} vs ${widthBudget.cardTitleLeft})`,
+    );
+    assert.ok(
+      widthBudget.treeConnectors.length === widthBudget.rows.length,
+      `every row owns its connector node (${widthBudget.treeConnectors.length} nodes for ${widthBudget.rows.length} rows)`,
+    );
+    for (const connector of widthBudget.treeConnectors) {
+      for (const [name, extent] of [["guide", connector.vertical], ["elbow", connector.elbow]]) {
+        if (!extent) continue;
+        assert.ok(
+          extent.left >= cardLeft280 - 1 && extent.right <= cardRight280 + 1,
+          `depth ${connector.depth} ${name} connector draws inside the card (${extent.left}..${extent.right} in ${cardLeft280}..${cardRight280})`,
+        );
+      }
+    }
+    const chain280 = [l1id, l2id, l3id].map((id) => widthBudget.rows.find((row) => row.id === id));
+    assert.ok(chain280.every(Boolean), "the full chain is measured at natural width");
+    for (let index = 1; index < chain280.length; index += 1) {
+      const step = indentOf(chain280[index], widthBudget.cardRect) - indentOf(chain280[index - 1], widthBudget.cardRect);
+      assert.ok(
+        step >= 8 && step <= 20,
+        `depth ${chain280[index].depth} steps ~12px right of its parent (step ${step}px)`,
+      );
+    }
+    report.nesting280 = {
+      rootIndent: rootIndent280,
+      rootDisclosureLeft: rootNest280.disclosureLeft,
+      cardFoldLeft: widthBudget.cardFoldLeft,
+      rootPrimaryLeft: rootNest280.primaryLeft,
+      cardTitleLeft: widthBudget.cardTitleLeft,
+      connectors: widthBudget.treeConnectors,
+    };
 
     // Discrimination probe: the previous row layout (one shared truncating
     // span for name + secondary beside non-shrinking MAIN/state) rebuilt
@@ -1099,6 +1194,56 @@ export async function runSidebarAgentTreeAcceptance() {
       }
     }
     report.densityGuide = "pass";
+    // R1 finisher: the same nesting proof on the genuine Pi -> Codex ->
+    // Claude Code chain — genuine gutter, disclosure right of the card
+    // fold, provider text right of the workspace title, connectors (with
+    // pseudo geometry) inside the card, ~12px steps down the chain.
+    const guideCardLeft = Math.round(guideMeasured.cardRect.left);
+    const guideCardRight = Math.round(guideMeasured.cardRect.right);
+    const guideRootIndent = guideIndentOf(guideChainRows[0]);
+    assert.ok(
+      guideRootIndent >= 20 && guideRootIndent <= 40,
+      `the pi root nests in a genuine gutter (indent ${guideRootIndent}px)`,
+    );
+    assert.ok(
+      guideMeasured.cardFoldLeft !== null &&
+        guideChainRows[0].disclosureLeft !== null &&
+        guideChainRows[0].disclosureLeft > guideMeasured.cardFoldLeft,
+      `the pi disclosure nests right of the card fold (${guideChainRows[0].disclosureLeft} vs ${guideMeasured.cardFoldLeft})`,
+    );
+    assert.ok(
+      guideMeasured.cardTitleLeft !== null &&
+        guideChainRows[0].primaryLeft > guideMeasured.cardTitleLeft,
+      `the pi provider text starts right of the workspace title (${guideChainRows[0].primaryLeft} vs ${guideMeasured.cardTitleLeft})`,
+    );
+    assert.ok(
+      guideMeasured.treeConnectors.length === guideMeasured.rows.length,
+      `every guide row owns its connector node (${guideMeasured.treeConnectors.length} nodes for ${guideMeasured.rows.length} rows)`,
+    );
+    for (const connector of guideMeasured.treeConnectors) {
+      for (const [name, extent] of [["guide", connector.vertical], ["elbow", connector.elbow]]) {
+        if (!extent) continue;
+        assert.ok(
+          extent.left >= guideCardLeft - 1 && extent.right <= guideCardRight + 1,
+          `guide depth ${connector.depth} ${name} connector draws inside the card (${extent.left}..${extent.right} in ${guideCardLeft}..${guideCardRight})`,
+        );
+      }
+    }
+    for (let index = 1; index < guideChainRows.length; index += 1) {
+      const step = guideIndentOf(guideChainRows[index]) - guideIndentOf(guideChainRows[index - 1]);
+      assert.ok(
+        step >= 8 && step <= 20,
+        `guide depth ${guideChainRows[index].depth} steps ~12px right of its parent (step ${step}px)`,
+      );
+    }
+    report.nestingGuide = {
+      rootIndent: guideRootIndent,
+      rootDisclosureLeft: guideChainRows[0].disclosureLeft,
+      cardFoldLeft: guideMeasured.cardFoldLeft,
+      rootPrimaryLeft: guideChainRows[0].primaryLeft,
+      cardTitleLeft: guideMeasured.cardTitleLeft,
+      connectors: guideMeasured.treeConnectors,
+    };
     const guideBadges = await page.evaluate(
       (id) => [...document.querySelectorAll(`[data-worktree-card-id="${id}"] .shell-worktree-agent-main-badge`)]
         .map((badge) => badge.closest("[data-worktree-agent-row]")?.getAttribute("data-worktree-agent-row")),
@@ -1135,6 +1280,11 @@ export async function runSidebarAgentTreeAcceptance() {
     const multiShot = path.join(output, "guide-layout-multi.png");
     await page.screenshot({ path: multiShot, animations: "disabled" });
     report.screenshots.push(multiShot);
+    // R1 finisher: the guide-comparable crop — the sidebar column alone,
+    // framed like the owner's reference, beside the full frame above.
+    const multiCrop = path.join(output, "guide-layout-multi-crop.png");
+    await page.locator(".workspace-sidebar").screenshot({ path: multiCrop, animations: "disabled" });
+    report.screenshots.push(multiCrop);
 
     // Collapsed parent, folded card and selection on the guide card —
     // scoped locators, so the first card's persisted folds are untouched.
@@ -1397,6 +1547,9 @@ export async function runSidebarAgentTreeAcceptance() {
     const lightShot = path.join(output, "guide-layout-light.png");
     await page.screenshot({ path: lightShot, animations: "disabled" });
     report.screenshots.push(lightShot);
+    const lightCrop = path.join(output, "guide-layout-light-crop.png");
+    await page.locator(".workspace-sidebar").screenshot({ path: lightCrop, animations: "disabled" });
+    report.screenshots.push(lightCrop);
     report.lightTheme = "pass";
     await page.evaluate(([key, theme]) => {
       let envelope = {};
