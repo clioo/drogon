@@ -811,9 +811,11 @@ pub fn authorized_prepare(
         // `bot.responsibility_create`/`delete` already share, so the
         // staged ledger and the shell-fixture session launch it triggers
         // always target the bot's real workspace, never the caller's
-        // possibly-stale assertion.
+        // possibly-stale assertion. A Bot whose record folder left the
+        // registry falls back to its own registered home, where the
+        // session runs anyway.
         WorkspaceScope::Ok | WorkspaceScope::HostGlobal => {
-            match crate::bot_mutation_rpc::resolve_bot_owning_workspace(
+            match crate::bot_mutation_rpc::resolve_bot_workspace_or_home(
                 conn,
                 derived_host_id,
                 &request.workspace_id,

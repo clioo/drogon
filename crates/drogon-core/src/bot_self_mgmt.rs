@@ -586,8 +586,8 @@ pub(crate) fn live_handle_owner(conn: &Connection, canonical: &str) -> SelfResul
     Ok(None)
 }
 
-pub fn home_for_bot(tx: &Transaction, bot_id: &str) -> SelfResult<Option<BotHomeProfile>> {
-    tx.query_row(
+pub fn home_for_bot(conn: &Connection, bot_id: &str) -> SelfResult<Option<BotHomeProfile>> {
+    conn.query_row(
         "SELECT payload_json FROM bot_homes WHERE bot_id = ?1",
         params![bot_id],
         |r| r.get::<_, String>(0),
