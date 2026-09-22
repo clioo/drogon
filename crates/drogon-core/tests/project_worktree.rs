@@ -1294,10 +1294,10 @@ fn session_agent_state_transitions_working_idle_then_exited() {
     );
     let just_after_output = read(0);
     assert_eq!(
-        just_after_output["session"]["agentState"], "working",
-        "output just arrived, well inside the 3s activity window"
+        just_after_output["session"]["agentState"], "unknown",
+        "shell output is not turn evidence: no hook turn, no working claim"
     );
-    assert!(just_after_output["session"]["agentStateAt"].is_string());
+    assert!(just_after_output["session"]["agentStateAt"].is_null());
 
     // Cross the 3s activity window while the fixture is still sleeping.
     sleep(Duration::from_millis(3300));
