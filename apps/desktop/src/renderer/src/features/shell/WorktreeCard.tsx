@@ -602,6 +602,9 @@ export function WorktreeCard({
                 >
                   <CompactAgentSummaryButton
                     sessions={rowSessions}
+                    // The pill summary keeps F1's shared harness labels
+                    // (pinned by the lineage suite): sidebar "Claude Code"
+                    // branding applies to the visible row primary only.
                     labelFor={(session) =>
                       formatRowHarnessLabel(resolveRowHarnessId(session))
                     }

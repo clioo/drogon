@@ -17,8 +17,13 @@ import type {
   Worktree,
 } from "../../../../shared/session-contract";
 import { WorktreeCard } from "./WorktreeCard";
-import { resolveRowConciseIdentity } from "./WorktreeAgentRow";
+import {
+  formatSidebarProviderLabel,
+  resolveRowConciseIdentity,
+  resolveRowDisplayPrimary,
+} from "./WorktreeAgentRow";
 import type { WorktreeAgentRow as WorktreeAgentRowData } from "./worktree-agent-rows";
+import { formatRowHarnessLabel } from "./worktree-agent-rows";
 import { areWorktreeAgentRowPropsEqual } from "./WorktreeAgentRow";
 import type { WorktreeAgentRowProps } from "./WorktreeAgentRow";
 import { deriveGeneratedTabTitle } from "../../../../shared/agent-tab-title";
@@ -288,9 +293,11 @@ describe("agent tree labels", () => {
         "data-worktree-agent-row",
       ),
     ).toBe("root");
-    // A long, truncated name must not swallow the badge: it lives beside the
-    // truncating column, not inside it.
-    expect(mainBadges[0].closest(".truncate")).toBeNull();
+    // A long, truncated name must not swallow the badge: it lives in the
+    // identity group beside the truncating primary, not inside it.
+    const badge = mainBadges[0];
+    expect(badge.closest(".shell-worktree-agent-identity")).not.toBeNull();
+    expect(badge.closest("[data-worktree-agent-primary]")).toBeNull();
     // Each row states its own condition in words, main rows included.
     // Tree order: the lone root, then the root that owns the child, then
     // the child nested under it.
@@ -485,9 +492,11 @@ describe("concise row identity", () => {
     const row = container.querySelector(
       '[data-worktree-agent-row="gen-1"]',
     ) as HTMLElement;
-    // The visible name column leads with the concise provider identity.
-    const nameColumn = row.querySelector(".truncate") as HTMLElement;
-    expect(nameColumn.firstElementChild?.textContent).toBe("Pi");
+    // The visible identity group leads with the concise provider identity.
+    const primary = row.querySelector(
+      "[data-worktree-agent-primary]",
+    ) as HTMLElement;
+    expect(primary?.textContent).toBe("Pi");
     // The full prompt-derived title is preserved for tooltip/announcement.
     expect(row.getAttribute("title")).toContain(generated);
   });
@@ -512,8 +521,10 @@ describe("concise row identity", () => {
     const row = container.querySelector(
       '[data-worktree-agent-row="ren-1"]',
     ) as HTMLElement;
-    const nameColumn = row.querySelector(".truncate") as HTMLElement;
-    expect(nameColumn.firstElementChild?.textContent).toBe("My custom name");
+    const primary = row.querySelector(
+      "[data-worktree-agent-primary]",
+    ) as HTMLElement;
+    expect(primary?.textContent).toBe("My custom name");
   });
 });
 
@@ -540,6 +551,235 @@ describe("right-slot affordances", () => {
     expect(
       container.querySelector("[data-worktree-card-affordances]"),
     ).toBeNull();
+  });
+});
+
+describe("sidebar provider branding", () => {
+  test("the sidebar reads Claude Code while the shared label stays Claude", () => {
+    expect(formatSidebarProviderLabel("claude")).toBe("Claude Code");
+    expect(formatRowHarnessLabel("claude")).toBe("Claude");
+    expect(formatSidebarProviderLabel("pi")).toBe("Pi");
+    expect(formatSidebarProviderLabel("codex")).toBe("Codex");
+    expect(formatSidebarProviderLabel("opencode")).toBe("OpenCode");
+    expect(formatSidebarProviderLabel(null)).toBe("Shell");
+  });
+
+  test("an actual default harness title renders the sidebar branding", () => {
+    // An observed-Claude session whose title is exactly F1's default label
+    // (no generated-title record, no rename) reads "Claude Code" — this is
+    // the real default-title path, not the generatedTitles test prop.
+    const observed = session({
+      id: "obs-1",
+      harnessId: null,
+      observedHarnessId: "claude",
+    });
+    const row = {
+      session: observed,
+      state: "idle",
+      title: "Claude",
+      secondary: "",
+      stateLabel: "Idle",
+      relativeTime: "now",
+      focused: false,
+    } as WorktreeAgentRowData;
+    expect(
+      resolveRowDisplayPrimary(row, { customTitle: null, generatedTitle: null }),
+    ).toBe("Claude Code");
+  });
+
+  test("explicit renames and plain shells render verbatim", () => {
+    const observed = session({
+      id: "obs-1",
+      harnessId: null,
+      observedHarnessId: "claude",
+    });
+    const row = {
+      session: observed,
+      state: "idle",
+      title: "My custom name",
+      secondary: "",
+      stateLabel: "Idle",
+      relativeTime: "now",
+      focused: false,
+    } as WorktreeAgentRowData;
+    expect(
+      resolveRowDisplayPrimary(row, {
+        customTitle: "My custom name",
+        generatedTitle: null,
+      }),
+    ).toBe("My custom name");
+    const shell = session({ id: "sh", harnessId: null });
+    const shellRow = {
+      session: shell,
+      state: "idle",
+      title: "Terminal 1",
+      secondary: "zsh",
+      stateLabel: "Idle",
+      relativeTime: "now",
+      focused: false,
+    } as WorktreeAgentRowData;
+    expect(
+      resolveRowDisplayPrimary(shellRow, {
+        customTitle: null,
+        generatedTitle: null,
+      }),
+    ).toBe("Terminal 1");
+  });
+
+  test("an observed-Claude card reads Claude Code with no generated titles stored", () => {
+    const { container } = renderCard({
+      sessions: [
+        session({
+          id: "obs-1",
+          harnessId: null,
+          observedHarnessId: "claude",
+          agentState: "idle",
+          agentStateAt: "2026-09-08T11:59:00.000Z",
+        }),
+      ],
+    });
+    const primary = container.querySelector(
+      '[data-worktree-agent-row="obs-1"] [data-worktree-agent-primary]',
+    );
+    expect(primary?.textContent).toBe("Claude Code");
+  });
+});
+
+describe("provider width budget", () => {
+  // Structural half of the 280px regression: the layout rules that keep a
+  // provider name readable live in classes jsdom cannot measure, so these
+  // tests pin the structure (protected identity group, yielding secondary,
+  // non-shrinking tail in DOM order) while the rendered half — real
+  // bounding boxes at 280px — is asserted over CDP in
+  // scripts/accept-sidebar-agent-tree.mjs, which fails on the old
+  // single-truncate-span layout.
+  function multiProviderCard() {
+    return renderCard({
+      sessions: [
+        session({
+          id: "pi-root",
+          harnessId: "pi",
+          agentState: "working",
+          agentStateAt: "2026-09-08T11:59:00.000Z",
+        }),
+        session({
+          id: "codex-child",
+          parentSessionId: "pi-root",
+          harnessId: "codex",
+          agentState: "idle",
+          agentStateAt: "2026-09-08T11:58:00.000Z",
+        }),
+        session({
+          id: "claude-child",
+          parentSessionId: "pi-root",
+          harnessId: null,
+          observedHarnessId: "claude",
+          agentState: undefined,
+          agentStateAt: "2026-09-08T11:00:00.000Z",
+        }),
+      ],
+    });
+  }
+
+  test("every provider name reads whole with MAIN and its own state", () => {
+    const { container } = multiProviderCard();
+    expect(
+      container.querySelector(
+        '[data-worktree-agent-row="pi-root"] [data-worktree-agent-primary]',
+      )?.textContent,
+    ).toBe("Pi");
+    expect(
+      container.querySelector(
+        '[data-worktree-agent-row="codex-child"] [data-worktree-agent-primary]',
+      )?.textContent,
+    ).toBe("Codex");
+    expect(
+      container.querySelector(
+        '[data-worktree-agent-row="claude-child"] [data-worktree-agent-primary]',
+      )?.textContent,
+    ).toBe("Claude Code");
+    // MAIN marks the genuine root-with-children only.
+    const badges = [...container.querySelectorAll(".shell-worktree-agent-main-badge")];
+    expect(badges).toHaveLength(1);
+    expect(
+      badges[0].closest("[data-worktree-agent-row]")?.getAttribute(
+        "data-worktree-agent-row",
+      ),
+    ).toBe("pi-root");
+    // Every row states its own condition, main rows included.
+    for (const id of ["pi-root", "codex-child", "claude-child"]) {
+      const label = container.querySelector(
+        `[data-worktree-agent-row="${id}"] .shell-worktree-agent-state-label`,
+      );
+      expect(label?.textContent?.length).toBeGreaterThan(0);
+    }
+    expect(
+      container.querySelector(
+        '[data-worktree-agent-row="claude-child"] .shell-worktree-agent-state-label',
+      )?.textContent,
+    ).toMatch(/^No update in /);
+  });
+
+  test("the tail follows the identity in DOM order and never shrinks away", () => {
+    const { container } = multiProviderCard();
+    for (const id of ["pi-root", "codex-child", "claude-child"]) {
+      const row = container.querySelector(
+        `[data-worktree-agent-row="${id}"]`,
+      ) as HTMLElement;
+      const identity = row.querySelector(".shell-worktree-agent-identity");
+      const tail = row.querySelector(".shell-worktree-agent-tail");
+      expect(identity).not.toBeNull();
+      expect(tail).not.toBeNull();
+      // The state group renders after the identity group, pushed right, so
+      // a tight row wraps the state below instead of clipping the name.
+      expect(
+        identity!.compareDocumentPosition(tail!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).not.toBe(0);
+      expect(tail!.className).toContain("shell-worktree-agent-tail");
+      // The secondary (when present) is its own truncating item between
+      // identity and tail — never inside the identity group.
+      const secondary = row.querySelector("[data-worktree-agent-secondary]");
+      if (secondary) {
+        expect(
+          secondary.closest(".shell-worktree-agent-identity"),
+        ).toBeNull();
+      }
+    }
+  });
+
+  test("a long rename truncates inside the identity while MAIN and state stay", () => {
+    const { container } = renderCard({
+      sessions: [
+        session({
+          id: "long-1",
+          harnessId: "pi",
+          agentState: "working",
+          agentStateAt: "2026-09-08T11:59:00.000Z",
+        }),
+      ],
+      tabStrip: {
+        ...EMPTY_TAB_STRIP_STATE,
+        titles: {
+          "long-1":
+            "A very long explicit user rename that cannot fit beside a state label",
+        },
+      },
+    });
+    const row = container.querySelector(
+      '[data-worktree-agent-row="long-1"]',
+    ) as HTMLElement;
+    const primary = row.querySelector(
+      "[data-worktree-agent-primary]",
+    ) as HTMLElement;
+    expect(primary?.textContent).toContain("A very long explicit user rename");
+    expect(primary?.className).toContain("shell-worktree-agent-primary");
+    expect(row.getAttribute("title")).toContain(
+      "A very long explicit user rename",
+    );
+    expect(
+      row.querySelector(".shell-worktree-agent-state-label")?.textContent,
+    ).toBe("Working");
   });
 });
 

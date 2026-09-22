@@ -1813,6 +1813,47 @@ footer[data-testid="status-bar"] {
   white-space: nowrap;
   color: var(--muted-foreground);
 }
+/* Row width budget (owner's guide: the provider name stays readable at the
+   natural 280px sidebar width, MAIN sits outside truncation, every row keeps
+   its own state). Scoped to the worktree agent rows only — the chats list
+   reuses `.compact-agent-row` with its own single-line recipe and is
+   untouched. The identity group never shrinks: a short provider name always
+   reads whole, a long rename truncates inside the group with the full title
+   in the tooltip. The secondary rides flex-basis 0 so it collapses toward
+   nothing before anything else gives. The tail never shrinks: when even the
+   collapsed secondary leaves no room, the row wraps and the state rides a
+   second line, right-aligned, instead of eating the identity. */
+[data-worktree-agent-row] {
+  flex-wrap: wrap;
+}
+.shell-worktree-agent-identity {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+.shell-worktree-agent-primary {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-worktree-agent-secondary {
+  flex: 1 1 0%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-worktree-agent-tail {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
 /* A root row that owns subagents carries the badge; the guide's MAIN pill is
    a quiet outline, never a solid chip, so it sits beside the row's name
    without competing with the status ring above it. */
