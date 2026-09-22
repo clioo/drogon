@@ -12,7 +12,7 @@
    pill from worktree-card-compact-agents.tsx. The card's own extras the
    source does not render (base-ref line, note line, "No sessions yet")
    are folded into the accessible label instead of drawn. */
-import { Fragment, useState, useSyncExternalStore } from "react";
+import { Fragment, useContext, useState, useSyncExternalStore } from "react";
 import { ChevronRight, MoreHorizontal, StickyNote } from "lucide-react";
 import { cn } from "../../lib/utils";
 import type { GraphBridge } from "../../../../shared/graph-contract";
@@ -55,6 +55,10 @@ import type { WorktreeAgentRow as WorktreeAgentRowData } from "./worktree-agent-
 import { WorktreeAgentRow } from "./WorktreeAgentRow";
 import { useGeneratedAgentTitles } from "../settings/agent-generated-titles";
 import { buildWorktreeAgentRowTree } from "./worktree-agent-lineage";
+import {
+  isSessionOnCard,
+  SidebarCardAttributionContext,
+} from "./sidebar-card-attribution";
 import type { TabStripState } from "./tab-order";
 import type { CardProperty } from "./workspace-options-state";
 import type { WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
@@ -295,8 +299,9 @@ export function WorktreeCard({
   graphBridge?: GraphBridge | null;
 }) {
   const [beginEditing, setBeginEditing] = useState(false);
-  const attached = sessions.filter(
-    (session) => session.workspaceId === worktree.workspaceId,
+  const cardAttribution = useContext(SidebarCardAttributionContext);
+  const attached = sessions.filter((session) =>
+    isSessionOnCard(session, worktree.workspaceId, cardAttribution),
   );
   // One nested row per session (the fork's useWorktreeAgentRows slot); the
   // summary counts below derive from these same rows so the two can never
@@ -358,8 +363,13 @@ export function WorktreeCard({
   // Row activation selects the workspace first, then the session tab: the
   // workspace switch clears the active tab, so the tab selection must win
   // last in the same batch (mirrors the notification focus handler).
+  // A worker adopted from a checkout with no card of its own opens in that
+  // checkout's workspace: its tab lives there, not in this card's strip.
   const handleSelectSession = (sessionId: string) => {
-    onSelect(worktree.workspaceId);
+    onSelect(
+      attached.find((session) => session.id === sessionId)?.workspaceId ??
+        worktree.workspaceId,
+    );
     onSelectSession?.(sessionId);
   };
   // Linked GitHub issue from the tasks link store (journey J6); null when
