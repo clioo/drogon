@@ -1143,6 +1143,79 @@ export async function runSidebarAgentTreeAcceptance() {
     });
     await until(async () => (await sessionRow(workerSessionId))?.verdict === "exited", "the worker session exited");
 
+    // R2 selected-copy regression: the native late-Pi failure that proved
+    // the second gate — a plain shell in the SELECTED workspace rendered
+    // Terminal and stayed Terminal for 90s after the daemon observed pi,
+    // because the selected list adopted once (append-only) while the
+    // sidebar merge prefers that copy. With the adopt reconciliation the
+    // same row must update to Pi in place. Real shell, real native
+    // binary, no inference, no reload, no workspace change.
+    const lateSelectedShell = await cliJson(
+      ["terminal", "create", "--workspace", workspaceId, "--", "/bin/sh"],
+      { env, cwd: fixture },
+    );
+    assert.equal(lateSelectedShell.harnessId ?? null, null, "the selected late shell starts as a plain shell");
+    const lateSelectedBeforeRow = await until(async () => {
+      const row = await sessionRow(lateSelectedShell.id);
+      return row && (row.harnessId ?? null) === null && (row.observedHarnessId ?? null) === null ? row : false;
+    }, "the daemon lists the selected late shell with no harness identity");
+    const expandSelectedPill = async () => {
+      if ((await expandPill.count()) > 0) {
+        const pill = expandPill.first();
+        if ((await pill.getAttribute("aria-expanded").catch(() => null)) === "false") {
+          await pill.click().catch(() => {});
+        }
+      }
+    };
+    const lateSelectedBeforeDom = await until(async () => {
+      await expandSelectedPill();
+      const measured = await measureGuideRows(worktreeId);
+      return measured.rows.find((row) => row.id === lateSelectedShell.id) || false;
+    }, "the sidebar lists the selected late plain shell");
+    assert.match(
+      String(lateSelectedBeforeDom.primaryText ?? ""),
+      /Terminal \d/,
+      "the selected late shell first renders as a plain terminal, not an agent",
+    );
+    await cliJson(
+      ["terminal", "send", "--session", lateSelectedShell.id, "--incarnation", lateSelectedShell.incarnation, "--text",
+        `exec ${quoteShellWord(path.join(binDir, "pidir", "pi"))} 600\n`],
+      { env, cwd: fixture },
+    );
+    const lateSelectedAfterRow = await until(async () => {
+      const row = await sessionRow(lateSelectedShell.id);
+      return row && isObservedPiSession(row) ? row : false;
+    }, "the daemon observes pi in the selected late shell's foreground");
+    const lateSelectedPi = await until(async () => {
+      await expandSelectedPill();
+      const measured = await measureGuideRows(worktreeId);
+      const row = measured.rows.find((candidate) => candidate.id === lateSelectedShell.id);
+      return row && row.primaryText === "Pi" ? { measured, row } : false;
+    }, "the selected sidebar row updates to Pi without a reload", 90000);
+    assert.equal(
+      lateSelectedPi.measured.rows.filter((row) => row.id === lateSelectedShell.id).length,
+      1,
+      "the selected foreground transition updates exactly one row — never a duplicate",
+    );
+    const lateSelectedActiveCard = await page.evaluate(
+      () => document.querySelector('[data-worktree-card-id][data-active="true"]')?.getAttribute("data-worktree-card-id") ?? null,
+    );
+    assert.equal(lateSelectedActiveCard, worktreeId, "the selected transition lands with the same workspace selected");
+    report.lateForegroundSelected = {
+      boundary: "real-App metadata-only snapshot path (session.list rows to DOM) on the selected card, not mocked preload data",
+      before: projectLateForegroundSnapshot(lateSelectedBeforeRow, lateSelectedBeforeDom),
+      after: projectLateForegroundSnapshot(lateSelectedAfterRow, lateSelectedPi.row),
+      cardRowIds: lateSelectedPi.measured.rows.map((row) => row.id),
+      activeCardId: lateSelectedActiveCard,
+    };
+    report.checks.push("late-foreground-selected-observed-pi-updates-the-same-row");
+    await cliJson(
+      ["rpc", "session.stop", "--params", JSON.stringify({ sessionId: lateSelectedShell.id, incarnation: lateSelectedShell.incarnation })],
+      { env, cwd: fixture },
+    );
+    await until(async () => (await sessionRow(lateSelectedShell.id))?.verdict === "exited", "the selected late shell exited");
+    checkCancelled();
+
     // R2 observed-identity: the late-foreground transition the fixture
     // above misses — every agent there starts BEFORE the initial render,
     // so the UI never displays the plain terminal first. Here a real plain
@@ -1152,18 +1225,16 @@ export async function runSidebarAgentTreeAcceptance() {
     // duplicate) with no reload and no workspace change. Real shell, real
     // native binary, no inference; the sleeper is quiet by design so the
     // turn state stays whatever the daemon derives, recorded not steered.
-    // The transition runs on its own folder card (unselected): the
-    // selected workspace's list adopts out-of-band sessions append-only
-    // and the sidebar merge prefers that copy, so a selected-workspace
-    // row can stale behind a second gate outside this correction's grant —
-    // on an unselected card the host-wide poll copy is the only copy, and
-    // the metadata-only delta reaches the DOM through the fixed
-    // comparator alone. Labeled accurately: a boundary-level real-App
-    // test of the metadata-only snapshot path (session.list rows to DOM),
-    // not mocked preload data — and not a claim about which comparator
-    // field flips, so the report records the full before/after rows
-    // (including any agentState move) without saying the old comparator
-    // would have failed on identity alone.
+    // Additional coverage on its own folder card (unselected): the
+    // selected-card regression above is the required proof; here the
+    // host-wide poll copy is the only copy, so the same metadata-only
+    // delta reaches the DOM through the fixed comparator alone.
+    // Labeled accurately: a boundary-level real-App test of the
+    // metadata-only snapshot path (session.list rows to DOM), not mocked
+    // preload data — and not a claim about which comparator field flips,
+    // so the report records the full before/after rows (including any
+    // agentState move) without saying the old comparator would have
+    // failed on identity alone.
     const lateProjectDir = path.join(fixture, "latefg");
     await mkdir(lateProjectDir, { recursive: true });
     const lateProject = await cliJson(["project", "add", lateProjectDir, "--name", "latefg"], { env, cwd: fixture });

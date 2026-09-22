@@ -585,13 +585,51 @@ export function adoptOutOfBandSessions(
       !known.has(`${item.hostId}:${item.id}`) &&
       !isHidden(item),
   );
-  if (adopted.length === 0) return current;
-  return [
-    ...current,
-    ...[...adopted].sort((left, right) =>
-      left.createdAt.localeCompare(right.createdAt),
-    ),
-  ];
+  // R2 selected-copy reconciliation: an already-listed row keeps the
+  // selected list's push state, names and sizing — but its observed
+  // harness/foreground metadata must track the host-wide poll, which
+  // re-reads the daemon every tick while the selected copy otherwise
+  // only refreshes on selection/tab events. On an exact
+  // host+id+incarnation match the fresh row IS the same session, so its
+  // three observation fields win — including an explicit clear (fresh
+  // null), which stale selected data must never revive. A
+  // same-id/different-incarnation or different-host row is left alone,
+  // and ONLY these three fields are ever touched: the poll snapshot is
+  // continuous but can lag a selection refetch, so it must never
+  // overwrite push state, sizing, or anything else.
+  const freshByKey = new Map<string, Session>();
+  for (const item of hostWide)
+    freshByKey.set(`${item.hostId}:${item.id}`, item);
+  let result = current;
+  if (adopted.length > 0)
+    result = [
+      ...current,
+      ...[...adopted].sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt),
+      ),
+    ];
+  for (let index = 0; index < current.length; index += 1) {
+    const item = result[index]!;
+    const fresh = freshByKey.get(`${item.hostId}:${item.id}`);
+    if (!fresh || fresh.incarnation !== item.incarnation) continue;
+    const observedHarnessId = fresh.observedHarnessId ?? null;
+    const observedHarnessAt = fresh.observedHarnessAt ?? null;
+    const hasForegroundChild = fresh.hasForegroundChild ?? false;
+    if (
+      (item.observedHarnessId ?? null) === observedHarnessId &&
+      (item.observedHarnessAt ?? null) === observedHarnessAt &&
+      (item.hasForegroundChild ?? false) === hasForegroundChild
+    )
+      continue;
+    if (result === current) result = current.slice();
+    result[index] = {
+      ...item,
+      observedHarnessId,
+      observedHarnessAt,
+      hasForegroundChild,
+    };
+  }
+  return result;
 }
 
 /**

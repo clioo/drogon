@@ -71,6 +71,142 @@ describe("adoptOutOfBandSessions", () => {
   });
 });
 
+describe("adoptOutOfBandSessions selected-copy observation refresh (R2)", () => {
+  const never = () => false;
+
+  test("a listed row gains the poll's observation; push state, sizing and command are preserved", () => {
+    const current = [
+      session("s1", {
+        agentState: "working",
+        agentStateAuthority: "hook",
+        cols: 100,
+        command: "/bin/zsh",
+      }),
+    ];
+    const result = adoptOutOfBandSessions(
+      current,
+      [
+        session("s1", {
+          observedHarnessId: "pi",
+          observedHarnessAt: "2026-01-01T00:01:00Z",
+          hasForegroundChild: true,
+        }),
+      ],
+      "w1",
+      never,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].observedHarnessId).toBe("pi");
+    expect(result[0].observedHarnessAt).toBe("2026-01-01T00:01:00Z");
+    expect(result[0].hasForegroundChild).toBe(true);
+    // The selected list's own facts are not clobbered by the poll copy.
+    expect(result[0].agentState).toBe("working");
+    expect(result[0].agentStateAuthority).toBe("hook");
+    expect(result[0].cols).toBe(100);
+    expect(result[0].command).toBe("/bin/zsh");
+    expect(result).not.toBe(current);
+  });
+
+  test("an explicit observation clear lands; stale selected data never revives it", () => {
+    const current = [
+      session("s1", {
+        observedHarnessId: "pi",
+        observedHarnessAt: "2026-01-01T00:01:00Z",
+        hasForegroundChild: true,
+      }),
+    ];
+    const result = adoptOutOfBandSessions(
+      current,
+      [session("s1", { hasForegroundChild: false })],
+      "w1",
+      never,
+    );
+    expect(result[0].observedHarnessId).toBeNull();
+    expect(result[0].observedHarnessAt).toBeNull();
+    expect(result[0].hasForegroundChild).toBe(false);
+  });
+
+  test("a foreground-only flip propagates both ways", () => {
+    const entered = adoptOutOfBandSessions(
+      [session("s1", { hasForegroundChild: false })],
+      [session("s1", { hasForegroundChild: true })],
+      "w1",
+      never,
+    );
+    expect(entered[0].hasForegroundChild).toBe(true);
+    const left = adoptOutOfBandSessions(
+      [session("s1", { hasForegroundChild: true })],
+      [session("s1", { hasForegroundChild: false })],
+      "w1",
+      never,
+    );
+    expect(left[0].hasForegroundChild).toBe(false);
+  });
+
+  test("a same-id/different-incarnation poll row never refreshes the newer entry", () => {
+    const current = [session("s1", { incarnation: "inc-new" })];
+    const result = adoptOutOfBandSessions(
+      current,
+      [
+        session("s1", {
+          incarnation: "inc-old",
+          observedHarnessId: "pi",
+          observedHarnessAt: "2026-01-01T00:01:00Z",
+          hasForegroundChild: true,
+        }),
+      ],
+      "w1",
+      never,
+    );
+    expect(result).toBe(current);
+  });
+
+  test("a coincident id from a different host never refreshes the unrelated entry", () => {
+    const current = [session("s1", { hostId: "h1" })];
+    const result = adoptOutOfBandSessions(
+      current,
+      [
+        session("s1", {
+          hostId: "h2",
+          observedHarnessId: "pi",
+          observedHarnessAt: "2026-01-01T00:01:00Z",
+        }),
+      ],
+      "w1",
+      never,
+    );
+    // The h2 row is adopted alongside; the h1 row keeps no observation.
+    expect(result).toHaveLength(2);
+    expect(result[0].observedHarnessId ?? null).toBeNull();
+    expect(result[1].observedHarnessId).toBe("pi");
+  });
+
+  test("no news returns the identical array — no observation churn, no re-render", () => {
+    const current = [
+      session("s1", {
+        observedHarnessId: "pi",
+        observedHarnessAt: "2026-01-01T00:01:00Z",
+        hasForegroundChild: true,
+      }),
+    ];
+    const clone = current.map((item) => ({ ...item, args: [...item.args] }));
+    expect(adoptOutOfBandSessions(current, clone, "w1", never)).toBe(current);
+    // Absent and false read as the same idle claim on both sides.
+    expect(
+      adoptOutOfBandSessions(current, [session("s1")], "w1", never),
+    ).not.toBe(current);
+    const idle = [session("s1")];
+    expect(
+      adoptOutOfBandSessions(
+        idle,
+        [session("s1", { hasForegroundChild: false })],
+        "w1",
+        never,
+      ),
+    ).toBe(idle);
+  });
+});
+
 describe("appendOrReplaceSession", () => {
   test("a new session id is appended", () => {
     const items = [session("s1")];
