@@ -625,6 +625,13 @@ export function commitObservationProof(
   for (const key of appliedKeys) ledger.markApplied(key, seq);
 }
 
+export function pruneObservationProofForSessions(
+  ledger: ObservationLedger,
+  sessions: readonly Session[],
+): void {
+  ledger.prune(new Set(sessions.map((item) => observationKeyOf(item))));
+}
+
 /**
  * Pure planner for `adoptOutOfBandSessions`: checks the ledger but never
  * writes it. Collects the applied keys for one `commitObservationProof`
@@ -948,6 +955,26 @@ export type SidebarPollSettlement = {
  * freshKeys) always advances to this poll. The data array keeps its
  * identity while idle so the 3 s tick still commits nothing new.
  */
+export function markWorkspaceReadProof(
+  proof: Map<string, number>,
+  workspaceIds: Iterable<string>,
+  seq: number,
+): void {
+  for (const workspaceId of workspaceIds) {
+    const last = proof.get(workspaceId);
+    if (last === undefined || seq > last) proof.set(workspaceId, seq);
+  }
+}
+
+export function isStaleWorkspaceRead(
+  proof: ReadonlyMap<string, number>,
+  workspaceId: string,
+  requestSeq: number,
+): boolean {
+  const last = proof.get(workspaceId);
+  return last !== undefined && requestSeq < last;
+}
+
 export function settleSidebarPoll(
   previousSessions: Session[],
   view: SidebarSessionSourceView,
@@ -2790,6 +2817,7 @@ export function App() {
   // resets them.
   const sidebarPollClock = useRef(0);
   const sidebarSettledSeq = useRef(0);
+  const workspaceReadProof = useRef<Map<string, number>>(new Map());
   const observationLedger = useRef<ObservationLedger>(createObservationLedger());
   const sidebarObservationProvenance = useRef<{
     seq: number;
@@ -2841,6 +2869,9 @@ export function App() {
     queueSelectedAdopt();
   }, [allBotSessions, selected, queueSelectedAdopt]);
   useEffect(() => {
+    pruneObservationProofForSessions(observationLedger.current, sessions);
+  }, [sessions]);
+  useEffect(() => {
     // Persists every confirmed selection once it settles against a known
     // workspace, so the next reload's restore has an up-to-date target.
     const workspace = workspaces.find((item) => item.id === selected);
@@ -2875,11 +2906,18 @@ export function App() {
           setError(response.error.message);
           return;
         }
-        // A newer poll settled while this fetch was in flight: its data and
-        // proof are fresher than anything this response can carry, and the
-        // adopt path already reconciled the selected copy against them.
-        // Applying the older snapshot would erase newer observation facts.
-        if (isStalePollSettlement(requestSeq, sidebarSettledSeq.current)) return;
+        // Drop only when a newer successful read of THIS workspace already
+        // settled. A poll that merely refreshed another workspace must not
+        // discard the selected response; per-key observation proof below
+        // still protects rows that a newer selected read actually touched.
+        if (
+          isStaleWorkspaceRead(
+            workspaceReadProof.current,
+            selected,
+            requestSeq,
+          )
+        )
+          return;
         const dismissed = loadDismissedSessions();
         // Each session's own recorded host is what a dismissal is checked
         // against — not this connection's current `status.hostId` — and
@@ -2906,6 +2944,11 @@ export function App() {
         commitObservationProof(
           observationLedger.current,
           fetchPlan.appliedKeys,
+          requestSeq,
+        );
+        markWorkspaceReadProof(
+          workspaceReadProof.current,
+          [selected],
           requestSeq,
         );
         setSessions((items) => applySelectedFetch(items, fetchPlan));
@@ -3011,6 +3054,11 @@ export function App() {
         // the shared collector.
         if (isStalePollSettlement(requestSeq, sidebarSettledSeq.current)) return;
         sidebarSettledSeq.current = requestSeq;
+        markWorkspaceReadProof(
+          workspaceReadProof.current,
+          view.freshWorkspaceIds,
+          requestSeq,
+        );
         // Fresh: the fork becomes the committed truth (its rotation,
         // scoped cache and fresh set included).
         sidebarSessionsSource.current = fork;
@@ -3039,6 +3087,8 @@ export function App() {
         // the selected copy since the last commit, and only this poll's
         // order can heal it. A no-op plan queues nothing.
         queueSelectedAdopt();
+      } catch (error) {
+        if (!cancelled) console.warn("Sidebar session poll failed", error);
       } finally {
         inFlight = false;
       }
@@ -3347,6 +3397,7 @@ export function App() {
     allBotSessions,
     sessions,
     splitSecondaryIds,
+    sidebarObservationProvenance.current.freshKeys,
   );
   // Defect 1: the host owns liveness, and the decision must be
   // workspace-independent. The daemon projects the recorded link's own

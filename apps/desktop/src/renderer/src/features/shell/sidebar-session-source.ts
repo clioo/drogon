@@ -43,11 +43,20 @@ export type SidebarSessionSourceView = {
    * copy's observation metadata must not adopt them.
    */
   freshKeys: ReadonlySet<string>;
+  /**
+   * Workspace ids whose scoped truth was actually read in the latest poll
+   * phase. Unlike `freshKeys`, this still records an empty successful read,
+   * which matters when ordering a pending selected-workspace load.
+   */
+  freshWorkspaceIds: ReadonlySet<string>;
 };
 
 export type SidebarSessionCollector = {
   /** A host-wide read succeeded: it is the whole truth again. */
-  noteHostWide(sessions: readonly Session[]): void;
+  noteHostWide(
+    sessions: readonly Session[],
+    workspaceIds?: readonly string[],
+  ): void;
   /** A host-wide read failed: fall back to the cached scoped lists. */
   noteHostWideFailure(): void;
   /** The next workspace ids to read, in rotation order. */
@@ -88,7 +97,7 @@ export async function pollSidebarSessions(deps: {
 }): Promise<SidebarSessionSourceView> {
   const hostWide = await deps.fetchHostWide();
   if (hostWide.ok && Array.isArray(hostWide.sessions)) {
-    deps.collector.noteHostWide(hostWide.sessions);
+    deps.collector.noteHostWide(hostWide.sessions, deps.workspaceIds);
     return deps.collector.view();
   }
   deps.collector.noteHostWideFailure();
@@ -118,6 +127,7 @@ type SidebarSessionCollectorState = {
   byWorkspaceId: [string, Session[]][];
   cursor: number;
   fresh: string[];
+  freshWorkspaces: string[];
 };
 
 function createCollectorFrom(initial?: SidebarSessionCollectorState): SidebarSessionCollector {
@@ -136,6 +146,7 @@ function createCollectorFrom(initial?: SidebarSessionCollectorState): SidebarSes
   // delivery adds its own workspace's keys, so a batch accumulates exactly
   // what it read and nothing it retained.
   let fresh = new Set<string>(initial?.fresh ?? []);
+  let freshWorkspaces = new Set<string>(initial?.freshWorkspaces ?? []);
 
   const merged = (): Session[] => {
     const byId = new Map<string, Session>();
@@ -146,12 +157,15 @@ function createCollectorFrom(initial?: SidebarSessionCollectorState): SidebarSes
   };
 
   return {
-    noteHostWide(sessions) {
+    noteHostWide(sessions, workspaceIds) {
       healthy = true;
       hostWide = [...sessions];
       byWorkspaceId.clear();
       cursor = 0;
       fresh = new Set(sessions.map(observationKeyOf));
+      freshWorkspaces = new Set(
+        workspaceIds ?? sessions.map((session) => session.workspaceId),
+      );
     },
     noteHostWideFailure() {
       healthy = false;
@@ -159,6 +173,7 @@ function createCollectorFrom(initial?: SidebarSessionCollectorState): SidebarSes
       // not blank the sidebar (the shell's own poll contract). The fresh set
       // restarts: only the scoped reads of THIS poll phase prove anything.
       fresh = new Set();
+      freshWorkspaces = new Set();
     },
     planScopedReads(workspaceIds, batchSize = SIDEBAR_SCOPED_READ_BATCH) {
       const wanted = [...new Set(workspaceIds)].slice(
@@ -182,13 +197,19 @@ function createCollectorFrom(initial?: SidebarSessionCollectorState): SidebarSes
       byWorkspaceId.delete(workspaceId);
       byWorkspaceId.set(workspaceId, [...sessions]);
       for (const session of sessions) fresh.add(observationKeyOf(session));
+      freshWorkspaces.add(workspaceId);
     },
     view() {
       // A copy per view: callers hold the array AND the set across async
       // adopt commits, and later polls must never mutate committed data or
       // proof (rows themselves are shared by reference, never mutated).
       if (healthy)
-        return { sessions: [...hostWide], degraded: false, freshKeys: new Set(fresh) };
+        return {
+          sessions: [...hostWide],
+          degraded: false,
+          freshKeys: new Set(fresh),
+          freshWorkspaceIds: new Set(freshWorkspaces),
+        };
       const scoped = merged();
       // Nothing scoped has landed yet: the last full list still beats blank.
       return {
@@ -198,6 +219,7 @@ function createCollectorFrom(initial?: SidebarSessionCollectorState): SidebarSes
             : [...hostWide],
         degraded: true,
         freshKeys: new Set(fresh),
+        freshWorkspaceIds: new Set(freshWorkspaces),
       };
     },
     isDegraded() {
@@ -212,6 +234,7 @@ function createCollectorFrom(initial?: SidebarSessionCollectorState): SidebarSes
         ),
         cursor,
         fresh: [...fresh],
+        freshWorkspaces: [...freshWorkspaces],
       });
     },
   };

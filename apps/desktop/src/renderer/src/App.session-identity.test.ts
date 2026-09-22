@@ -7,12 +7,15 @@ import {
   planAdoptOutOfBandSessions,
   planQueuedAdopt,
   planSelectedFetch,
+  pruneObservationProofForSessions,
   appendOrReplaceSession,
   applyConfirmedClose,
   capabilityDigest,
   contextMatches,
   isPollPageVisible,
   isSlowPollDue,
+  isStaleWorkspaceRead,
+  markWorkspaceReadProof,
   removeSessionExact,
   sameBotsLoadResult,
   sameSessions,
@@ -982,6 +985,7 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
       sessions: reread,
       degraded: false,
       freshKeys: keys,
+      freshWorkspaceIds: new Set(["w1"]),
     }, 7);
     expect(settled.seq).toBe(7);
     expect(settled.freshKeys).toBe(keys);
@@ -997,6 +1001,7 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
       sessions: next,
       degraded: false,
       freshKeys: keys,
+      freshWorkspaceIds: new Set(["w1"]),
     }, 7);
     expect(settled.dataChanged).toBe(true);
     expect(settled.sessions).toBe(next);
@@ -1024,6 +1029,7 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
       sessions: reread,
       degraded: false,
       freshKeys: keys,
+      freshWorkspaceIds: new Set(["w1"]),
     }, 7);
     expect(settled.sessions).toBe(observed);
     // Reconciling the stale selected copy against the fresh proof restores
@@ -1097,6 +1103,32 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     commitObservationProof(ledger, plan.appliedKeys, 6);
     expect(ledger.shouldApply(observationKeyOf(target()), 6)).toBe(false);
     expect(ledger.shouldApply(observationKeyOf(target()), 7)).toBe(true);
+  });
+
+  test("pruning to the selected rows keeps live proof under unrelated retained history", () => {
+    const ledger = createObservationLedger(2);
+    const live = target(freshPi);
+    const keys = new Set([observationKeyOf(live)]);
+    const projection = planQueuedAdopt([live], "w1", never, {
+      freshKeys: keys,
+      seq: 6,
+      ledger,
+    });
+    commitObservationProof(ledger, projection.appliedKeys, 6);
+    pruneObservationProofForSessions(ledger, [live]);
+
+    // A degraded poll that only read w2 renders retained/other rows but
+    // admits no w1 proof, so it cannot fill the tiny ledger and re-arm the
+    // live key. This mirrors the App effect: prune runs after selected state
+    // commits, while `planQueuedAdopt` filters by the selected workspace.
+    const unrelated = planQueuedAdopt([other("o1"), other("o2")], "w1", never, {
+      freshKeys: new Set([observationKeyOf(other("o1")), observationKeyOf(other("o2"))]),
+      seq: 7,
+      ledger,
+    });
+    expect(unrelated.appliedKeys).toEqual([]);
+    commitObservationProof(ledger, unrelated.appliedKeys, 7);
+    expect(ledger.shouldApply(observationKeyOf(live), 5)).toBe(false);
   });
 
   test("a queued local sizing update survives a following observation adoption", () => {
@@ -1285,15 +1317,15 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     expect(final[0].observedHarnessId ?? null).toBeNull();
   });
 
-  test("an unrelated workspace success while a selected load is pending leaves the target alone", async () => {
+  test("an unrelated workspace success while a selected load is pending no longer drops the selected response", async () => {
     // Degraded poll reads only w2; the selected w1 target row is retained
     // (renders) but not fresh, so its observation must not move. A selected
-    // fetch requested before the poll (older order) settles after it: the
-    // global poll order already passed it, so the shell drops it before the
-    // ledger is even consulted.
+    // fetch requested before that poll is globally older but still the
+    // newest successful read of w1, so the production guard must admit it.
     const collector = createSidebarSessionCollector();
     collector.noteHostWide([target(), other("o1")]);
     const selectedRequestSeq = 5;
+    const pollSeq = 6;
     const view = await pollSidebarSessions({
       collector,
       workspaceIds: ["w1", "w2"],
@@ -1305,9 +1337,14 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     });
     expect(view.degraded).toBe(true);
     expect(view.freshKeys.has(observationKeyOf(target()))).toBe(false);
+    expect(view.freshWorkspaceIds).toEqual(new Set(["w2"]));
+    const workspaceProof = new Map<string, number>();
+    markWorkspaceReadProof(workspaceProof, view.freshWorkspaceIds, pollSeq);
+    expect(isStalePollSettlement(selectedRequestSeq, pollSeq)).toBe(true);
+    expect(isStaleWorkspaceRead(workspaceProof, "w1", selectedRequestSeq)).toBe(false);
+
     const ledger = createObservationLedger();
     const selected = [target(freshPi)];
-    const pollSeq = 6;
     const projection = planQueuedAdopt(view.sessions, "w1", never, {
       freshKeys: view.freshKeys,
       seq: pollSeq,
@@ -1315,20 +1352,25 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     });
     expect(projection.appliedKeys).toEqual([]);
     expect(projection.observations).toEqual([]);
-    commitObservationProof(ledger, projection.appliedKeys, pollSeq);
     expect(applyQueuedAdopt(selected, projection)).toBe(selected);
-    // The older selected load settles late: globally stale past the poll, so
-    // the shell drops the snapshot outright.
-    expect(isStalePollSettlement(selectedRequestSeq, pollSeq)).toBe(true);
-    // Even planned at its own order it could not move the newer proof: the
-    // poll above committed nothing for the target, but a newer selected
-    // truth (seq 8 Pi) still blocks the older idle.
-    const defended = planAdoptOutOfBandSessions(selected, view.sessions, "w1", never, {
-      freshKeys: view.freshKeys,
-      seq: pollSeq,
+
+    const fetchPlan = planSelectedFetch(
+      [target({ observedHarnessId: "codex", observedHarnessAt: "2026-01-01T00:04:00Z" })],
+      selectedRequestSeq,
       ledger,
-    });
-    expect(defended.sessions).toBe(selected);
+    );
+    commitObservationProof(ledger, fetchPlan.appliedKeys, selectedRequestSeq);
+    markWorkspaceReadProof(workspaceProof, ["w1"], selectedRequestSeq);
+    const fetched = applySelectedFetch(selected, fetchPlan);
+    expect(fetched[0].observedHarnessId).toBe("codex");
+    expect(fetched[0].observedHarnessAt).toBe("2026-01-01T00:04:00Z");
+  });
+
+  test("a newer successful read of the same workspace fences an older selected response", () => {
+    const workspaceProof = new Map<string, number>();
+    markWorkspaceReadProof(workspaceProof, ["w1"], 8);
+    expect(isStaleWorkspaceRead(workspaceProof, "w1", 5)).toBe(true);
+    expect(isStaleWorkspaceRead(workspaceProof, "w2", 5)).toBe(false);
   });
 
   test("a selected fetch reconciles per identity instead of dropping the snapshot", () => {

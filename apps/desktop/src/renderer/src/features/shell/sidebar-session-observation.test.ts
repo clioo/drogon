@@ -95,10 +95,10 @@ describe("createObservationLedger", () => {
     ledger.markApplied("h1:c:1", 3);
     expect(ledger.size).toBe(2);
     // Eviction re-arms the evicted key for ANY seq — including a stale one.
-    // The shell never relies on eviction being harmless: globally stale
-    // polls/fetches are dropped by request order before they reach the
-    // ledger (see isStalePollSettlement), and the adopt path prunes to the
-    // live selected copy so a live key is never the victim.
+    // The shell never relies on eviction being harmless: stale poll
+    // settlements and stale selected-workspace reads are fenced by read
+    // provenance before they reach the ledger, and the adopt path prunes to
+    // the live selected copy so unrelated history cannot evict a live key.
     expect(ledger.shouldApply("h1:a:1", 4)).toBe(true);
     expect(ledger.shouldApply("h1:b:1", 2)).toBe(false);
     expect(OBSERVATION_LEDGER_MAX_ENTRIES).toBeGreaterThan(2);
@@ -108,7 +108,7 @@ describe("createObservationLedger", () => {
     // Regression: with a tiny bound, admitting a newer fact for a live key
     // and then evicting it with unrelated keys lets an older seq win again.
     // Production never lets that older seq reach the ledger when a newer
-    // poll already settled (request order < last settled is dropped).
+    // read of the same authority already settled.
     const ledger = createObservationLedger(2);
     ledger.markApplied("h1:live:1", 6);
     expect(ledger.shouldApply("h1:live:1", 5)).toBe(false);
@@ -116,8 +116,8 @@ describe("createObservationLedger", () => {
     ledger.markApplied("h1:third:1", 8);
     expect(ledger.size).toBe(2);
     // The live proof was the oldest eviction victim: the stale seq wins the
-    // ledger check again — which is why the shell drops seq 5 globally once
-    // seq 8 settled, before consulting the ledger.
+    // ledger check again — which is why the shell fences seq 5 before
+    // consulting the ledger once seq 8 settled for the same source.
     expect(ledger.shouldApply("h1:live:1", 5)).toBe(true);
     expect(isStalePollSettlement(5, 8)).toBe(true);
   });

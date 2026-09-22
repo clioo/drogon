@@ -171,6 +171,7 @@ describe("observation freshness provenance (R3)", () => {
     const view = collector.view();
     expect(view.degraded).toBe(false);
     expect(view.freshKeys).toEqual(new Set(rows.map(observationKeyOf)));
+    expect(view.freshWorkspaceIds).toEqual(new Set(["ws-1", "ws-2"]));
   });
 
   test("a degraded poll marks only the workspaces it actually read fresh", async () => {
@@ -195,6 +196,7 @@ describe("observation freshness provenance (R3)", () => {
     ]);
     expect(view.freshKeys.has(observationKeyOf(session("other-new", "ws-2")))).toBe(true);
     expect(view.freshKeys.has(observationKeyOf(session("target", "ws-1")))).toBe(false);
+    expect(view.freshWorkspaceIds).toEqual(new Set(["ws-2"]));
   });
 
   test("the next degraded poll resets freshness to what it read", async () => {
@@ -209,6 +211,7 @@ describe("observation freshness provenance (R3)", () => {
     const fresh = collector.view().freshKeys;
     expect(fresh.has(observationKeyOf(session("two", "ws-2")))).toBe(true);
     expect(fresh.has(observationKeyOf(session("one", "ws-1")))).toBe(false);
+    expect(collector.view().freshWorkspaceIds).toEqual(new Set(["ws-2"]));
   });
 
   test("recovering host-wide replaces the fresh set with the full truth", () => {
@@ -219,6 +222,20 @@ describe("observation freshness provenance (R3)", () => {
     expect(collector.view().freshKeys).toEqual(
       new Set([observationKeyOf(session("fresh", "ws-2"))]),
     );
+    expect(collector.view().freshWorkspaceIds).toEqual(new Set(["ws-2"]));
+  });
+
+  test("successful empty scoped reads still prove workspace freshness", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([session("retained", "ws-1")]);
+    const view = await pollSidebarSessions({
+      collector,
+      workspaceIds: ["ws-empty"],
+      fetchHostWide: async () => ({ ok: false }),
+      fetchScoped: async () => ({ ok: true, sessions: [] }),
+    });
+    expect(view.freshKeys).toEqual(new Set());
+    expect(view.freshWorkspaceIds).toEqual(new Set(["ws-empty"]));
   });
 
   test("fresh keys are exact host+id+incarnation matches", () => {
@@ -303,6 +320,7 @@ describe("poll rejection and host changes (R3 epoch isolation)", () => {
     expect(view.freshKeys).toEqual(
       new Set([observationKeyOf(session("new", "ws-1"))]),
     );
+    expect(view.freshWorkspaceIds).toEqual(new Set(["ws-1"]));
   });
 });
 

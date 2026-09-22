@@ -82,11 +82,11 @@ export type ObservationLedger = {
  * first: forgetting a key re-arms it for ANY seq, including a stale one, so
  * callers must never rely on eviction being harmless on its own. In the
  * shell this is safe for two structural reasons, both pinned by regression:
- * globally stale polls/fetches are dropped by request order before they
- * reach the ledger, and the adopt path prunes to the live selected copy so
- * a live key is never the eviction victim while its row can still be
- * overwritten. A re-apply after prune/eviction still applies only
- * freshly-read rows.
+ * stale poll settlements and stale selected-workspace reads are dropped by
+ * read provenance before they reach the ledger, and the adopt path prunes
+ * to the live selected copy so unrelated retained history cannot evict a
+ * live key while its row can still be overwritten. A re-apply after
+ * prune/eviction still applies only freshly-read rows.
  */
 export function createObservationLedger(
   maxEntries: number = OBSERVATION_LEDGER_MAX_ENTRIES,
