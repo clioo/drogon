@@ -251,3 +251,61 @@ describe("one sidebar poll", () => {
     ]);
   });
 });
+
+describe("collector forks (R3 epoch isolation)", () => {
+  test("a discarded fork (cancelled or stale poll) leaves the shared collector untouched", async () => {
+    // A cancelled epoch's poll still runs to completion against its fork;
+    // dropping its view must not disturb the last committed truth.
+    const shared = createSidebarSessionCollector();
+    shared.noteHostWide([session("committed", "ws-1")]);
+    const fork = shared.fork();
+    await pollSidebarSessions({
+      collector: fork,
+      workspaceIds: ["ws-1"],
+      fetchHostWide: async () => ({ ok: true, sessions: [session("stale", "ws-1")] }),
+      fetchScoped: async () => ({ ok: false }),
+    });
+    expect(fork.view().sessions.map((row) => row.id)).toEqual(["stale"]);
+    const view = shared.view();
+    expect(view.sessions.map((row) => row.id)).toEqual(["committed"]);
+    expect(view.freshKeys).toEqual(
+      new Set([observationKeyOf(session("committed", "ws-1"))]),
+    );
+    expect(view.degraded).toBe(false);
+  });
+
+  test("a fork starts from the committed state and diverges independently", async () => {
+    const shared = createSidebarSessionCollector();
+    shared.noteHostWideFailure();
+    shared.noteScoped("ws-1", [session("one", "ws-1")]);
+    const fork = shared.fork();
+    expect(fork.isDegraded()).toBe(true);
+    fork.noteScoped("ws-2", [session("two", "ws-2")]);
+    expect(fork.view().sessions.map((row) => row.id).sort()).toEqual(["one", "two"]);
+    // The shared collector never saw ws-2.
+    expect(shared.view().sessions.map((row) => row.id)).toEqual(["one"]);
+    // And shared writes after the fork do not leak into it either.
+    shared.noteScoped("ws-3", [session("three", "ws-3")]);
+    expect(fork.view().sessions.map((row) => row.id).sort()).toEqual(["one", "two"]);
+    expect(shared.view().sessions.map((row) => row.id).sort()).toEqual([
+      "one",
+      "three",
+    ]);
+  });
+
+  test("a committed view is immutable: later polls never mutate a held array or proof", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([session("a", "ws-1")]);
+    const committed = collector.view();
+    const heldSessions = committed.sessions;
+    const heldKeys = committed.freshKeys;
+    await pollSidebarSessions({
+      collector,
+      workspaceIds: ["ws-1"],
+      fetchHostWide: async () => ({ ok: true, sessions: [session("b", "ws-1")] }),
+      fetchScoped: async () => ({ ok: false }),
+    });
+    expect(heldSessions.map((row) => row.id)).toEqual(["a"]);
+    expect(heldKeys).toEqual(new Set([observationKeyOf(session("a", "ws-1"))]));
+  });
+});

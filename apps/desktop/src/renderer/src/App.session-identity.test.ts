@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "vitest";
 import {
   adoptOutOfBandSessions,
+  commitObservationProof,
+  planAdoptOutOfBandSessions,
   appendOrReplaceSession,
   applyConfirmedClose,
   capabilityDigest,
@@ -10,6 +12,7 @@ import {
   removeSessionExact,
   sameBotsLoadResult,
   sameSessions,
+  settleSidebarPoll,
   shouldSessionPollTick,
 } from "./App";
 import type { BotsLoadResult } from "./bots-loader";
@@ -23,6 +26,7 @@ import {
   createObservationLedger,
   isStalePollSettlement,
   observationKeyOf,
+  type ObservationLedger,
 } from "./features/shell/sidebar-session-observation";
 
 const session = (id: string, overrides: Partial<Session> = {}): Session => ({
@@ -727,6 +731,27 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     observedHarnessAt: "2026-01-01T00:02:00Z",
     hasForegroundChild: true,
   };
+  // The shell's commit path: the pure plan runs (and may replay) without
+  // touching the ledger; its proof commits exactly once with its sessions.
+  const adoptAndCommit = (
+    current: Session[],
+    hostWide: readonly Session[],
+    provenance: {
+      freshKeys: ReadonlySet<string>;
+      seq: number;
+      ledger: ObservationLedger;
+    },
+  ): Session[] => {
+    const plan = planAdoptOutOfBandSessions(
+      current,
+      hostWide,
+      "w1",
+      never,
+      provenance,
+    );
+    commitObservationProof(provenance.ledger, plan.appliedKeys, provenance.seq);
+    return plan.sessions;
+  };
 
   // A degraded poll whose target workspace failed while another progressed.
   // Returns the view the shell would commit (retained target + fresh other).
@@ -807,7 +832,7 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     const ledger = createObservationLedger();
     const idle = [target({ hasForegroundChild: false })];
     const newerKeys = new Set([observationKeyOf(target(freshPi))]);
-    const gained = adoptOutOfBandSessions(idle, [target(freshPi)], "w1", never, {
+    const gained = adoptAndCommit(idle, [target(freshPi)], {
       freshKeys: newerKeys,
       seq: 6,
       ledger,
@@ -816,14 +841,14 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     // The older response settles late with a stale positive AND a stale
     // null; neither may move the selection that already saw seq 6.
     const olderKeys = new Set([observationKeyOf(target())]);
-    const rolled = adoptOutOfBandSessions(gained, [target()], "w1", never, {
+    const rolled = adoptAndCommit(gained, [target()], {
       freshKeys: olderKeys,
       seq: 5,
       ledger,
     });
     expect(rolled).toBe(gained);
     expect(rolled[0].observedHarnessId).toBe("pi");
-    const olderPositive = adoptOutOfBandSessions(
+    const olderPositive = adoptAndCommit(
       gained,
       [
         target({
@@ -831,19 +856,15 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
           observedHarnessAt: "2026-01-01T00:01:00Z",
         }),
       ],
-      "w1",
-      never,
       { freshKeys: olderKeys, seq: 5, ledger },
     );
     expect(olderPositive).toBe(gained);
     // A genuinely newer poll still moves the selection afterwards.
-    const moved = adoptOutOfBandSessions(
-      gained,
-      [target({ hasForegroundChild: false })],
-      "w1",
-      never,
-      { freshKeys: newerKeys, seq: 8, ledger },
-    );
+    const moved = adoptAndCommit(gained, [target({ hasForegroundChild: false })], {
+      freshKeys: newerKeys,
+      seq: 8,
+      ledger,
+    });
     expect(moved).not.toBe(gained);
     expect(moved[0].observedHarnessId ?? null).toBeNull();
     expect(moved[0].hasForegroundChild).toBe(false);
@@ -854,44 +875,38 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     const keys = new Set([observationKeyOf(target())]);
     const at = (n: string) => `2026-01-01T00:0${n}:00Z`;
     // Gain.
-    const gained = adoptOutOfBandSessions([target()], [target(freshPi)], "w1", never, {
+    const gained = adoptAndCommit([target()], [target(freshPi)], {
       freshKeys: keys,
       seq: 1,
       ledger,
     });
     expect(gained[0].observedHarnessId).toBe("pi");
     // Change.
-    const changed = adoptOutOfBandSessions(
+    const changed = adoptAndCommit(
       gained,
       [target({ observedHarnessId: "codex", observedHarnessAt: at("3") })],
-      "w1",
-      never,
       { freshKeys: keys, seq: 2, ledger },
     );
     expect(changed[0].observedHarnessId).toBe("codex");
     // Clear (null carries no timestamp; the poll order is the proof).
-    const cleared = adoptOutOfBandSessions(changed, [target()], "w1", never, {
+    const cleared = adoptAndCommit(changed, [target()], {
       freshKeys: keys,
       seq: 3,
       ledger,
     });
     expect(cleared[0].observedHarnessId ?? null).toBeNull();
     // Foreground enter and leave (no timestamp at all).
-    const entered = adoptOutOfBandSessions(
+    const entered = adoptAndCommit(
       cleared,
       [target({ hasForegroundChild: true })],
-      "w1",
-      never,
       { freshKeys: keys, seq: 4, ledger },
     );
     expect(entered[0].hasForegroundChild).toBe(true);
-    const left = adoptOutOfBandSessions(
-      entered,
-      [target({ hasForegroundChild: false })],
-      "w1",
-      never,
-      { freshKeys: keys, seq: 5, ledger },
-    );
+    const left = adoptAndCommit(entered, [target({ hasForegroundChild: false })], {
+      freshKeys: keys,
+      seq: 5,
+      ledger,
+    });
     expect(left[0].hasForegroundChild).toBe(false);
   });
 
@@ -949,5 +964,134 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     expect(isStalePollSettlement(5, 6)).toBe(true);
     expect(isStalePollSettlement(6, 6)).toBe(false);
     expect(isStalePollSettlement(7, 6)).toBe(false);
+  });
+
+  test("an unchanged successful read still advances ordering proof without minting a new array", () => {
+    // A byte-identical re-read (fresh objects) is still a successful
+    // observation: its request order is new evidence for null clears and
+    // foreground flips, which carry no timestamp of their own.
+    const previous = [target(freshPi)];
+    const reread = previous.map((item) => ({ ...item, args: [...item.args] }));
+    expect(reread).not.toBe(previous);
+    const keys = new Set([observationKeyOf(target())]);
+    const settled = settleSidebarPoll(previous, {
+      sessions: reread,
+      degraded: false,
+      freshKeys: keys,
+    }, 7);
+    expect(settled.seq).toBe(7);
+    expect(settled.freshKeys).toBe(keys);
+    expect(settled.dataChanged).toBe(false);
+    expect(settled.sessions).toBe(previous);
+  });
+
+  test("a changed read commits the new array with its proof", () => {
+    const previous = [target({ hasForegroundChild: false })];
+    const next = [target(freshPi)];
+    const keys = new Set([observationKeyOf(target())]);
+    const settled = settleSidebarPoll(previous, {
+      sessions: next,
+      degraded: false,
+      freshKeys: keys,
+    }, 7);
+    expect(settled.dataChanged).toBe(true);
+    expect(settled.sessions).toBe(next);
+    expect(settled.seq).toBe(7);
+    expect(settled.freshKeys).toBe(keys);
+  });
+
+  test("an unchanged successful read re-proves the selected copy after a stale selected-fetch overwrite", () => {
+    const ledger = createObservationLedger();
+    const keys = new Set([observationKeyOf(target())]);
+    // Poll 1 (seq 6) observes Pi; the selected copy adopts and commits.
+    const observed = adoptAndCommit([target({ hasForegroundChild: false })], [target(freshPi)], {
+      freshKeys: keys,
+      seq: 6,
+      ledger,
+    });
+    expect(observed[0].observedHarnessId).toBe("pi");
+    // A stale selected fetch overwrites the selected copy with older idle
+    // rows (its snapshot was stamped at completion, not request order).
+    const staleSelected = [target({ hasForegroundChild: false })];
+    // Poll 2 (seq 7) succeeds with byte-identical content to poll 1's
+    // commit — but its proof is new evidence, so it must still advance.
+    const reread = [target(freshPi)];
+    const settled = settleSidebarPoll(observed, {
+      sessions: reread,
+      degraded: false,
+      freshKeys: keys,
+    }, 7);
+    expect(settled.sessions).toBe(observed);
+    // Reconciling the stale selected copy against the fresh proof restores
+    // the Pi the stale fetch erased.
+    const healed = adoptAndCommit(staleSelected, settled.sessions, {
+      freshKeys: settled.freshKeys,
+      seq: settled.seq,
+      ledger,
+    });
+    expect(healed).not.toBe(staleSelected);
+    expect(healed[0].observedHarnessId).toBe("pi");
+    expect(healed[0].hasForegroundChild).toBe(true);
+  });
+
+  test("a late older selected fetch cannot erase a newer poll observation", () => {
+    const ledger = createObservationLedger();
+    const keys = new Set([observationKeyOf(target())]);
+    // A newer poll (seq 8) observed Pi and committed it into the selected
+    // copy while the selected fetch (requested at order 5) was in flight.
+    const selected = adoptAndCommit(
+      [target({ hasForegroundChild: false })],
+      [target(freshPi)],
+      { freshKeys: keys, seq: 8, ledger },
+    );
+    expect(selected[0].observedHarnessId).toBe("pi");
+    // The older fetch settles late with idle rows. Its request order is
+    // stale past the last settled poll, so the shell drops the snapshot —
+    // and even planned at its own request order it could not move the copy.
+    expect(isStalePollSettlement(5, 8)).toBe(true);
+    const late = planAdoptOutOfBandSessions(
+      selected,
+      [target({ hasForegroundChild: false })],
+      "w1",
+      never,
+      { freshKeys: keys, seq: 5, ledger },
+    );
+    expect(late.sessions).toBe(selected);
+    expect(late.appliedKeys).toEqual([]);
+    expect(selected[0].observedHarnessId).toBe("pi");
+  });
+
+  test("replaying the adopt updater with identical inputs applies identically (StrictMode replay)", () => {
+    // The shell commits adopt inside a React setState updater, which React
+    // may invoke twice with the same current state. The updater must be
+    // pure: replaying it with identical inputs must produce the identical
+    // result, never lose the fresh observation the first pass applied.
+    const current = [target({ hasForegroundChild: false })];
+    const hostWide = [target(freshPi)];
+    const keys = new Set([observationKeyOf(target())]);
+    const ledger = createObservationLedger();
+    const updater = (items: Session[]) =>
+      adoptOutOfBandSessions(items, hostWide, "w1", never, {
+        freshKeys: keys,
+        seq: 6,
+        ledger,
+      });
+    const first = updater(current);
+    expect(first[0].observedHarnessId).toBe("pi");
+    const second = updater(current);
+    expect(second).toEqual(first);
+    expect(second[0].observedHarnessId).toBe("pi");
+    // The plan never writes the ledger itself: replay leaves no trace, and
+    // the committer records the proof exactly once with its sessions.
+    expect(ledger.size).toBe(0);
+    const plan = planAdoptOutOfBandSessions(current, hostWide, "w1", never, {
+      freshKeys: keys,
+      seq: 6,
+      ledger,
+    });
+    expect(plan.sessions).toEqual(first);
+    commitObservationProof(ledger, plan.appliedKeys, 6);
+    expect(ledger.shouldApply(observationKeyOf(target()), 6)).toBe(false);
+    expect(ledger.shouldApply(observationKeyOf(target()), 7)).toBe(true);
   });
 });

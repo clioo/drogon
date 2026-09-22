@@ -61,6 +61,14 @@ export type SidebarSessionCollector = {
   view(): SidebarSessionSourceView;
   /** True while the last host-wide read failed. */
   isDegraded(): boolean;
+  /**
+   * R3: an independent copy of the committed state. A poll reads into the
+   * fork; the shell swaps it in only for a fresh, non-cancelled commit, so
+   * a cancelled epoch's late rows (or a stale poll's older truth) can never
+   * corrupt the shared accumulator. Rows are shared by reference and never
+   * mutated in place; lists, rotation and the fresh set are all copied.
+   */
+  fork(): SidebarSessionCollector;
 };
 
 /**
@@ -104,18 +112,30 @@ export async function pollSidebarSessions(deps: {
   return deps.collector.view();
 }
 
-export function createSidebarSessionCollector(): SidebarSessionCollector {
-  let healthy = true;
-  let hostWide: Session[] = [];
-  const byWorkspaceId = new Map<string, Session[]>();
+type SidebarSessionCollectorState = {
+  healthy: boolean;
+  hostWide: Session[];
+  byWorkspaceId: [string, Session[]][];
+  cursor: number;
+  fresh: string[];
+};
+
+function createCollectorFrom(initial?: SidebarSessionCollectorState): SidebarSessionCollector {
+  let healthy = initial?.healthy ?? true;
+  let hostWide = initial ? [...initial.hostWide] : [];
+  const byWorkspaceId = new Map<string, Session[]>(
+    (initial?.byWorkspaceId ?? []).map(
+      ([id, sessions]) => [id, [...sessions]] as [string, Session[]],
+    ),
+  );
   // Insertion order is the rotation: the oldest-read workspace is the next
   // one to refresh, so a degraded sidebar still converges on fresh rows.
-  let cursor = 0;
+  let cursor = initial?.cursor ?? 0;
   // R3: keys actually delivered by the latest poll phase (see `freshKeys`
   // above). Reset when a new degraded phase begins; each successful scoped
   // delivery adds its own workspace's keys, so a batch accumulates exactly
   // what it read and nothing it retained.
-  let fresh = new Set<string>();
+  let fresh = new Set<string>(initial?.fresh ?? []);
 
   const merged = (): Session[] => {
     const byId = new Map<string, Session>();
@@ -164,13 +184,18 @@ export function createSidebarSessionCollector(): SidebarSessionCollector {
       for (const session of sessions) fresh.add(observationKeyOf(session));
     },
     view() {
-      // A copy per view: callers hold the set across async adopt commits,
-      // and later polls must never mutate a committed proof.
-      if (healthy) return { sessions: hostWide, degraded: false, freshKeys: new Set(fresh) };
+      // A copy per view: callers hold the array AND the set across async
+      // adopt commits, and later polls must never mutate committed data or
+      // proof (rows themselves are shared by reference, never mutated).
+      if (healthy)
+        return { sessions: [...hostWide], degraded: false, freshKeys: new Set(fresh) };
       const scoped = merged();
       // Nothing scoped has landed yet: the last full list still beats blank.
       return {
-        sessions: scoped.length > 0 ? [...scoped, ...hostWide.filter((s) => !scoped.some((row) => row.id === s.id))] : hostWide,
+        sessions:
+          scoped.length > 0
+            ? [...scoped, ...hostWide.filter((s) => !scoped.some((row) => row.id === s.id))]
+            : [...hostWide],
         degraded: true,
         freshKeys: new Set(fresh),
       };
@@ -178,5 +203,20 @@ export function createSidebarSessionCollector(): SidebarSessionCollector {
     isDegraded() {
       return !healthy;
     },
+    fork() {
+      return createCollectorFrom({
+        healthy,
+        hostWide: [...hostWide],
+        byWorkspaceId: [...byWorkspaceId].map(
+          ([id, sessions]) => [id, [...sessions]] as [string, Session[]],
+        ),
+        cursor,
+        fresh: [...fresh],
+      });
+    },
   };
+}
+
+export function createSidebarSessionCollector(): SidebarSessionCollector {
+  return createCollectorFrom();
 }
