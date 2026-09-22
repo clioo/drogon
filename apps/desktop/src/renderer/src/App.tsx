@@ -461,6 +461,8 @@ export function sameSession(left: Session, right: Session): boolean {
     left.createdAt === right.createdAt &&
     left.agentState === right.agentState &&
     left.agentStateAt === right.agentStateAt &&
+    (left.agentStateAuthority ?? null) ===
+      (right.agentStateAuthority ?? null) &&
     left.agentPromptPreview === right.agentPromptPreview &&
     left.cacheIdleAt === right.cacheIdleAt &&
     left.harnessId === right.harnessId &&
@@ -1274,9 +1276,18 @@ export function App() {
       item.agentState ?? "unknown",
       second.agentState ?? "unknown",
     );
-    return aggregated === (item.agentState ?? "unknown")
-      ? item
-      : { ...item, agentState: aggregated };
+    if (aggregated === (item.agentState ?? "unknown")) return item;
+    // The badge shows the hotter pane's state, so it must also carry that
+    // pane's turn proof — never the root's stale proof, and never a proof
+    // the hotter pane did not report (an old-daemon push without metadata
+    // clears rather than inherits).
+    const winner =
+      aggregated === (second.agentState ?? "unknown") ? second : item;
+    return {
+      ...item,
+      agentState: aggregated,
+      agentStateAuthority: winner.agentStateAuthority ?? null,
+    };
   });
   // A restored selection can point at a second pane (it was the last
   // session): the tab it belongs to is its split root.
@@ -2575,6 +2586,7 @@ export function App() {
         workspaceId: event.workspaceId,
         agentState: event.agentState as AgentState,
         agentStateAt: event.agentStateAt ?? null,
+        agentStateAuthority: event.agentStateAuthority ?? null,
         agentPromptPreview: event.agentPromptPreview,
         cacheIdleAt: event.cacheIdleAt,
       };

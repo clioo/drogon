@@ -65,6 +65,10 @@ function asWatchedSessions(value: unknown): WatchedSession[] {
           : undefined,
       agentState: typeof row.agentState === "string" ? row.agentState : undefined,
       agentStateAt: typeof row.agentStateAt === "string" ? row.agentStateAt : null,
+      agentStateAuthority:
+        row.agentStateAuthority === "hook" || row.agentStateAuthority === "activity"
+          ? row.agentStateAuthority
+          : undefined,
     });
   }
   return out;
@@ -232,6 +236,9 @@ export function createNeedsInputWatcher(deps: NeedsInputWatcherDeps): {
             agentStateAt:
               sessions.find((item) => item.id === transition.session.id)
                 ?.agentStateAt ?? null,
+            agentStateAuthority:
+              sessions.find((item) => item.id === transition.session.id)
+                ?.agentStateAuthority ?? null,
           };
           window.webContents.send(
             notificationsIpcChannels.stateChanged,
@@ -359,6 +366,7 @@ export function createAgentTaskCompletionObserver(
         harnessId: event.harnessId,
         agentState: event.agentState,
         agentStateAt: event.agentStateAt,
+        agentStateAuthority: event.agentStateAuthority,
       },
       workspaceName: null,
     }));
@@ -575,6 +583,7 @@ export function registerNotificationsIpc(
             harnessId: event.harnessId,
             agentState: event.agentState,
             agentStateAt: event.agentStateAt,
+            agentStateAuthority: event.agentStateAuthority,
           },
         workspaceName: workspaceNames.get(event.workspaceId) ?? null,
       };

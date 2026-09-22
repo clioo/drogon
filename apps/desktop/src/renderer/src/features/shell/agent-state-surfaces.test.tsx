@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 /* MIT Copyright (c) 2026 Lovecast Inc.
-   F1 cross-surface regression: the SAME old-daemon session (harness-less
+   F1/R1 cross-surface regression: the SAME old-daemon session (harness-less
    shell carrying PTY-clock `working`, with and without an observed
-   harness) drives the agent row, the card sentence, the tab badge and the
-   summary pill — no surface may spin a Working claim for an unproven turn.
-   A launched `working` control proves genuine turns still render Working. */
+   harness — plus a launched session without turn proof) drives the agent
+   row, the card sentence, the tab badge and the summary pill — no surface
+   may spin a Working claim for an unproven turn. A hook-proven launched
+   `working` control proves genuine turns still render Working. */
 import { afterEach, describe, expect, test } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { Tooltip } from "radix-ui";
@@ -170,8 +171,35 @@ describe("one old-daemon shell session on every surface", () => {
     });
   }
 
-  test("a launched working still spins the tab and names the agent turn", () => {
+  test("an old-daemon launched working spins nothing on any surface", () => {
+    // The R1 correction: a launched idle repaint is indistinguishable on
+    // old wire, so missing proof never makes an agent Working — launch or
+    // not. The launched row is a named agent that is not reporting.
     const item = shellSession({ harnessId: "pi" });
+    const sessions = [item];
+
+    expect(
+      buildWorktreeAgentRows(sessions, {
+        nowMs: Date.parse("2026-09-08T12:00:00.000Z"),
+      }).map((row) => row.state),
+    ).toEqual(["unknown"]);
+    expect(worktreeActivitySentence(sessions)).toBe("1 AGENT NOT REPORTING");
+    expect(worktreeActivityGlyph(sessions)).toBeNull();
+    expect(cardDotState(sessions)).toBe("unknown");
+
+    const strip = renderStrip(sessions);
+    expect(
+      strip.container.querySelector("[data-agent-spinner]"),
+      "an unproven launched turn must not spin the tab",
+    ).toBeNull();
+    strip.unmount();
+  });
+
+  test("a hook-proven launched working still spins the tab and names the agent turn", () => {
+    const item = shellSession({
+      harnessId: "pi",
+      agentStateAuthority: "hook",
+    });
     const sessions = [item];
 
     expect(

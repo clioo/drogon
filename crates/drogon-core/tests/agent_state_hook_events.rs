@@ -161,6 +161,10 @@ fn hook_event_marks_needs_input_and_resume_clears_it() {
             .is_some_and(|at| !at.is_empty()),
         "needs_input must carry the hook timestamp"
     );
+    assert_eq!(
+        marked["agentStateAuthority"], "hook",
+        "a hook wait signal proves the wait"
+    );
 
     let listed = ok(&engine, "session.list", json!({}));
     let row = listed["sessions"]
@@ -171,6 +175,10 @@ fn hook_event_marks_needs_input_and_resume_clears_it() {
         .expect("session must be listed");
     assert_eq!(row["agentState"], "needs_input");
     assert_eq!(row["agentStateAt"], marked["agentStateAt"]);
+    assert_eq!(
+        row["agentStateAuthority"], "hook",
+        "poll and push must agree on the proof"
+    );
 
     // Keystroke echo is PTY output, but it must NOT spend the wait: the
     // generic output clear is exactly how typing used to lie about the
@@ -220,6 +228,10 @@ fn hook_event_marks_needs_input_and_resume_clears_it() {
         resumed["agentState"], "working",
         "the resumption hook must clear the wait and report the turn"
     );
+    assert_eq!(
+        resumed["agentStateAuthority"], "hook",
+        "a silent hook turn is still a proven turn"
+    );
 
     let stopped = ok(
         &engine,
@@ -228,6 +240,10 @@ fn hook_event_marks_needs_input_and_resume_clears_it() {
     );
     assert_eq!(stopped["verdict"], "exited");
     assert_eq!(stopped["agentState"], "exited");
+    assert!(
+        stopped["agentStateAuthority"].is_null(),
+        "exit claims no turn proof; the verdict is the truth"
+    );
 }
 
 #[test]
@@ -321,6 +337,10 @@ fn hook_events_on_harness_less_sessions_are_refused() {
         .find(|s| s["id"] == session_id)
         .expect("session must be listed");
     assert_eq!(row["agentState"], "unknown");
+    assert!(
+        row["agentStateAuthority"].is_null(),
+        "unproven silence claims no proof"
+    );
 
     for event in [
         "Stop",

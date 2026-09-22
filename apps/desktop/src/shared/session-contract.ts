@@ -90,6 +90,17 @@ export type Session = {
    */
   agentState?: AgentState;
   agentStateAt?: string | null;
+  /**
+   * Turn proof behind `agentState` (activity authority, additive): `hook`
+   * means the harness's own hook lifecycle reported the turn (an open turn
+   * behind `working`, a turn-end behind `idle`, a hook wait behind
+   * `needs_input`) — the only thing that proves a turn. `activity` means
+   * the `idle` derives only from the PTY clock going quiet. Absent/null
+   * means no proof is claimed (`unknown`, `exited`, or a daemon predating
+   * the field) and must never render as `working`/`idle`. Optional so an
+   * older daemon's rows still validate; older clients ignore it.
+   */
+  agentStateAuthority?: "hook" | "activity" | null;
   /** Bounded first-known prompt preview, in memory only; used for stable tab names. */
   agentPromptPreview?: string | null;
   /** Claude Stop hook timestamp; never inferred from loss of contact. */

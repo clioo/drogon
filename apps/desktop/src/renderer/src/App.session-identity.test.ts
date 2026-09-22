@@ -267,6 +267,22 @@ describe("PERF-03 poll identity (sameSessions)", () => {
     expect(sameSessions(previous, clone(previous))).toBe(true);
   });
 
+  test("identical turn proof keeps the previous array; null and absent agree", () => {
+    const previous = [
+      session("s1", { agentState: "working", agentStateAuthority: "hook" }),
+      session("s2", { agentState: "working", agentStateAuthority: null }),
+    ];
+    expect(sameSessions(previous, clone(previous))).toBe(true);
+    // An old daemon's missing field and an explicit null are the same
+    // no-proof claim — neither may mint a new array identity.
+    expect(
+      sameSessions(previous, [
+        session("s1", { agentState: "working", agentStateAuthority: "hook" }),
+        session("s2", { agentState: "working" }),
+      ]),
+    ).toBe(true);
+  });
+
   test("any field-level change replaces the list", () => {
     const previous = [session("s1")];
     for (const overrides of [
@@ -286,6 +302,11 @@ describe("PERF-03 poll identity (sameSessions)", () => {
       { command: "/bin/zsh" },
       { cols: 100 },
       { createdAt: "2026-01-02T00:00:00Z" },
+      // R1: an authority-only move replaces the list — proof gained or
+      // lost with the state unchanged flips the rendered dot, so it must
+      // never be discarded as a sameSessions no-op.
+      { agentStateAuthority: "hook" },
+      { agentState: "working", agentStateAuthority: "hook" },
     ] as Partial<Session>[]) {
       expect(
         sameSessions(previous, [session("s1", overrides)]),

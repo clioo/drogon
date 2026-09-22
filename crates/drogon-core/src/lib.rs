@@ -1246,17 +1246,18 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
     let needs_input_at: Option<String> = r.get(12)?;
     let turn_fact: Option<String> = r.get(14)?;
     let turn_fact_at: Option<String> = r.get(15)?;
-    let (agent_state, agent_state_at) = if verdict == "exited" {
-        ("exited", needs_input_at.clone())
-    } else if needs_input_at.is_some() {
-        ("needs_input", needs_input_at.clone())
-    } else if turn_fact.as_deref() == Some(session::TURN_ACTIVE_WIRE) {
-        ("working", turn_fact_at.clone())
-    } else if turn_fact.as_deref() == Some(session::TURN_ENDED_WIRE) {
-        ("idle", turn_fact_at.clone())
-    } else {
-        ("unknown", None)
-    };
+    let (agent_state, agent_state_at, agent_state_authority): (&str, Option<String>, Option<&str>) =
+        if verdict == "exited" {
+            ("exited", needs_input_at.clone(), None)
+        } else if needs_input_at.is_some() {
+            ("needs_input", needs_input_at.clone(), Some("hook"))
+        } else if turn_fact.as_deref() == Some(session::TURN_ACTIVE_WIRE) {
+            ("working", turn_fact_at.clone(), Some("hook"))
+        } else if turn_fact.as_deref() == Some(session::TURN_ENDED_WIRE) {
+            ("idle", turn_fact_at.clone(), Some("hook"))
+        } else {
+            ("unknown", None, None)
+        };
     Ok((
         id.clone(),
         json!({
@@ -1273,6 +1274,12 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "createdAt": r.get::<_, String>(10)?,
             "agentState": agent_state,
             "agentStateAt": agent_state_at,
+            // The turn proof behind `agentState`: hook-reported states
+            // re-report their `hook` authority from the durable fact, so a
+            // restored row keeps its spinner/idle honestly; anything else
+            // (and every pre-field row) carries null — no proof, never a
+            // spinner downstream.
+            "agentStateAuthority": agent_state_authority,
             "agentPromptPreview": null,
             "cacheIdleAt": null,
             "harnessId": r.get::<_, Option<String>>(11)?,
@@ -1490,6 +1497,9 @@ mod session_list_workspace_index_tests {
                 "agentSessionTranscriptPath",
                 "agentState",
                 "agentStateAt",
+                // Additive (R1 activity authority): the turn proof behind
+                // `agentState`; older clients ignore the unknown key.
+                "agentStateAuthority",
                 "args",
                 "cacheIdleAt",
                 "causedByEventId",
@@ -1508,7 +1518,7 @@ mod session_list_workspace_index_tests {
                 "verdict",
                 "workspaceId",
             ],
-            "RPC output shape is unchanged",
+            "RPC output shape carries exactly the pinned keys",
         );
         assert_eq!(row["workspaceId"], "ws-a");
         assert_eq!(row["createdAt"], "2026-09-10T00:00:01Z");

@@ -34,7 +34,11 @@ function shellSession(
   };
 }
 
-/** An agent launched through `harness.start`. */
+/**
+ * An agent launched through `harness.start` on a current daemon: hook
+ * turn states (`working`/`idle`/`needs_input`) carry the hook proof, so
+ * these rows model hook-reported turns — never old-daemon PTY-clock wire.
+ */
 function session(
   state: AgentState | undefined,
   verdict: Session["verdict"] = "live",
@@ -44,6 +48,9 @@ function session(
     id: `s-${state}-${verdict}-${Math.random()}`,
     harnessId: "pi",
     exitCode: verdict === "exited" ? 0 : null,
+    ...(state === "working" || state === "idle" || state === "needs_input"
+      ? { agentStateAuthority: "hook" as const }
+      : {}),
   };
 }
 
@@ -179,9 +186,13 @@ describe("worktree card activity", () => {
       "1 AGENT NOT REPORTING",
     );
     expect(worktreeActivityGlyph([observedSession("working")])).toBeNull();
+    // A quiet clock is not proof of idleness either: an observed `idle`
+    // without hook proof reads not-reporting, never a false quiet — the
+    // agent stays named, not hidden and not idle.
     expect(worktreeActivitySentence([observedSession("idle")])).toBe(
-      "NO ACTIVE AGENTS",
+      "1 AGENT NOT REPORTING",
     );
+    expect(worktreeActivityGlyph([observedSession("idle")])).toBeNull();
   });
 
   test("an unverifiable plain shell names its session, never an agent", () => {

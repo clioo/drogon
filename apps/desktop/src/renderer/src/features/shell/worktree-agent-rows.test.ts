@@ -126,8 +126,18 @@ describe("buildWorktreeAgentRows", () => {
   it("derives the collapsed summary counts from the same rows", () => {
     const rows = buildWorktreeAgentRows(
       [
-        session({ id: "s-1", agentState: "working", harnessId: "pi" }),
-        session({ id: "s-2", agentState: "idle", harnessId: "pi" }),
+        session({
+          id: "s-1",
+          agentState: "working",
+          harnessId: "pi",
+          agentStateAuthority: "hook",
+        }),
+        session({
+          id: "s-2",
+          agentState: "idle",
+          harnessId: "pi",
+          agentStateAuthority: "hook",
+        }),
       ],
       { nowMs: NOW },
     );
@@ -148,7 +158,12 @@ describe("buildWorktreeAgentRows", () => {
     const rows = buildWorktreeAgentRows(
       [
         session({ id: "s-1", agentState: "working", harnessId: null }),
-        session({ id: "s-2", agentState: "idle", harnessId: "pi" }),
+        session({
+          id: "s-2",
+          agentState: "idle",
+          harnessId: "pi",
+          agentStateAuthority: "hook",
+        }),
       ],
       { nowMs: NOW },
     );
@@ -175,8 +190,8 @@ describe("resolved harness (issue #622, B1)", () => {
   });
 
   it("labels a session running an agent by harness, shells keep Terminal N", () => {
-    // F1: identity fixtures use the proven quiet state — an unproven
-    // `working` turn now states the agent silence instead of the label.
+    // Identity (title) is recognition, not a turn claim: it holds while
+    // the unproven turn states the agent silence in the secondary slot.
     const rows = buildWorktreeAgentRows(
       [
         session({
@@ -199,12 +214,16 @@ describe("resolved harness (issue #622, B1)", () => {
     );
     // The observed session reads the harness label, not a terminal number.
     expect(rows.find((row) => row.session.id === "s-1")?.title).toBe("Claude");
-    expect(rows.find((row) => row.session.id === "s-1")?.secondary).toBe("");
+    expect(rows.find((row) => row.session.id === "s-1")?.secondary).toBe(
+      "No update in 1m",
+    );
     // The genuine plain shell still reads exactly what its tab reads.
     expect(rows.find((row) => row.session.id === "s-2")?.title).toBe(
       "Terminal 2",
     );
-    expect(rows.find((row) => row.session.id === "s-2")?.secondary).toBe("zsh");
+    expect(rows.find((row) => row.session.id === "s-2")?.secondary).toBe(
+      "No update in 1m",
+    );
   });
 
   it("keeps a harness.start session on its harness identity", () => {
@@ -215,6 +234,7 @@ describe("resolved harness (issue #622, B1)", () => {
           harnessId: "claude",
           observedHarnessId: "pi",
           command: "/bin/zsh",
+          agentStateAuthority: "hook",
         }),
       ],
       { nowMs: NOW },
@@ -225,7 +245,14 @@ describe("resolved harness (issue #622, B1)", () => {
 
   it("a custom rename still wins over the harness label", () => {
     const rows = buildWorktreeAgentRows(
-      [session({ id: "s-1", agentState: "idle", observedHarnessId: "codex" })],
+      [
+        session({
+          id: "s-1",
+          agentState: "idle",
+          harnessId: "codex",
+          agentStateAuthority: "hook",
+        }),
+      ],
       { nowMs: NOW, customTitles: { "s-1": "Setup" } },
     );
     expect(rows[0]?.title).toBe("Setup");
@@ -238,8 +265,8 @@ describe("resolved harness (issue #622, B1)", () => {
       resolveRowSecondary(
         session({
           agentState: "idle",
-          harnessId: null,
-          observedHarnessId: "claude",
+          harnessId: "claude",
+          agentStateAuthority: "hook",
           command: "/bin/zsh",
         }),
         NOW,
@@ -248,7 +275,11 @@ describe("resolved harness (issue #622, B1)", () => {
     ).toBe("");
     expect(
       resolveRowSecondary(
-        session({ agentState: "idle", harnessId: "claude" }),
+        session({
+          agentState: "idle",
+          harnessId: "claude",
+          agentStateAuthority: "hook",
+        }),
         NOW,
         "Claude",
       ),
@@ -260,10 +291,16 @@ describe("row copy", () => {
   it("names harness sessions by harness and shells by command", () => {
     expect(
       resolveRowSecondary(
-        session({ agentState: "working", harnessId: "pi" }),
+        session({
+          agentState: "working",
+          harnessId: "pi",
+          agentStateAuthority: "hook",
+        }),
         NOW,
       ),
     ).toBe("Pi");
+    // A quiet shell states the agent silence, never a guessed command
+    // activity: the command still names the row's title and tab.
     expect(
       resolveRowSecondary(
         session({
@@ -272,6 +309,19 @@ describe("row copy", () => {
           command: "/usr/local/bin/fish",
         }),
         NOW,
+      ),
+    ).toBe("No update in 1m");
+    // ...while a shell with a terminal truth of its own (exited) still
+    // names its command after the dash.
+    expect(
+      resolveRowSecondary(
+        session({
+          agentState: "exited",
+          harnessId: null,
+          command: "/usr/local/bin/fish",
+        }),
+        NOW,
+        "Terminal 1",
       ),
     ).toBe("fish");
     expect(formatRowHarnessLabel(null)).toBe("Shell");
@@ -291,6 +341,7 @@ describe("row copy", () => {
         session({
           agentState: "idle",
           harnessId: "claude",
+          agentStateAuthority: "hook",
           agentPromptPreview: "Refactor the sidebar card order",
         }),
         NOW,
@@ -304,6 +355,7 @@ describe("row copy", () => {
         session({
           agentState: "idle",
           harnessId: "claude",
+          agentStateAuthority: "hook",
           agentPromptPreview: "Refactor the sidebar card order",
         }),
         NOW,
@@ -417,6 +469,7 @@ describe("shell truthfulness (owner's report, F1)", () => {
           createdAt: "2026-09-08T11:30:00.000Z",
           agentState: "working",
           harnessId: "pi",
+          agentStateAuthority: "hook",
         }),
       ],
       { nowMs: NOW },

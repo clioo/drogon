@@ -80,6 +80,55 @@ describe("ReadResult gridChanges (#605)", () => {
   });
 });
 
+describe("Session agentStateAuthority (R1 activity authority)", () => {
+  it("is declared on the contract", () => {
+    // The renderer draws `working`/`idle` only on hook proof; without the
+    // declaration the row cannot see the proof at all.
+    expect(contractSource).toMatch(
+      /^\s*agentStateAuthority\?: "hook" \| "activity" \| null;$/m,
+    );
+  });
+
+  it("is optional, because a daemon predating it still answers", () => {
+    expect(contractSource).toMatch(/agentStateAuthority\?/);
+    expect(
+      resultSchemas["session.start"].safeParse(validSession).success,
+    ).toBe(true);
+  });
+
+  it("accepts hook and activity proof through the runtime schema", () => {
+    for (const agentStateAuthority of ["hook", "activity"] as const) {
+      const parsed = resultSchemas["session.start"].safeParse({
+        ...validSession,
+        agentState: "working",
+        agentStateAuthority,
+      });
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        expect(
+          (parsed.data as { agentStateAuthority?: string | null })
+            .agentStateAuthority,
+        ).toBe(agentStateAuthority);
+      }
+    }
+  });
+
+  it("accepts an explicit null (no proof claimed) and rejects anything else", () => {
+    expect(
+      resultSchemas["session.start"].safeParse({
+        ...validSession,
+        agentStateAuthority: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      resultSchemas["session.start"].safeParse({
+        ...validSession,
+        agentStateAuthority: "harnessId",
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe("Session observed-harness fields (#622)", () => {
   it("are declared on the contract", () => {
     // The overlay reads the daemon's foreground-process observation off

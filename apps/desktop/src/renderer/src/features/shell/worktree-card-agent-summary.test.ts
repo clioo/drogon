@@ -36,9 +36,9 @@ function session(overrides: Partial<Session> = {}): Session {
 describe("buildCardSummaryGroups", () => {
   test("clusters same-state sessions in SUMMARY_STATE_ORDER", () => {
     const groups = buildCardSummaryGroups([
-      session({ id: "a", agentState: "idle" }),
-      session({ id: "b", agentState: "working" }),
-      session({ id: "c", agentState: "working" }),
+      session({ id: "a", agentState: "idle", agentStateAuthority: "hook" }),
+      session({ id: "b", agentState: "working", agentStateAuthority: "hook" }),
+      session({ id: "c", agentState: "working", agentStateAuthority: "hook" }),
       session({ id: "d", agentState: "needs_input" }),
     ]);
     expect(groups.map((group) => group.state)).toEqual([
@@ -58,8 +58,8 @@ describe("summarizeCardAgentStates", () => {
   test("one state names the count and state", () => {
     expect(
       summarizeCardAgentStates([
-        session({ agentState: "working" }),
-        session({ id: "b", agentState: "working" }),
+        session({ agentState: "working", agentStateAuthority: "hook" }),
+        session({ id: "b", agentState: "working", agentStateAuthority: "hook" }),
       ]),
     ).toBe("All sessions working");
   });
@@ -67,7 +67,7 @@ describe("summarizeCardAgentStates", () => {
   test("mixed states list counts in summary order", () => {
     expect(
       summarizeCardAgentStates([
-        session({ agentState: "working" }),
+        session({ agentState: "working", agentStateAuthority: "hook" }),
         session({ id: "b", agentState: "exited" }),
       ]),
     ).toBe("1 working, 1 exited");
@@ -78,7 +78,7 @@ describe("summarizeAgentsForAria", () => {
   test("uniform multi-agent groups replace the session subject with the pill's", () => {
     expect(
       summarizeAgentsForAria(
-        [session({ agentState: "working" }), session({ id: "b", agentState: "working" })],
+        [session({ agentState: "working", agentStateAuthority: "hook" }), session({ id: "b", agentState: "working", agentStateAuthority: "hook" })],
         "2 agents",
       ),
     ).toBe("2 agents working");
@@ -87,7 +87,7 @@ describe("summarizeAgentsForAria", () => {
   test("mixed groups read 'subject: counts'", () => {
     expect(
       summarizeAgentsForAria(
-        [session({ agentState: "working" }), session({ id: "b", agentState: "exited" })],
+        [session({ agentState: "working", agentStateAuthority: "hook" }), session({ id: "b", agentState: "exited" })],
         "2 agents",
       ),
     ).toBe("2 agents: 1 working, 1 exited");
@@ -98,7 +98,7 @@ describe("summarizeSessionIdentities", () => {
   test("joins harness label + state per session", () => {
     expect(
       summarizeSessionIdentities(
-        [session({ agentState: "working" }), session({ id: "b", harnessId: "pi", agentState: "exited" })],
+        [session({ agentState: "working", agentStateAuthority: "hook" }), session({ id: "b", harnessId: "pi", agentState: "exited" })],
         (item) => (item.harnessId === "pi" ? "Pi" : "Claude"),
       ),
     ).toBe("Claude working; Pi exited");
@@ -119,7 +119,7 @@ describe("cardDotState", () => {
 
 describe("cardIdentitySession", () => {
   test("picks the agent of the state the lane's dot is showing", () => {
-    const idle = session({ id: "idle", agentState: "idle", harnessId: "claude" });
+    const idle = session({ id: "idle", agentState: "idle", harnessId: "claude", agentStateAuthority: "hook" });
     const waiting = session({
       id: "waiting",
       harnessId: "pi",
@@ -136,7 +136,7 @@ describe("cardIdentitySession", () => {
 
   test("falls back to any identified session when the dot's group is a plain shell", () => {
     const shell = session({ id: "shell", agentState: "working", harnessId: null });
-    const agent = session({ id: "agent", agentState: "idle", harnessId: "pi" });
+    const agent = session({ id: "agent", agentState: "idle", harnessId: "pi", agentStateAuthority: "hook" });
     expect(cardIdentitySession([shell, agent])?.id).toBe("agent");
   });
 
@@ -176,9 +176,26 @@ describe("shell-aware derivation (F1)", () => {
     expect(summarizeCardAgentStates([observed])).toBe("1 session not reporting");
   });
 
-  test("a launched working groups as working", () => {
-    const launched = session({ id: "launched", agentState: "working", harnessId: "pi" });
-    expect(cardDotState([launched])).toBe("working");
-    expect(summarizeCardAgentStates([launched])).toBe("1 session working");
+  test("an old-daemon launched working groups as not reporting, hook proof as working", () => {
+    // The R1 correction: a launched idle repaint is indistinguishable on
+    // old wire, so missing proof never groups as working.
+    const oldLaunched = session({
+      id: "old-launched",
+      agentState: "working",
+      harnessId: "pi",
+    });
+    expect(cardDotState([oldLaunched])).toBe("unknown");
+    expect(summarizeCardAgentStates([oldLaunched])).toBe(
+      "1 session not reporting",
+    );
+    // ...while a current hook-reported turn still groups as working.
+    const proven = session({
+      id: "proven",
+      agentState: "working",
+      harnessId: "pi",
+      agentStateAuthority: "hook",
+    });
+    expect(cardDotState([proven])).toBe("working");
+    expect(summarizeCardAgentStates([proven])).toBe("1 session working");
   });
 });

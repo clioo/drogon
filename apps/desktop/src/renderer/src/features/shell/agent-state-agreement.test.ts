@@ -38,9 +38,17 @@ const STATES: AgentState[] = [
 describe("agent-state agreement (#194)", () => {
   test("one session renders the same state in the tab badge, card dot and card text", () => {
     for (const agentState of STATES) {
-      // Launched agents: the wire `working` is a hook-reported turn, so
-      // every surface agrees with the daemon's own reading.
-      const item = session({ id: agentState, agentState, harnessId: "pi" });
+      // Hook-proven turns (current daemon): every surface agrees with the
+      // daemon's own reading. `working`/`idle` carry the hook proof;
+      // `needs_input`/`exited`/`unknown` need none.
+      const item = session({
+        id: agentState,
+        agentState,
+        harnessId: "pi",
+        ...(agentState === "working" || agentState === "idle"
+          ? { agentStateAuthority: "hook" as const }
+          : {}),
+      });
       // Tab badge input and card dot share the single derivation.
       expect(sessionAgentState(item)).toBe(agentState);
       expect(cardDotState([item])).toBe(agentState);
@@ -75,20 +83,69 @@ describe("agent-state agreement (#194)", () => {
     }
   });
 
+  test("an old-daemon launched working reads unknown on every surface", () => {
+    // The R1 correction: a launched idle repaint is indistinguishable on
+    // old wire (no turn-authority field), so missing proof never makes an
+    // agent Working — launch or not. Current hook turns prove separately.
+    const oldLaunched = session({
+      id: "old-launched",
+      agentState: "working",
+      harnessId: "pi",
+    });
+    expect(sessionAgentState(oldLaunched)).toBe("unknown");
+    expect(cardDotState([oldLaunched])).toBe("unknown");
+    expect(summarizeCardSessions([oldLaunched]).state).toBe("unknown");
+    expect(summarizeCardAgentStates([oldLaunched])).toBe(
+      "1 session not reporting",
+    );
+    const proven = session({
+      id: "proven",
+      agentState: "working",
+      harnessId: "pi",
+      agentStateAuthority: "hook",
+    });
+    expect(sessionAgentState(proven)).toBe("working");
+    expect(cardDotState([proven])).toBe("working");
+    expect(summarizeCardSessions([proven]).state).toBe("working");
+    expect(summarizeCardAgentStates([proven])).toBe("1 session working");
+  });
+
+  test("a quiet clock without hook proof reads unknown on every surface", () => {
+    // Elapsed silence is not proof of idleness: old-daemon `idle` (no
+    // field) and current activity-derived `idle` alike agree on unknown.
+    for (const item of [
+      session({ id: "old-idle", agentState: "idle", harnessId: "pi" }),
+      session({
+        id: "activity-idle",
+        agentState: "idle",
+        harnessId: "pi",
+        agentStateAuthority: "activity",
+      }),
+    ]) {
+      expect(sessionAgentState(item)).toBe("unknown");
+      expect(cardDotState([item])).toBe("unknown");
+      expect(summarizeCardSessions([item]).state).toBe("unknown");
+      expect(summarizeCardAgentStates([item])).toBe("1 session not reporting");
+    }
+  });
+
   test("a mixed card dots the priority group, never the freshest stamp", () => {
     // The issue's case: the freshest session is idle but an older one is
-    // still working — the dot must stay working, matching the text.
+    // still working — the dot must stay working, matching the text. Both
+    // turns are hook-proven (current daemon); unproven twins read unknown.
     const attached = [
       session({
         id: "old-working",
         agentState: "working",
         harnessId: "pi",
+        agentStateAuthority: "hook",
         agentStateAt: "2026-09-07T10:00:00Z",
       }),
       session({
         id: "new-idle",
         agentState: "idle",
         harnessId: "pi",
+        agentStateAuthority: "hook",
         agentStateAt: "2026-09-07T11:30:00Z",
       }),
     ];
@@ -106,16 +163,22 @@ describe("agent-state agreement (#194)", () => {
   test("all idle with ancient stamps stays self-consistent, never phantom working", () => {
     // The issue's "2 working, 1 idle 33m ago" with zero daemon activity:
     // once the states agree, an old stamp reads as idleness, not work.
+    // Both idles are hook-concluded (current daemon); an unproven quiet
+    // clock reads unknown instead (pinned above), never idle.
     const now = Date.parse("2026-09-08T05:00:00Z");
     const attached = [
       session({
         id: "a",
         agentState: "idle",
+        harnessId: "pi",
+        agentStateAuthority: "hook",
         agentStateAt: "2026-09-08T04:26:39Z",
       }),
       session({
         id: "b",
         agentState: "idle",
+        harnessId: "pi",
+        agentStateAuthority: "hook",
         agentStateAt: "2026-09-08T04:33:36Z",
       }),
     ];
@@ -131,7 +194,12 @@ describe("agent-state agreement (#194)", () => {
 
   test("any needs_input wins the dot and raises unread", () => {
     const attached = [
-      session({ id: "idle", agentState: "idle" }),
+      session({
+        id: "idle",
+        agentState: "idle",
+        harnessId: "pi",
+        agentStateAuthority: "hook",
+      }),
       session({ id: "wait", agentState: "needs_input" }),
     ];
     const summary = summarizeCardSessions(attached);
@@ -145,7 +213,14 @@ describe("agent-state agreement (#194)", () => {
     // No stamps anywhere: no stamp shown, not the session age.
     expect(
       summarizeCardSessions(
-        [session({ id: "a", agentState: "working" })],
+        [
+          session({
+            id: "a",
+            agentState: "working",
+            harnessId: "pi",
+            agentStateAuthority: "hook",
+          }),
+        ],
         now,
       ).activeRelative,
     ).toBe("");
@@ -156,11 +231,15 @@ describe("agent-state agreement (#194)", () => {
           session({
             id: "a",
             agentState: "working",
+            harnessId: "pi",
+            agentStateAuthority: "hook",
             agentStateAt: "not-a-date",
           }),
           session({
             id: "b",
             agentState: "idle",
+            harnessId: "pi",
+            agentStateAuthority: "hook",
             agentStateAt: "2026-09-07T11:50:00Z",
           }),
         ],

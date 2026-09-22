@@ -318,6 +318,16 @@ impl AgentState {
     }
 }
 
+/// Wire spellings of `agentStateAuthority` (the turn proof behind
+/// `agentState`, see `session::agent_state_fields`): `hook` means the state
+/// derives from the harness's own hook lifecycle (an open turn, a turn-end,
+/// or a hook wait signal) — the only thing that proves a turn. `activity`
+/// means the `idle` derives only from the PTY activity clock going quiet
+/// with no hook turn behind it. Absent/null means no proof is claimed
+/// (`unknown`, `exited`, or a daemon predating the field).
+pub(crate) const AUTHORITY_HOOK: &str = "hook";
+pub(crate) const AUTHORITY_ACTIVITY: &str = "activity";
+
 /// Hook-authoritative turn fact for sessions that opted into explicit
 /// wait clearing (OpenCode/Pi/interactive Codex, interactive Claude).
 /// `Untracked` keeps the purely activity-based derivation (plain shells,
