@@ -13,7 +13,10 @@
    freshness report ("No update in 34m") while the session is not reporting,
    so the row never states a condition the daemon did not report. The MAIN
    badge marks a root row that actually owns subagents (the nesting's parent
-   end), never a lone session.
+   end), never a lone session. The name is the concise provider identity when
+   the visible title is only an auto-generated prompt preview (explicit user
+   renames still render verbatim, prompt and shell details stay in the
+   tooltip and the accessible label).
    Adapter: Orca rows read hook-reported agent entries (model chip, tool
    preview, last assistant message, cache timer, subagent disclosure); this
    repo's contract carries none of those, so the row shows the tab title
@@ -36,6 +39,7 @@ import { agentStateLabel } from "./agent-state";
 import {
   formatRowHarnessLabel,
   resolveRowHarnessId,
+  resolveRowMessagePreview,
   type WorktreeAgentRow as WorktreeAgentRowData,
 } from "./worktree-agent-rows";
 
@@ -65,7 +69,59 @@ export type WorktreeAgentRowProps = {
   isChildRow?: boolean;
   /** Owner's design: the badge a root row that owns subagents carries. */
   isMainRow?: boolean;
+  /**
+   * Owner's guide: where the visible title came from. An explicit user
+   * rename always renders verbatim; an auto-generated prompt title folds
+   * back to the concise harness identity (the prompt stays in the
+   * tooltip/aria label and the preview secondary). Both absent means the
+   * title is already concise (harness label or `Terminal N`).
+   */
+  customTitle?: string | null;
+  generatedTitle?: string | null;
 };
+
+/** Visible width budget for a folded-back prompt preview secondary. */
+export const CONCISE_PREVIEW_SECONDARY_MAX_LENGTH = 120;
+
+function truncateConcisePreview(preview: string): string {
+  const text = preview.trim().replace(/\s+/g, " ");
+  if (text.length <= CONCISE_PREVIEW_SECONDARY_MAX_LENGTH) return text;
+  const slice = text.slice(0, CONCISE_PREVIEW_SECONDARY_MAX_LENGTH).trimEnd();
+  const lastSpace = slice.lastIndexOf(" ");
+  if (lastSpace >= Math.floor(CONCISE_PREVIEW_SECONDARY_MAX_LENGTH * 0.55)) {
+    return slice.slice(0, lastSpace);
+  }
+  return slice;
+}
+
+/**
+ * Owner's guide identity for a row whose visible title is an
+ * auto-generated prompt preview: the concise provider name up front, the
+ * prompt as the secondary, the full generated title kept for the
+ * tooltip/aria label by the caller. Returns null when the row already
+ * reads concise (explicit rename, harness label, plain shell) — those
+ * render exactly as before. Pure, unit-tested via the design suite.
+ */
+export function resolveRowConciseIdentity(
+  row: WorktreeAgentRowData,
+  titles: { customTitle?: string | null; generatedTitle?: string | null },
+): { primary: string; secondary: string } | null {
+  // An explicit rename is the user's own words: never folded away.
+  if (titles.customTitle) return null;
+  const generated = titles.generatedTitle;
+  if (!generated) return null;
+  // The title may carry the recovery decoration for unverifiable verdicts
+  // (`label · id:incarnation`); the generated text is still its head.
+  if (row.title !== generated && !row.title.startsWith(`${generated} · `)) {
+    return null;
+  }
+  // Plain shells already read `Terminal N` with the command as secondary.
+  const harnessId = resolveRowHarnessId(row.session);
+  if (!harnessId) return null;
+  const primary = formatRowHarnessLabel(harnessId);
+  const preview = resolveRowMessagePreview(row.session, primary);
+  return { primary, secondary: truncateConcisePreview(preview) };
+}
 
 /**
  * PERF-03: the card rebuilds every row object on each App render (and the
@@ -88,6 +144,8 @@ export function areWorktreeAgentRowPropsEqual(
     previous.reserveDisclosureGutter === next.reserveDisclosureGutter &&
     previous.isChildRow === next.isChildRow &&
     previous.isMainRow === next.isMainRow &&
+    previous.customTitle === next.customTitle &&
+    previous.generatedTitle === next.generatedTitle &&
     previous.row.state === next.row.state &&
     previous.row.title === next.row.title &&
     previous.row.secondary === next.row.secondary &&
@@ -115,6 +173,8 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
   reserveDisclosureGutter = false,
   isChildRow = false,
   isMainRow = false,
+  customTitle = null,
+  generatedTitle = null,
 }: WorktreeAgentRowProps) {
   const handleActivate = useCallback(
     (event: React.MouseEvent) => {
@@ -135,12 +195,20 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
     },
     [onToggleChildren],
   );
-  const primary = row.title || agentStateLabel(row.state);
+  // Owner's guide: a prompt-derived title folds back to the concise
+  // provider name; the full generated title stays in the accessible label
+  // below, so no prompt detail is lost to a screen reader or tooltip.
+  const concise = resolveRowConciseIdentity(row, {
+    customTitle,
+    generatedTitle,
+  });
+  const primary = concise?.primary ?? (row.title || agentStateLabel(row.state));
   // Why: while a session is not reporting, its secondary slot repeats the
   // freshness report the trailing state text already carries — one honest
   // line, not two.
-  const secondary =
-    row.state === "unknown" && row.secondary === row.stateLabel
+  const secondary = concise
+    ? concise.secondary
+    : row.state === "unknown" && row.secondary === row.stateLabel
       ? ""
       : row.secondary;
   // Why: the trailing state text IS the freshness report for a session that
@@ -148,7 +216,13 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
   // print that duration a second time. A row that knows its state keeps the
   // age: "Idle 5m" is two different facts.
   const showAge = row.state !== "unknown" && row.relativeTime !== "";
-  const rowTitle = [primary, secondary, row.stateLabel]
+  const rowTitle = [
+    // A folded-back row announces its full generated title, not the
+    // concise provider name standing in for it.
+    concise ? row.title : primary,
+    secondary,
+    row.stateLabel,
+  ]
     .filter(Boolean)
     .join(" - ");
   const focused = row.focused;

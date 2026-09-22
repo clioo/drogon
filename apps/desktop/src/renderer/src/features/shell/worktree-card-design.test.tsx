@@ -17,7 +17,14 @@ import type {
   Worktree,
 } from "../../../../shared/session-contract";
 import { WorktreeCard } from "./WorktreeCard";
+import { resolveRowConciseIdentity } from "./WorktreeAgentRow";
+import type { WorktreeAgentRow as WorktreeAgentRowData } from "./worktree-agent-rows";
+import { areWorktreeAgentRowPropsEqual } from "./WorktreeAgentRow";
+import type { WorktreeAgentRowProps } from "./WorktreeAgentRow";
+import { deriveGeneratedTabTitle } from "../../../../shared/agent-tab-title";
 import { EMPTY_TAB_STRIP_STATE } from "./tab-order";
+import type { TabStripState } from "./tab-order";
+import type { CardProperty } from "./workspace-options-state";
 import {
   clearWorktreeAgentExpansionStateForTests,
   resetWorktreeAgentExpansionMemoryForTests,
@@ -28,6 +35,7 @@ import type { WorkspaceStatusDefinition } from "../../../../shared/persistence-c
 afterEach(() => {
   cleanup();
   clearWorktreeAgentExpansionStateForTests();
+  window.localStorage.removeItem("drogon:agent-generated-titles:v1");
   delete (window as { drogon?: unknown }).drogon;
 });
 
@@ -80,11 +88,15 @@ function renderCard({
   statusId = null,
   pr = null,
   worktreeOverrides = {},
+  tabStrip = EMPTY_TAB_STRIP_STATE,
+  showProperties = {},
 }: {
   sessions: Session[];
   statusId?: string | null;
   pr?: WorktreeCardPrDisplay | null;
   worktreeOverrides?: Partial<Worktree>;
+  tabStrip?: TabStripState;
+  showProperties?: Partial<Record<CardProperty, boolean>>;
 }) {
   (window as unknown as { drogon?: unknown }).drogon ??= {};
   return render(
@@ -100,11 +112,12 @@ function renderCard({
         onSelect={() => {}}
         onSelectSession={() => {}}
         activeSessionId=""
-        tabStrip={EMPTY_TAB_STRIP_STATE}
+        tabStrip={tabStrip}
         statuses={STATUSES}
         pr={pr}
         onRemove={null}
         onRename={null}
+        showProperties={showProperties}
       />
     </TooltipProvider>,
   );
@@ -362,5 +375,199 @@ describe("review marker", () => {
   test("no linked review draws nothing rather than a placeholder", () => {
     const { container } = renderCard({ sessions: [session()], pr: null });
     expect(container.querySelector("[data-worktree-card-pr-state]")).toBeNull();
+  });
+});
+
+describe("concise row identity", () => {
+  const PROMPT = "Fix the sidebar card order for real";
+  const generated = deriveGeneratedTabTitle(PROMPT) ?? PROMPT;
+
+  function conciseRow(overrides: Partial<WorktreeAgentRowData> = {}) {
+    const base = session({
+      id: "gen-1",
+      harnessId: "pi",
+      agentState: "working",
+      agentStateAt: "2026-09-08T11:59:00.000Z",
+      agentPromptPreview: PROMPT,
+    });
+    return {
+      session: base,
+      state: "working",
+      title: generated,
+      secondary: "Pi",
+      stateLabel: "Working",
+      relativeTime: "1m",
+      focused: false,
+      ...overrides,
+    } as WorktreeAgentRowData;
+  }
+
+  test("a prompt-derived title folds back to the provider name", () => {
+    const identity = resolveRowConciseIdentity(conciseRow(), {
+      customTitle: null,
+      generatedTitle: generated,
+    });
+    expect(identity?.primary).toBe("Pi");
+    expect(identity?.secondary).toContain("Fix the sidebar card order");
+  });
+
+  test("an explicit rename, a missing generated title, and plain shells render verbatim", () => {
+    // The user's own rename wins over the fold-back.
+    expect(
+      resolveRowConciseIdentity(conciseRow(), {
+        customTitle: "My custom name",
+        generatedTitle: generated,
+      }),
+    ).toBeNull();
+    // No generated title means the title is already concise.
+    expect(
+      resolveRowConciseIdentity(conciseRow(), {
+        customTitle: null,
+        generatedTitle: null,
+      }),
+    ).toBeNull();
+    // A generated title that did not produce this row's title is ignored.
+    expect(
+      resolveRowConciseIdentity(conciseRow(), {
+        customTitle: null,
+        generatedTitle: "Some other title",
+      }),
+    ).toBeNull();
+    // Plain shells already read `Terminal N`.
+    const shell = session({ id: "sh", harnessId: null });
+    expect(
+      resolveRowConciseIdentity(
+        conciseRow({ session: shell, title: "Terminal 1" }),
+        { customTitle: null, generatedTitle: "Terminal 1" },
+      ),
+    ).toBeNull();
+  });
+
+  test("title provenance changes the memo comparison", () => {
+    const base: WorktreeAgentRowProps = {
+      row: conciseRow(),
+      disabled: false,
+      onSelect: () => {},
+    };
+    expect(
+      areWorktreeAgentRowPropsEqual(base, { ...base, onSelect: () => {} }),
+    ).toBe(true);
+    expect(
+      areWorktreeAgentRowPropsEqual(base, {
+        ...base,
+        generatedTitle: generated,
+      }),
+    ).toBe(false);
+    expect(
+      areWorktreeAgentRowPropsEqual(
+        { ...base, generatedTitle: generated },
+        { ...base, generatedTitle: generated, customTitle: "Mine" },
+      ),
+    ).toBe(false);
+  });
+
+  test("the card shows the provider name with the prompt kept in the tooltip", () => {
+    window.localStorage.setItem(
+      "drogon:agent-generated-titles:v1",
+      JSON.stringify({ "gen-1": generated }),
+    );
+    const { container } = renderCard({
+      sessions: [
+        session({
+          id: "gen-1",
+          harnessId: "pi",
+          agentState: "working",
+          agentStateAt: "2026-09-08T11:59:00.000Z",
+          agentPromptPreview: PROMPT,
+        }),
+      ],
+    });
+    const row = container.querySelector(
+      '[data-worktree-agent-row="gen-1"]',
+    ) as HTMLElement;
+    // The visible name column leads with the concise provider identity.
+    const nameColumn = row.querySelector(".truncate") as HTMLElement;
+    expect(nameColumn.firstElementChild?.textContent).toBe("Pi");
+    // The full prompt-derived title is preserved for tooltip/announcement.
+    expect(row.getAttribute("title")).toContain(generated);
+  });
+
+  test("an explicit rename still renders verbatim on the card", () => {
+    window.localStorage.setItem(
+      "drogon:agent-generated-titles:v1",
+      JSON.stringify({ "ren-1": generated }),
+    );
+    const { container } = renderCard({
+      sessions: [
+        session({
+          id: "ren-1",
+          harnessId: "pi",
+          agentState: "working",
+          agentStateAt: "2026-09-08T11:59:00.000Z",
+          agentPromptPreview: PROMPT,
+        }),
+      ],
+      tabStrip: { ...EMPTY_TAB_STRIP_STATE, titles: { "ren-1": "My custom name" } },
+    });
+    const row = container.querySelector(
+      '[data-worktree-agent-row="ren-1"]',
+    ) as HTMLElement;
+    const nameColumn = row.querySelector(".truncate") as HTMLElement;
+    expect(nameColumn.firstElementChild?.textContent).toBe("My custom name");
+  });
+});
+
+describe("right-slot affordances", () => {
+  test("no generic branch glyph poses as the review indicator", () => {
+    const { container } = renderCard({ sessions: [session({ id: "a" })] });
+    // The session marker stays; the branch glyph is gone (the branch reads
+    // as text in the meta row, the right slot keeps the real PR icon).
+    expect(
+      container.querySelector("[data-worktree-card-affordances]"),
+    ).not.toBeNull();
+    expect(
+      container.querySelector(".shell-worktree-card-affordance-branch"),
+    ).toBeNull();
+    expect(
+      container.querySelector(
+        '[data-worktree-card-affordances] svg.lucide-git-branch',
+      ),
+    ).toBeNull();
+  });
+
+  test("a card with no sessions draws no affordance cluster", () => {
+    const { container } = renderCard({ sessions: [] });
+    expect(
+      container.querySelector("[data-worktree-card-affordances]"),
+    ).toBeNull();
+  });
+});
+
+describe("creator provenance", () => {
+  test("cli provenance is a compact pill, not a full-strength line", () => {
+    const { container } = renderCard({
+      sessions: [session({ id: "a" })],
+      worktreeOverrides: { creator: "cli" },
+    });
+    const pill = container.querySelector(
+      ".shell-worktree-card-provenance",
+    ) as HTMLElement;
+    expect(pill?.textContent).toBe("Drogon CLI");
+    // The same fact no longer repeats as a bright mono metadata badge.
+    const issues = [
+      ...container.querySelectorAll(".shell-worktree-card-issue"),
+    ].map((node) => node.textContent);
+    expect(issues).not.toContain("Drogon CLI");
+  });
+
+  test("the cli property toggle still hides the provenance pill", () => {
+    const { container } = renderCard({
+      sessions: [session({ id: "a" })],
+      worktreeOverrides: { creator: "cli" },
+      showProperties: { cli: false },
+    });
+    expect(
+      container.querySelector(".shell-worktree-card-provenance"),
+    ).toBeNull();
   });
 });
