@@ -216,6 +216,35 @@ export function isObservedClaudeSession(row) {
   return (row?.harnessId ?? null) === null && row?.observedHarnessId === "claude";
 }
 
+/** The late-foreground twin for Pi: a plain shell observed foregrounding
+ *  the compiled `pi` sleeper after the UI already rendered it as a plain
+ *  terminal. */
+export function isObservedPiSession(row) {
+  return (row?.harnessId ?? null) === null && row?.observedHarnessId === "pi";
+}
+
+/**
+ * Project one side of the late-foreground transition for the JSON report:
+ * the daemon row's identity/observation/state fields beside what the DOM
+ * row actually read. Exported (like the tree projection above) so the
+ * companion pins the report shape without launching an app. The DOM row
+ * may come from either reader (`readAgentTree` rows carry `text` and
+ * `identityTitle`; `measureGuideRows` rows carry `primaryText`), so both
+ * are accepted and recorded as seen.
+ */
+export function projectLateForegroundSnapshot(daemonRow, domRow) {
+  return {
+    harnessId: daemonRow?.harnessId ?? null,
+    observedHarnessId: daemonRow?.observedHarnessId ?? null,
+    observedHarnessAt: daemonRow?.observedHarnessAt ?? null,
+    hasForegroundChild: daemonRow?.hasForegroundChild ?? null,
+    agentState: daemonRow?.agentState ?? null,
+    agentStateAuthority: daemonRow?.agentStateAuthority ?? null,
+    domText: domRow?.text ?? domRow?.primaryText ?? null,
+    domIdentityTitle: domRow?.identityTitle ?? null,
+  };
+}
+
 /** The root row names the agent instead of the shell it started as. */
 export function rootRowTextIsAgentNotTerminal(text) {
   const value = String(text ?? "");
@@ -1113,6 +1142,109 @@ export async function runSidebarAgentTreeAcceptance() {
       cwd: fixture,
     });
     await until(async () => (await sessionRow(workerSessionId))?.verdict === "exited", "the worker session exited");
+
+    // R2 observed-identity: the late-foreground transition the fixture
+    // above misses — every agent there starts BEFORE the initial render,
+    // so the UI never displays the plain terminal first. Here a real plain
+    // shell renders as `Terminal N` with no harness identity, then execs
+    // the compiled `pi` sleeper AFTER; the same card must update that row
+    // to Pi in place (exactly one row for the session — never a
+    // duplicate) with no reload and no workspace change. Real shell, real
+    // native binary, no inference; the sleeper is quiet by design so the
+    // turn state stays whatever the daemon derives, recorded not steered.
+    // The transition runs on its own folder card (unselected): the
+    // selected workspace's list adopts out-of-band sessions append-only
+    // and the sidebar merge prefers that copy, so a selected-workspace
+    // row can stale behind a second gate outside this correction's grant —
+    // on an unselected card the host-wide poll copy is the only copy, and
+    // the metadata-only delta reaches the DOM through the fixed
+    // comparator alone. Labeled accurately: a boundary-level real-App
+    // test of the metadata-only snapshot path (session.list rows to DOM),
+    // not mocked preload data — and not a claim about which comparator
+    // field flips, so the report records the full before/after rows
+    // (including any agentState move) without saying the old comparator
+    // would have failed on identity alone.
+    const lateProjectDir = path.join(fixture, "latefg");
+    await mkdir(lateProjectDir, { recursive: true });
+    const lateProject = await cliJson(["project", "add", lateProjectDir, "--name", "latefg"], { env, cwd: fixture });
+    const lateTrees = await cliJson(["worktree", "list", "--project", lateProject.id], { env, cwd: fixture });
+    assert.equal(lateTrees.worktrees.length, 1, "a folder project has exactly its implicit worktree");
+    const lateWorktreeId = lateTrees.worktrees[0].id;
+    const lateWorkspaceId = lateTrees.worktrees[0].workspaceId;
+    const lateShell = await cliJson(
+      ["terminal", "create", "--workspace", lateWorkspaceId, "--", "/bin/sh"],
+      { env, cwd: fixture },
+    );
+    assert.equal(lateShell.harnessId ?? null, null, "the late shell starts as a plain shell");
+    const lateBeforeRow = await until(async () => {
+      const row = await sessionRow(lateShell.id);
+      return row && (row.harnessId ?? null) === null && (row.observedHarnessId ?? null) === null ? row : false;
+    }, "the daemon lists the late shell with no harness identity");
+    // Card-scoped reads: a lone session renders a flat row, not a
+    // `[role="treeitem"]` node, so the tree reader cannot see this card —
+    // and the geometry probe throws before the card exists, so the waits
+    // read through this null-safe projection and measure only afterwards.
+    const readLateCardRows = async () =>
+      page.evaluate((id) => {
+        const card = document.querySelector(`[data-worktree-card-id="${id}"]`);
+        if (!card) return null;
+        return [...card.querySelectorAll("[data-worktree-agent-row]")].map((row) => ({
+          id: row.getAttribute("data-worktree-agent-row"),
+          primaryText: row.querySelector("[data-worktree-agent-primary]")?.textContent ?? null,
+        }));
+      }, lateWorktreeId);
+    const lateBeforeDom = await until(async () => {
+      const rows = await readLateCardRows();
+      return rows?.find((row) => row.id === lateShell.id) || false;
+    }, "the sidebar lists the late plain shell");
+    assert.match(
+      String(lateBeforeDom.primaryText ?? ""),
+      /Terminal \d/,
+      "the late shell first renders as a plain terminal, not an agent",
+    );
+    await cliJson(
+      ["terminal", "send", "--session", lateShell.id, "--incarnation", lateShell.incarnation, "--text",
+        `exec ${quoteShellWord(path.join(binDir, "pidir", "pi"))} 600\n`],
+      { env, cwd: fixture },
+    );
+    const lateAfterRow = await until(async () => {
+      const row = await sessionRow(lateShell.id);
+      return row && isObservedPiSession(row) ? row : false;
+    }, "the daemon observes pi in the late shell's foreground");
+    const latePiRow = await until(async () => {
+      const rows = await readLateCardRows();
+      const row = rows?.find((candidate) => candidate.id === lateShell.id);
+      return row && row.primaryText === "Pi" ? row : false;
+    }, "the same sidebar row updates to Pi without a reload", 90000);
+    const lateAfterDom = await measureGuideRows(lateWorktreeId);
+    assert.equal(
+      lateAfterDom.rows.filter((row) => row.id === lateShell.id).length,
+      1,
+      "the foreground transition updates exactly one row — the session is never duplicated",
+    );
+    const lateActiveCard = await page.evaluate(
+      () => document.querySelector('[data-worktree-card-id][data-active="true"]')?.getAttribute("data-worktree-card-id") ?? null,
+    );
+    assert.equal(lateActiveCard, worktreeId, "the transition lands with the same workspace selected");
+    report.lateForeground = {
+      boundary: "real-App metadata-only snapshot path (session.list rows to DOM) on an unselected card, not mocked preload data",
+      projectId: lateProject.id,
+      worktreeId: lateWorktreeId,
+      workspaceId: lateWorkspaceId,
+      before: projectLateForegroundSnapshot(lateBeforeRow, lateBeforeDom),
+      after: projectLateForegroundSnapshot(lateAfterRow, latePiRow),
+      cardRowIds: lateAfterDom.rows.map((row) => row.id),
+      activeCardId: lateActiveCard,
+    };
+    report.checks.push("late-foreground-observed-pi-updates-the-same-row");
+    // The late shell stays listed until the fixture daemon stops; stop it
+    // explicitly so no sleeper outlives the check.
+    await cliJson(
+      ["rpc", "session.stop", "--params", JSON.stringify({ sessionId: lateShell.id, incarnation: lateShell.incarnation })],
+      { env, cwd: fixture },
+    );
+    await until(async () => (await sessionRow(lateShell.id))?.verdict === "exited", "the late shell exited");
+    checkCancelled();
 
     // F3 guide layout continued: a second folder project proves multi-card
     // rhythm — first its no-session card, then a Pi root with Codex and

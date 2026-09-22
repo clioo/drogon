@@ -283,6 +283,106 @@ describe("PERF-03 poll identity (sameSessions)", () => {
     ).toBe(true);
   });
 
+  // R2 (#622 follow-up): a metadata-only snapshot delta — a plain shell
+  // observed foregrounding a harness, or a busy-close foreground flag
+  // flipping — must replace the list, or the sidebar keeps the old rows
+  // and hides the observed Pi identity and agent counts.
+  test("gaining an observed harness replaces the list; null and absent agree", () => {
+    const previous = [session("s1")];
+    expect(
+      sameSessions(previous, [
+        session("s1", {
+          observedHarnessId: "pi",
+          observedHarnessAt: "2026-01-01T00:01:00Z",
+        }),
+      ]),
+    ).toBe(false);
+    // No observation either way is the same claim — neither mints an array.
+    expect(sameSessions(previous, [session("s1", { observedHarnessId: null })])).toBe(
+      true,
+    );
+    expect(
+      sameSessions(
+        [session("s1", { observedHarnessId: null, observedHarnessAt: null })],
+        [session("s1")],
+      ),
+    ).toBe(true);
+  });
+
+  test("changing or clearing the observed harness replaces the list", () => {
+    const observed = [
+      session("s1", {
+        observedHarnessId: "pi",
+        observedHarnessAt: "2026-01-01T00:01:00Z",
+      }),
+    ];
+    expect(
+      sameSessions(observed, [
+        session("s1", {
+          observedHarnessId: "codex",
+          observedHarnessAt: "2026-01-01T00:01:00Z",
+        }),
+      ]),
+    ).toBe(false);
+    expect(sameSessions(observed, [session("s1")])).toBe(false);
+    expect(
+      sameSessions(observed, [session("s1", { observedHarnessId: null })]),
+    ).toBe(false);
+  });
+
+  test("an observed-harness timestamp-only move replaces the list", () => {
+    const previous = [
+      session("s1", {
+        observedHarnessId: "pi",
+        observedHarnessAt: "2026-01-01T00:01:00Z",
+      }),
+    ];
+    expect(
+      sameSessions(previous, [
+        session("s1", {
+          observedHarnessId: "pi",
+          observedHarnessAt: "2026-01-01T00:02:00Z",
+        }),
+      ]),
+    ).toBe(false);
+  });
+
+  test("foreground enter and leave replace the list; absent reads as idle", () => {
+    expect(
+      sameSessions(
+        [session("s1", { hasForegroundChild: false })],
+        [session("s1", { hasForegroundChild: true })],
+      ),
+    ).toBe(false);
+    expect(
+      sameSessions(
+        [session("s1", { hasForegroundChild: true })],
+        [session("s1", { hasForegroundChild: false })],
+      ),
+    ).toBe(false);
+    // An old daemon's missing flag reads as idle, like an explicit false.
+    expect(
+      sameSessions([session("s1")], [session("s1", { hasForegroundChild: false })]),
+    ).toBe(true);
+    expect(
+      sameSessions(
+        [session("s1", { hasForegroundChild: false })],
+        [session("s1")],
+      ),
+    ).toBe(true);
+  });
+
+  test("a byte-identical observed/foreground reply keeps the previous array", () => {
+    const previous = [
+      session("s1", {
+        observedHarnessId: "pi",
+        observedHarnessAt: "2026-01-01T00:01:00Z",
+        hasForegroundChild: true,
+      }),
+    ];
+    expect(sameSessions(previous, clone(previous))).toBe(true);
+  });
+
   test("any field-level change replaces the list", () => {
     const previous = [session("s1")];
     for (const overrides of [

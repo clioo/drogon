@@ -438,10 +438,12 @@ export function appendOrReplaceSession(
  */
 /**
  * PERF-03: field-level session equality for poll identity stabilization.
- * Every field of the session contract is compared (including `args`
- * element-wise), so keeping the previous array can never hide a real
- * change — it only stops a byte-identical poll reply from minting a new
- * array identity and re-rendering the whole shell.
+ * Every rendered field of the session contract is compared (including
+ * `args` element-wise), so keeping the previous array can never hide a
+ * real change — it only stops a byte-identical poll reply from minting a
+ * new array identity and re-rendering the whole shell. `gridCursor` is
+ * intentionally excluded: it is read-path-only (TerminalPane), never
+ * rendered by the shell list.
  */
 export function sameSession(left: Session, right: Session): boolean {
   if (left === right) return true;
@@ -470,7 +472,15 @@ export function sameSession(left: Session, right: Session): boolean {
     left.causedByEventId === right.causedByEventId &&
     left.agentSessionId === right.agentSessionId &&
     left.agentSessionTranscriptPath === right.agentSessionTranscriptPath &&
-    left.agentResume === right.agentResume
+    left.agentResume === right.agentResume &&
+    // A metadata-only delta (a plain shell observed foregrounding a
+    // harness, a busy-close foreground flag flipping) changes what the
+    // sidebar renders, so it must replace the list. Absent reads as the
+    // idle claim (null observation, no foreground child), matching an
+    // older daemon's rows; false and true never agree.
+    (left.observedHarnessId ?? null) === (right.observedHarnessId ?? null) &&
+    (left.observedHarnessAt ?? null) === (right.observedHarnessAt ?? null) &&
+    (left.hasForegroundChild ?? false) === (right.hasForegroundChild ?? false)
   );
 }
 

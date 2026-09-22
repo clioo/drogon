@@ -20,10 +20,12 @@ import {
   TIMED_SLEEPER_C_SOURCE,
   isNativeCompiledSleeper,
   isObservedClaudeSession,
+  isObservedPiSession,
   nativeSleeperFormatName,
   parseCollapsedLineageEnvelope,
   projectAgentTreeRow,
   projectBinaryIdentity,
+  projectLateForegroundSnapshot,
   quoteShellWord,
   rootRowTextIsAgentNotTerminal,
 } from "./accept-sidebar-agent-tree.mjs";
@@ -138,6 +140,71 @@ describe("isObservedClaudeSession", () => {
     assert.equal(isObservedClaudeSession({ harnessId: null, observedHarnessId: null }), false);
     assert.equal(isObservedClaudeSession({ harnessId: null, observedHarnessId: "pi" }), false);
     assert.equal(isObservedClaudeSession(null), false);
+  });
+});
+
+describe("isObservedPiSession", () => {
+  it("matches a plain shell foregrounding the pi fixture", () => {
+    assert.equal(isObservedPiSession({ harnessId: null, observedHarnessId: "pi" }), true);
+    assert.equal(isObservedPiSession({ observedHarnessId: "pi" }), true);
+  });
+
+  it("rejects launched harnesses, other observations and missing rows", () => {
+    assert.equal(isObservedPiSession({ harnessId: "pi", observedHarnessId: "pi" }), false);
+    assert.equal(isObservedPiSession({ harnessId: null, observedHarnessId: null }), false);
+    assert.equal(isObservedPiSession({ harnessId: null, observedHarnessId: "claude" }), false);
+    assert.equal(isObservedPiSession(null), false);
+  });
+});
+
+describe("projectLateForegroundSnapshot", () => {
+  it("records daemon identity, observation, state and DOM text side by side", () => {
+    assert.deepEqual(
+      projectLateForegroundSnapshot(
+        {
+          harnessId: null,
+          observedHarnessId: "pi",
+          observedHarnessAt: "2026-09-22T00:01:00Z",
+          hasForegroundChild: true,
+          agentState: "unknown",
+          agentStateAuthority: null,
+        },
+        { text: "Pi - No update in 0m", identityTitle: "Pi" },
+      ),
+      {
+        harnessId: null,
+        observedHarnessId: "pi",
+        observedHarnessAt: "2026-09-22T00:01:00Z",
+        hasForegroundChild: true,
+        agentState: "unknown",
+        agentStateAuthority: null,
+        domText: "Pi - No update in 0m",
+        domIdentityTitle: "Pi",
+      },
+    );
+  });
+
+  it("accepts measureGuideRows rows and nulls missing fields", () => {
+    assert.deepEqual(projectLateForegroundSnapshot({}, { primaryText: "Terminal 4" }), {
+      harnessId: null,
+      observedHarnessId: null,
+      observedHarnessAt: null,
+      hasForegroundChild: null,
+      agentState: null,
+      agentStateAuthority: null,
+      domText: "Terminal 4",
+      domIdentityTitle: null,
+    });
+    assert.deepEqual(projectLateForegroundSnapshot(null, null), {
+      harnessId: null,
+      observedHarnessId: null,
+      observedHarnessAt: null,
+      hasForegroundChild: null,
+      agentState: null,
+      agentStateAuthority: null,
+      domText: null,
+      domIdentityTitle: null,
+    });
   });
 });
 
