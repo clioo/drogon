@@ -1144,6 +1144,89 @@ export async function runSidebarAgentTreeAcceptance() {
     await page.reload();
     await page.getByRole("button", { name: "Select guidebiz", exact: true }).waitFor();
     report.guide = guide;
+    // R1 hook truth (activity authority): the guide sentence above is
+    // derived from displayed row states, which cannot prove inference
+    // authority. These CLI-only assertions pin the authority itself
+    // against independent lifecycle fixtures — terminal noise on an
+    // observed shell, and a real hook turn on a harness launch. No model
+    // inference anywhere: the noise is typed text, the turn is a hook
+    // event delivered over the daemon's own RPC. Outside CHECK_NAMES
+    // (which the companion test pins); recorded here and in report.checks.
+    const hookTruth = { fixture: true, sessions: "observed sleeper + hook-event lifecycle, no inference" };
+    // 1. Terminal noise never manufactures hook proof: type into the
+    // observed pi root (a shell hosting a sleeper). PTY echo flows, but
+    // the row must never claim a hook-proven turn.
+    const noiseRoot = await sessionRow(guideChain.rootId);
+    await cliJson(
+      ["terminal", "send", "--session", guideChain.rootId, "--incarnation", noiseRoot.incarnation, "--text", "echo hook-truth-noise-probe\n"],
+      { env, cwd: fixture },
+    );
+    const noiseBytes = await until(async () => {
+      const read = await cliJson(
+        ["rpc", "session.read", "--params", JSON.stringify({ sessionId: guideChain.rootId, incarnation: noiseRoot.incarnation, cursor: 0 })],
+        { env, cwd: fixture },
+      );
+      return read.dataBase64 && Buffer.from(read.dataBase64, "base64").toString("utf8").includes("hook-truth-noise-probe") ? true : false;
+    }, "the terminal noise reaches the observed shell as PTY output");
+    assert.ok(noiseBytes, "noise bytes are independently observed before the authority assertion");
+    const noisyRow = await sessionRow(guideChain.rootId);
+    assert.notEqual(noisyRow.agentState, "working", "terminal echo on an observed shell never reads working");
+    assert.notEqual(noisyRow.agentStateAuthority ?? null, "hook", "terminal echo never deposits hook proof");
+    hookTruth.noiseRow = { agentState: noisyRow.agentState, agentStateAuthority: noisyRow.agentStateAuthority ?? null };
+    report.checks.push("hook-truth-terminal-noise-never-proves-a-turn");
+    // 2. A real hook turn carries proof: launch pi through the product's
+    // own harness surface with a fixture sleeper behind the harness name
+    // (agentCmdOverrides, absolute path — no PATH dependence, no model),
+    // then drive the pi hook namespace over session.hook_event.
+    const hookPiScript = path.join(fixture, "hook-truth-pi.sh");
+    await writeFile(hookPiScript, "#!/bin/sh\nexec sleep 60\n");
+    await chmod(hookPiScript, 0o755);
+    await writeFile(
+      path.join(dataDir, "agent-settings.json"),
+      JSON.stringify({
+        version: 1,
+        settings: {
+          defaultTuiAgent: null,
+          disabledTuiAgents: [],
+          agentCmdOverrides: { pi: hookPiScript },
+          agentDefaultArgs: {},
+          agentDefaultEnv: {},
+          agentStatusHooksEnabled: true,
+          tabAutoGenerateTitle: false,
+          promptCacheTimerEnabled: false,
+          promptCacheTtlMs: 300000,
+          codexSessionSourceHome: "",
+        },
+      }),
+    );
+    const hookLaunch = await cliJson(
+      ["rpc", "harness.start", "--params", JSON.stringify({ workspaceId: workspace2Id, harnessId: "pi", permissionMode: "inherit", requestId: `hook-truth-${Date.now()}` })],
+      { env, cwd: fixture },
+    );
+    assert.equal(hookLaunch.harnessId, "pi", "the hook fixture is a launched pi session");
+    const hookTurn = await cliJson(
+      ["rpc", "session.hook_event", "--params", JSON.stringify({ sessionId: hookLaunch.id, incarnation: hookLaunch.incarnation, event: "AgentStart" })],
+      { env, cwd: fixture },
+    );
+    assert.equal(hookTurn.agentState, "working", "a real resumption hook opens a silent turn");
+    assert.equal(hookTurn.agentStateAuthority, "hook", "the open turn carries hook proof");
+    const hookEnd = await cliJson(
+      ["rpc", "session.hook_event", "--params", JSON.stringify({ sessionId: hookLaunch.id, incarnation: hookLaunch.incarnation, event: "AgentEnd" })],
+      { env, cwd: fixture },
+    );
+    assert.equal(hookEnd.agentState, "idle", "a real turn end concludes to idle");
+    assert.equal(hookEnd.agentStateAuthority, "hook", "the concluded turn keeps hook proof");
+    hookTruth.turnRow = { agentState: hookTurn.agentState, agentStateAuthority: hookTurn.agentStateAuthority };
+    hookTruth.endRow = { agentState: hookEnd.agentState, agentStateAuthority: hookEnd.agentStateAuthority };
+    // The harness.start session stays listed until the fixture daemon
+    // stops; stop it explicitly so no harness child outlives the check.
+    await cliJson(
+      ["rpc", "session.stop", "--params", JSON.stringify({ sessionId: hookLaunch.id, incarnation: hookLaunch.incarnation })],
+      { env, cwd: fixture },
+    );
+    await until(async () => (await sessionRow(hookLaunch.id))?.verdict === "exited", "the hook fixture session exited");
+    report.checks.push("hook-truth-hook-lifecycle-carries-proof");
+    report.hookTruth = hookTruth;
     checkCancelled();
     assert.deepEqual(report.pageErrors, [], "no renderer page errors");
     checkCancelled();

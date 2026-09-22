@@ -89,21 +89,65 @@ describe("shell-aware agent activity (owner's report, F1)", () => {
     );
   });
 
-  test("a harness.start launch keeps its working", () => {
-    // Current daemons only emit launch `working` for a hook-reported turn,
-    // so the wire state is authoritative there. Old-daemon limitation: a
-    // launched idle repaint is indistinguishable on the wire (no
-    // turn-authority field), so old launched `working` still passes through.
+  test("a launched working without hook proof reads unknown, never a spinner", () => {
+    // The R1 correction: an old daemon derives launch `working` from PTY
+    // output alone (an idle repaint inside the activity window), which the
+    // wire cannot distinguish from a true hook turn — so missing proof
+    // never makes an agent Working, launch or not.
     expect(sessionAgentState(launched({ agentState: "working" }))).toBe(
-      "working",
+      "unknown",
     );
+    expect(
+      agentIconKind(sessionAgentState(launched({ agentState: "working" }))),
+    ).toBe("unknown");
+  });
+
+  test("a hook-proven launch keeps its working", () => {
+    // Current daemons only emit `agentStateAuthority: "hook"` for a
+    // hook-reported turn, so the wire state is authoritative there.
+    expect(
+      sessionAgentState(
+        launched({ agentState: "working", agentStateAuthority: "hook" }),
+      ),
+    ).toBe("working");
+  });
+
+  test("idle without hook proof reads unknown, never a false quiet", () => {
+    // A quiet activity clock is not proof an agent is idle: old-daemon
+    // `idle` (no field) and current activity-derived `idle` alike read
+    // unknown rather than oscillating a false Idle.
+    expect(sessionAgentState(shell({ agentState: "idle" }))).toBe("unknown");
+    expect(
+      sessionAgentState(
+        shell({ agentState: "idle", agentStateAuthority: "activity" }),
+      ),
+    ).toBe("unknown");
+    expect(
+      sessionAgentState(
+        launched({ agentState: "idle", agentStateAuthority: "activity" }),
+      ),
+    ).toBe("unknown");
+  });
+
+  test("a hook-concluded idle keeps its idle despite later echo", () => {
+    // A turn-end hook concluded the turn on the harness's own authority,
+    // so the row reads idle even though PTY bytes followed.
+    expect(
+      sessionAgentState(
+        launched({ agentState: "idle", agentStateAuthority: "hook" }),
+      ),
+    ).toBe("idle");
   });
 
   test("every other shell state passes through untouched", () => {
-    expect(sessionAgentState(shell({ agentState: "idle" }))).toBe("idle");
     expect(sessionAgentState(shell({ agentState: "needs_input" }))).toBe(
       "needs_input",
     );
+    expect(
+      sessionAgentState(
+        launched({ agentState: "needs_input", agentStateAuthority: "hook" }),
+      ),
+    ).toBe("needs_input");
     expect(sessionAgentState(shell({ agentState: "exited" }))).toBe("exited");
     expect(sessionAgentState(shell())).toBe("unknown");
     expect(sessionAgentState(shell({ agentState: "unknown" }))).toBe(

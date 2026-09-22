@@ -45,6 +45,10 @@ const session = z.object({
   // validates; absent reads as `unknown` at the call sites.
   agentState: z.enum(["working", "idle", "needs_input", "exited", "unknown"]).optional(),
   agentStateAt: z.string().nullable().optional(),
+  // Activity authority (additive): the turn proof behind `agentState`.
+  // Optional+nullable so a response from an older service without the field
+  // still validates; absent reads as "no proof claimed" at the call sites.
+  agentStateAuthority: z.enum(["hook", "activity"]).nullable().optional(),
   agentPromptPreview: z.string().max(2048).nullable().optional(),
   cacheIdleAt: z.string().nullable().optional(),
   // Sidebar lineage (#359): the daemon reports the orchestrator-spawned

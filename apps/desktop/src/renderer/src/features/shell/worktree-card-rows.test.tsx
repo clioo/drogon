@@ -88,6 +88,7 @@ describe("WorktreeCard nested session rows", () => {
           id: "s-1",
           agentState: "working",
           harnessId: "claude",
+          agentStateAuthority: "hook",
           createdAt: "2026-09-08T11:00:00.000Z",
         }),
         session({
@@ -134,11 +135,11 @@ describe("WorktreeCard nested session rows", () => {
   test("focused highlight follows the active tab and summary matches rows", () => {
     const { container, unmount } = renderCard(
       [
-        // F1 sidebar truth (coordinator grant): launched agents, so the
-        // launch record rides along — harness-less `working` wire is the
-        // old-daemon false positive, never an agent turn.
-        session({ id: "s-1", agentState: "working", harnessId: "pi" }),
-        session({ id: "s-2", agentState: "idle", harnessId: "pi" }),
+        // Launched agents on a current daemon: hook turn states carry the
+        // hook proof (R1) — harness-less `working` wire is the old-daemon
+        // false positive, never an agent turn.
+        session({ id: "s-1", agentState: "working", harnessId: "pi", agentStateAuthority: "hook" }),
+        session({ id: "s-2", agentState: "idle", harnessId: "pi", agentStateAuthority: "hook" }),
       ],
       "s-2",
     );
@@ -187,6 +188,7 @@ describe("WorktreeCard nested session rows", () => {
           id: "s-3",
           agentState: "working",
           harnessId: "pi",
+          agentStateAuthority: "hook",
           command: "pi",
           createdAt: "2026-09-08T11:45:00.000Z",
         }),

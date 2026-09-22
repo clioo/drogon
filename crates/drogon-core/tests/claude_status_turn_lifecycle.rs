@@ -191,6 +191,11 @@ fn typing_at_a_fresh_claude_session_never_reads_working() {
         "idle",
         "local keystrokes at the composer must never flip the session to working"
     );
+    assert_eq!(
+        listed_row(&engine, &session_id)["agentStateAuthority"],
+        "hook",
+        "the fresh-launch idle boundary is the harness's own done row"
+    );
 }
 
 /// The full hook lifecycle on the claude install surface: a submitted turn
@@ -218,6 +223,10 @@ fn claude_turn_lifecycle_reads_working_only_for_real_turns() {
     // The user submits a prompt: the turn opens and reads working.
     let working = hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
     assert_eq!(working["agentState"], "working");
+    assert_eq!(
+        working["agentStateAuthority"], "hook",
+        "a real hook turn is proven working"
+    );
 
     // Silent thinking far past the 3s activity window must not drop the
     // hook-reported turn to idle mid-turn.
@@ -227,14 +236,24 @@ fn claude_turn_lifecycle_reads_working_only_for_real_turns() {
         "working",
         "a hook-reported turn stays working through output silence"
     );
+    assert_eq!(
+        listed_row(&engine, &session_id)["agentStateAuthority"],
+        "hook",
+        "silence never spends the hook proof"
+    );
 
     // Tool lifecycle hooks keep the turn authoritative too.
     let tooling = hook_event(&engine, &session_id, &incarnation, "PostToolUse");
     assert_eq!(tooling["agentState"], "working");
+    assert_eq!(tooling["agentStateAuthority"], "hook");
 
     // The turn ends: Stop concludes it to idle on the harness's authority.
     let stopped = hook_event(&engine, &session_id, &incarnation, "Stop");
     assert_eq!(stopped["agentState"], "idle");
+    assert_eq!(
+        stopped["agentStateAuthority"], "hook",
+        "a true turn end is proven idle"
+    );
 
     // And typing at the now-idle prompt can never spin it back up — the
     // exact regression from the bug report, on the post-turn side.
@@ -244,15 +263,23 @@ fn claude_turn_lifecycle_reads_working_only_for_real_turns() {
         "idle",
         "keystroke echo at the idle prompt must not resurrect working"
     );
+    assert_eq!(
+        listed_row(&engine, &session_id)["agentStateAuthority"],
+        "hook",
+        "echo after a true end keeps the proven idle"
+    );
 
     // Notification parks the session on a genuine wait; the next submit
     // resumes the turn and clears it.
     let waiting = hook_event(&engine, &session_id, &incarnation, "Notification");
     assert_eq!(waiting["agentState"], "needs_input");
+    assert_eq!(waiting["agentStateAuthority"], "hook");
     let resumed = hook_event(&engine, &session_id, &incarnation, "UserPromptSubmit");
     assert_eq!(resumed["agentState"], "working");
+    assert_eq!(resumed["agentStateAuthority"], "hook");
     let done = hook_event(&engine, &session_id, &incarnation, "Stop");
     assert_eq!(done["agentState"], "idle");
+    assert_eq!(done["agentStateAuthority"], "hook");
 }
 
 /// The per-session settings file must install the reference's claude turn
@@ -338,6 +365,10 @@ fn hooks_disabled_claude_keeps_the_activity_policy() {
         listed_state(&engine, session["id"].as_str().unwrap()),
         "unknown",
         "hook-less sessions claim no turn: PTY echo is not turn evidence"
+    );
+    assert!(
+        listed_row(&engine, session["id"].as_str().unwrap())["agentStateAuthority"].is_null(),
+        "disabled hooks deposit no proof either"
     );
 }
 
@@ -510,6 +541,10 @@ fn restart_keeps_a_hook_reported_turn_working() {
             .as_str()
             .is_some_and(|at| !at.is_empty()),
         "the restored working state must carry its original stamp"
+    );
+    assert_eq!(
+        row["agentStateAuthority"], "hook",
+        "the restored hook turn keeps its proof: loss of contact never proves the turn concluded"
     );
 }
 

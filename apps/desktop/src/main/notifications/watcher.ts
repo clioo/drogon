@@ -17,6 +17,10 @@ export type WatchedSession = {
   harnessId?: string | null;
   agentState?: string;
   agentStateAt?: string | null;
+  /** Turn proof behind `agentState` (`hook`/`activity`); absent on old-daemon
+   * rows. Forwarded, never interpreted: banner transitions still key on the
+   * state strings, while the renderer needs the proof to draw the dot. */
+  agentStateAuthority?: "hook" | "activity" | null;
 };
 
 export type SessionTransition = {
