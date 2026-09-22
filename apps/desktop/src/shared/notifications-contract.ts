@@ -54,6 +54,10 @@ export const sessionStateChangedSchema = z.object({
   workspaceId: z.string().min(1).max(128),
   agentState: z.string().min(1).max(32),
   agentStateAt: z.string().nullable(),
+  // Activity authority (additive): the turn proof behind `agentState`.
+  // Optional+nullable so a push from an older daemon without the field
+  // still validates; absent reads as "no proof claimed" at the call sites.
+  agentStateAuthority: z.enum(["hook", "activity"]).nullable().optional(),
   agentPromptPreview: z.string().max(2048).nullable().optional(),
   cacheIdleAt: z.string().nullable().optional(),
 });

@@ -56,20 +56,25 @@ export function agentStateOf(session: Session): AgentState {
 
 /**
  * The agent-activity state every shell surface reads (rows, card sentence,
- * tab badge, summary pill). A daemon predating the producer gate derives
- * `working` for a harness-less shell from any PTY output in its window, so
- * old wire can carry `working` where no turn is proven — that reads
- * `unknown` here, never Working, never a manufactured Idle. A
- * `harness.start` launch keeps its `working`: current daemons only emit it
- * for a hook-reported turn, so the wire state is authoritative there.
- * Old-daemon limitation: a launched idle repaint is indistinguishable on
- * the wire (no turn-authority field), so old launched `working` still
- * passes through — compatibility there is incomplete by design, pending a
- * coordinator-approved wire field. Every other state passes through.
+ * tab badge, summary pill). `working`/`idle` render only on hook proof
+ * (`agentStateAuthority === "hook"`): the harness's own hook lifecycle is
+ * the only thing that proves a turn. A daemon predating the authority
+ * field can carry `working` for a harness-less shell — or a launched
+ * session's idle repaint — from PTY output alone, so old wire without
+ * proof reads `unknown` here, never Working, never a manufactured Idle.
+ * A quiet activity clock behind `idle` (`"activity"` or absent) is not
+ * proof of idleness either: the turn is simply unknown. `needs_input`
+ * (hook wait signals only, on every daemon generation), `exited` and
+ * `unknown` pass through; the `unverifiable` rule in `sessionDotState`
+ * still applies first.
  */
 export function sessionAgentState(session: Session): AgentState {
   const state = sessionDotState(session);
-  if (state === "working" && session.harnessId == null) return "unknown";
+  if (
+    (state === "working" || state === "idle") &&
+    session.agentStateAuthority !== "hook"
+  )
+    return "unknown";
   return state;
 }
 

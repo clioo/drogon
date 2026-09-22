@@ -59,10 +59,13 @@ function session(overrides: Partial<Session> = {}): Session {
     createdAt: "2026-09-08T11:00:00.000Z",
     agentState: "working",
     agentStateAt: "2026-09-08T11:59:00.000Z",
-    // F1 sidebar truth (coordinator grant): the suite's agent fixtures mean
-    // launched agents, so they carry the launch record — harness-less
+    // The suite's agent fixtures mean launched agents on a current daemon,
+    // so hook turn states carry the hook proof (R1) — harness-less
     // `working` wire is the old-daemon false positive, never an agent.
+    // No-proof old-daemon scenarios live in agent-state.test.ts,
+    // agent-state-agreement.test.ts and agent-state-surfaces.test.tsx.
     harnessId: "pi",
+    agentStateAuthority: "hook",
     ...overrides,
   };
 }

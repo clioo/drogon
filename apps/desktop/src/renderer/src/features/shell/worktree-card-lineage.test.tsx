@@ -174,12 +174,14 @@ describe("WorktreeCard subagent nesting box (issue #359)", () => {
     const { view } = renderCard("wt-nest-4", orchestrationSet());
     fireEvent.click(view.getByRole("button", { name: "Hide 3 child agents" }));
     // The source draws no summary text line; the same counts ride the
-    // card's accessible label and still cover every session.
+    // card's accessible label and still cover every session. None of the
+    // fixture rows carries hook proof, so the collapsed card honestly
+    // reports the whole silent set instead of a quiet it cannot prove.
     const surface = view.container.querySelector<HTMLElement>(
       ".shell-worktree-card",
     );
     expect(surface?.getAttribute("aria-label") ?? "").toContain(
-      "All sessions idle",
+      "All sessions not reporting",
     );
   });
 
@@ -378,9 +380,10 @@ describe("WorktreeCard subagent nesting box (issue #359)", () => {
       "compact",
     );
     // The pill names the observed session's harness (the shared resolver),
-    // not Shell.
+    // not Shell — with the honest not-reporting state, since an observed
+    // quiet clock without hook proof is no one's idle to claim.
     const pill = view.getByRole("button", { name: /Expand 6 agents/ });
-    expect(pill.getAttribute("aria-label")).toContain("Claude idle");
+    expect(pill.getAttribute("aria-label")).toContain("Claude not reporting");
     fireEvent.click(pill);
     const rows = view.container.querySelector(".shell-worktree-card-rows")!;
     const parentNode = rows

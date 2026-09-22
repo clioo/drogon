@@ -276,6 +276,32 @@ describe("createNeedsInputWatcher", () => {
     ).toHaveLength(1);
   });
 
+  it("forwards turn proof on the poll path so poll and push agree", async () => {
+    // The renderer draws working/idle only on hook proof: the 2 s poll
+    // fallback must carry the daemon's proof like the push feed does, or
+    // every poll would wipe the row's authority back to no-proof.
+    const window = fakeWindow();
+    const proven: WatchedSession = {
+      ...waiting("a"),
+      agentState: "working",
+      agentStateAuthority: "hook",
+    };
+    const deps = depsFor(window, [{ sessions: [waiting("a")] }, { sessions: [proven] }]);
+    const watcher = createNeedsInputWatcher(deps);
+    stoppables.push(watcher);
+    await watcher.tick();
+    await watcher.tick();
+    const states = window.sent.filter(
+      (item) => item.channel === "ui:session-state-changed",
+    );
+    expect(states).toHaveLength(2);
+    expect(states[1].event).toMatchObject({
+      sessionId: "a",
+      agentState: "working",
+      agentStateAuthority: "hook",
+    });
+  });
+
   it("forwards activity transitions without notifying (idle shell leaves working)", async () => {
     const window = fakeWindow();
     const idle: WatchedSession = {

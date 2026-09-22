@@ -50,3 +50,23 @@ describe("session.list observed-harness validation (issue #622, C1)", () => {
     expect(parsed.sessions[0]?.observedHarnessAt).toBeUndefined();
   });
 });
+
+describe("session.list agentStateAuthority validation (R1)", () => {
+  test("hook and activity proof survive validation", () => {
+    for (const agentStateAuthority of ["hook", "activity"] as const) {
+      const parsed = resultSchemas["session.list"].parse({
+        sessions: [{ ...validSession, agentStateAuthority }],
+      }) as { sessions: Array<{ agentStateAuthority?: string | null }> };
+      expect(parsed.sessions[0]?.agentStateAuthority).toBe(
+        agentStateAuthority,
+      );
+    }
+  });
+
+  test("an older service reply without the key still validates", () => {
+    const parsed = resultSchemas["session.list"].parse({
+      sessions: [validSession],
+    }) as { sessions: Array<{ agentStateAuthority?: string | null }> };
+    expect(parsed.sessions[0]?.agentStateAuthority).toBeUndefined();
+  });
+});

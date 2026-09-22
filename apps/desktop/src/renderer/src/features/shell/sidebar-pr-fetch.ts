@@ -7,8 +7,11 @@
    without a DOM:
    - one bounded page (`state: "all"`, full page) per git project, so a
      concluded review is visible and the default 36-item window cannot hide
-     a branch's PRs; further pages follow `hasNextPage` while visible
-     branches stay unmatched, within an explicit page budget;
+     a branch's PRs; further pages follow `hasNextPage` while a visible
+     branch still lacks a LIVE match (a concluded-only match never stops
+     the walk — a later page may carry the live review), within an
+     explicit page budget; a mid-walk failure keeps the fetched pages
+     (marked incomplete + failed) instead of discarding them for null;
    - listings revalidate on a bounded schedule during app lifetime
      (stale-while-revalidate with failure backoff), never per render and
      never with overlapping generations;
@@ -26,6 +29,7 @@
 
 import type { TaskPullRequest } from "../../../../shared/tasks-contract";
 import type { Worktree } from "../../../../shared/session-contract";
+import { isLivePullRequest } from "../../../../shared/workspace-pr-status";
 import type { ProjectGroup } from "./project-adapter";
 import { selectCardPull } from "./worktree-card-pr-display";
 
@@ -469,6 +473,65 @@ export function sidebarProjectHasUnresolvedBranches(
     if (hasSidebarLinkedPr(worktree)) return false;
     return true;
   });
+}
+
+/**
+ * True while a page walk must continue past the current window to avoid
+ * missing a live review: like `sidebarProjectHasUnresolvedBranches`, but
+ * a branch whose best-known match is CONCLUDED (merged/closed) still
+ * holds the walk open — a later page may carry the branch's still-live
+ * review, and stopping on the concluded match would pin the concluded
+ * one while defeating live-first selection. A branch with a live match
+ * (open/draft) is resolved; a stored link still never holds a walk open.
+ * The walk stays bounded by `SIDEBAR_PULLS_MAX_PAGES`, and an exhausted
+ * budget with live-unresolved branches reports `incomplete` (retryable,
+ * never "no PR").
+ */
+export function sidebarProjectHasUnresolvedLiveBranches(
+  group: ProjectGroup,
+  pulls: readonly TaskPullRequest[],
+): boolean {
+  return group.worktrees.some((worktree) => {
+    if (!worktree.branch) return false;
+    if (hasSidebarLinkedPr(worktree)) return false;
+    const match = selectCardPull(worktree, pulls);
+    if (match === null) return true;
+    return !isLivePullRequest(match);
+  });
+}
+
+/**
+ * One project's page-walk outcome. `pulls: null` means NO page succeeded
+ * (a page-1 failure): the merge keeps the last good listing and records
+ * `null` only when nothing was ever fetched. A mid-walk failure returns
+ * the successfully fetched earlier pages with `incomplete: true` and
+ * `failed: true` — known data is preserved, the project reads stale (so
+ * no Ready claim is made from incomplete knowledge), and the failure
+ * streak schedules a bounded retry. A clean walk reports `failed: false`.
+ */
+export type SidebarPullsWalkOutcome = {
+  projectId: string;
+  pulls: readonly TaskPullRequest[] | null;
+  incomplete: boolean;
+  failed: boolean;
+};
+
+/**
+ * Folds a thrown or typed page failure into an honest walk outcome: the
+ * earlier pages of THIS walk survive (page 1 replaces, so they are the
+ * provider's current truth for what they cover), marked incomplete and
+ * failed so the refresh backoff retries and the ready-claim lapses until
+ * a clean walk confirms it. With no successful page at all the outcome is
+ * `null` — the merge then keeps the previous verified listing, never an
+ * empty masquerade.
+ */
+export function sidebarPullsWalkErrorOutcome(
+  pages: SidebarPullsCache,
+  projectId: string,
+): SidebarPullsWalkOutcome {
+  const partial = pages.get(projectId) ?? null;
+  if (!partial) return { projectId, pulls: null, incomplete: false, failed: true };
+  return { projectId, pulls: partial, incomplete: true, failed: true };
 }
 
 /**

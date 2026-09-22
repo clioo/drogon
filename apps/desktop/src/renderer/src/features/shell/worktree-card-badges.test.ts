@@ -27,10 +27,13 @@ function session(id: string, agentState: Session["agentState"]): Session {
     exitCode: null,
     createdAt: "",
     agentState,
-    // F1 sidebar truth (coordinator grant): these fixtures describe launched
-    // agents, so they carry the launch record — harness-less `working` wire
-    // is the old-daemon false positive, never an agent turn.
+    // Launched agents on a current daemon: hook turn states carry the hook
+    // proof — harness-less `working` wire is the old-daemon false positive,
+    // and a launched turn without proof reads not-reporting (R1).
     harnessId: "pi",
+    ...(agentState === "working" || agentState === "idle"
+      ? { agentStateAuthority: "hook" as const }
+      : {}),
   };
 }
 
