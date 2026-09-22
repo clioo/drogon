@@ -438,10 +438,12 @@ export function appendOrReplaceSession(
  */
 /**
  * PERF-03: field-level session equality for poll identity stabilization.
- * Every field of the session contract is compared (including `args`
- * element-wise), so keeping the previous array can never hide a real
- * change — it only stops a byte-identical poll reply from minting a new
- * array identity and re-rendering the whole shell.
+ * Every rendered field of the session contract is compared (including
+ * `args` element-wise), so keeping the previous array can never hide a
+ * real change — it only stops a byte-identical poll reply from minting a
+ * new array identity and re-rendering the whole shell. `gridCursor` is
+ * intentionally excluded: it is read-path-only (TerminalPane), never
+ * rendered by the shell list.
  */
 export function sameSession(left: Session, right: Session): boolean {
   if (left === right) return true;
@@ -470,7 +472,15 @@ export function sameSession(left: Session, right: Session): boolean {
     left.causedByEventId === right.causedByEventId &&
     left.agentSessionId === right.agentSessionId &&
     left.agentSessionTranscriptPath === right.agentSessionTranscriptPath &&
-    left.agentResume === right.agentResume
+    left.agentResume === right.agentResume &&
+    // A metadata-only delta (a plain shell observed foregrounding a
+    // harness, a busy-close foreground flag flipping) changes what the
+    // sidebar renders, so it must replace the list. Absent reads as the
+    // idle claim (null observation, no foreground child), matching an
+    // older daemon's rows; false and true never agree.
+    (left.observedHarnessId ?? null) === (right.observedHarnessId ?? null) &&
+    (left.observedHarnessAt ?? null) === (right.observedHarnessAt ?? null) &&
+    (left.hasForegroundChild ?? false) === (right.hasForegroundChild ?? false)
   );
 }
 
@@ -575,13 +585,51 @@ export function adoptOutOfBandSessions(
       !known.has(`${item.hostId}:${item.id}`) &&
       !isHidden(item),
   );
-  if (adopted.length === 0) return current;
-  return [
-    ...current,
-    ...[...adopted].sort((left, right) =>
-      left.createdAt.localeCompare(right.createdAt),
-    ),
-  ];
+  // R2 selected-copy reconciliation: an already-listed row keeps the
+  // selected list's push state, names and sizing — but its observed
+  // harness/foreground metadata must track the host-wide poll, which
+  // re-reads the daemon every tick while the selected copy otherwise
+  // only refreshes on selection/tab events. On an exact
+  // host+id+incarnation match the fresh row IS the same session, so its
+  // three observation fields win — including an explicit clear (fresh
+  // null), which stale selected data must never revive. A
+  // same-id/different-incarnation or different-host row is left alone,
+  // and ONLY these three fields are ever touched: the poll snapshot is
+  // continuous but can lag a selection refetch, so it must never
+  // overwrite push state, sizing, or anything else.
+  const freshByKey = new Map<string, Session>();
+  for (const item of hostWide)
+    freshByKey.set(`${item.hostId}:${item.id}`, item);
+  let result = current;
+  if (adopted.length > 0)
+    result = [
+      ...current,
+      ...[...adopted].sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt),
+      ),
+    ];
+  for (let index = 0; index < current.length; index += 1) {
+    const item = result[index]!;
+    const fresh = freshByKey.get(`${item.hostId}:${item.id}`);
+    if (!fresh || fresh.incarnation !== item.incarnation) continue;
+    const observedHarnessId = fresh.observedHarnessId ?? null;
+    const observedHarnessAt = fresh.observedHarnessAt ?? null;
+    const hasForegroundChild = fresh.hasForegroundChild ?? false;
+    if (
+      (item.observedHarnessId ?? null) === observedHarnessId &&
+      (item.observedHarnessAt ?? null) === observedHarnessAt &&
+      (item.hasForegroundChild ?? false) === hasForegroundChild
+    )
+      continue;
+    if (result === current) result = current.slice();
+    result[index] = {
+      ...item,
+      observedHarnessId,
+      observedHarnessAt,
+      hasForegroundChild,
+    };
+  }
+  return result;
 }
 
 /**
