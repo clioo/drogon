@@ -4,7 +4,7 @@
    worktree list, kanban board and dialogs are this repo's own).
    Like the source this is a plain div, not a landmark: the reference
    sidebar carries no complementary role. */
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { GraphBridge } from "../../../../shared/graph-contract";
 import type {
   Project,
@@ -19,6 +19,10 @@ import { ProjectList } from "./ProjectList";
 import type { ProjectAction } from "./ProjectList";
 import { ChatsList } from "./ChatsList";
 import type { SidebarBotSession } from "./sidebar-bot-sessions";
+import {
+  attributeSessionsToCards,
+  SidebarCardAttributionContext,
+} from "./sidebar-card-attribution";
 import { SidebarFooter } from "./sidebar-footer";
 import type { SettingsSectionId } from "../settings/settings-sections";
 import {
@@ -124,6 +128,21 @@ export function Sidebar({
   const dragRef = useRef({ startX: 0, startWidth: width });
   dragRef.current.startWidth = resizing ? dragRef.current.startWidth : width;
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // One attribution for every card in both lists, so a worker whose own
+  // checkout has no card still shows up once, under the session that
+  // started it (sidebar-card-attribution.ts).
+  const cardAttribution = useMemo(
+    () =>
+      attributeSessionsToCards({
+        sessions,
+        cardWorkspaceIds: groups.flatMap((group) =>
+          group.worktrees.map((worktree) => worktree.workspaceId),
+        ),
+        workspaces,
+        shownElsewhere: new Set(botSessions.map((row) => row.sessionId)),
+      }),
+    [sessions, groups, workspaces, botSessions],
+  );
 
   const onResizeStart = (event: React.MouseEvent) => {
     event.preventDefault();
@@ -159,7 +178,7 @@ export function Sidebar({
       style={open ? { width } : { width: 0, borderRightWidth: 0 }}
     >
       {open && (
-        <>
+        <SidebarCardAttributionContext.Provider value={cardAttribution}>
           <SidebarNav
             route={route}
             onSelectRoute={onSelectRoute}
@@ -216,7 +235,7 @@ export function Sidebar({
             onOpenSettings={onOpenSettings}
             onRevealActiveWorkspace={revealActiveWorkspace}
           />
-        </>
+        </SidebarCardAttributionContext.Provider>
       )}
       {open && (
         <div
