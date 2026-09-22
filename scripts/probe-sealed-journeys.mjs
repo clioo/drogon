@@ -674,9 +674,40 @@ async function j1Diagnostics(page, workspaceId) {
   }, workspaceId);
 }
 
+/**
+ * Reselect the workspace a journey addresses by id through the real sidebar
+ * card control, then prove the selection landed (`aria-current="page"`).
+ * The tab-strip "New tab" menu launches into the SELECTED workspace while
+ * journey assertions poll the `workspaceId` argument: without this, whichever
+ * card an earlier probe left selected receives the launch and the status
+ * poll reads the wrong workspace (observed: Pi booted live in the implicit
+ * folder card while the live-row poll on the composer's workspace found
+ * nothing). A click on the already-selected card is a no-op. The name is
+ * resolved from the real workspaces list, never guessed.
+ */
+export async function selectWorkspaceCardById(page, workspaceId) {
+  const name = await page.evaluate(async (id) => {
+    const response = await window.drogon.workspaces();
+    if (!response.ok) throw new Error(response.error.message);
+    const match = response.result.workspaces.find((item) => item.id === id);
+    if (!match) throw new Error(`workspace ${id} is not registered`);
+    return match.name;
+  }, workspaceId);
+  await page.getByRole("button", { name: `Select ${name}`, exact: true }).click();
+  await page.waitForFunction(
+    (label) =>
+      document.querySelector(`[aria-label="${label}"]`)?.getAttribute("aria-current") ===
+      "page",
+    `Select ${name}`,
+    { timeout: 15000 },
+  );
+}
+
 export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, getFixtureReceipt }) {
-  // The packaged-surfaces prelude ends on Tasks; return through the real
+  // The packaged-surfaces prelude ends on Tasks; reselect the addressed
+  // workspace through its real card first, then return through the real
   // Sessions nav before using the session header to set Pi defaults.
+  await selectWorkspaceCardById(page, workspaceId);
   await page
     .getByRole("button", { name: "Sessions", exact: true })
     .first()

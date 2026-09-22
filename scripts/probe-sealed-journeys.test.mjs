@@ -14,6 +14,7 @@ import {
   PI_PROVIDER,
   SEALED_MODEL_FIXTURE_BASE_URL_ENV,
   seedLocalPiProvider,
+  selectWorkspaceCardById,
   waitForFixtureReady,
 } from "./probe-sealed-journeys.mjs";
 import { FAR_FUTURE_CRON } from "./probe-packaged-surfaces.mjs";
@@ -265,6 +266,97 @@ describe("waitForFixtureReady (fail-closed identity + redirect refusal)", () => 
     } finally {
       await new Promise((resolve) => redirecting.close(resolve));
       await new Promise((resolve) => other.close(resolve));
+    }
+  });
+});
+
+describe("selectWorkspaceCardById", () => {
+  // Minimal page double: evaluate runs the real page-side callback against
+  // a stubbed window.drogon, the click records the exact accessible name,
+  // and waitForFunction runs the real selection predicate against a stubbed
+  // document that reports aria-current only for the clicked card.
+  function stubPage(workspaces) {
+    const calls = [];
+    let clicked = null;
+    const previousWindow = globalThis.window;
+    const previousDocument = globalThis.document;
+    globalThis.window = {
+      drogon: {
+        workspaces: async () => ({ ok: true, result: { workspaces } }),
+      },
+    };
+    globalThis.document = {
+      querySelector: (selector) => {
+        const match = /aria-label="([^"]+)"/.exec(selector);
+        if (!match) return null;
+        return {
+          getAttribute: (name) =>
+            name === "aria-current" && clicked === match[1] ? "page" : null,
+        };
+      },
+    };
+    const page = {
+      calls,
+      evaluate: (fn, arg) => fn(arg),
+      getByRole: (role, { name } = {}) => ({
+        click: async () => {
+          calls.push(["click", role, name]);
+          clicked = name;
+        },
+      }),
+      waitForFunction: async (fn, label) => {
+        calls.push(["wait", label]);
+        assert.equal(fn(label), true, "selection must be proven via aria-current");
+      },
+    };
+    return { page, restore: () => {
+      globalThis.window = previousWindow;
+      globalThis.document = previousDocument;
+    } };
+  }
+
+  it("clicks the card matching the addressed id and proves the selection", async () => {
+    const { page, restore } = stubPage([
+      { id: "implicit-id", name: "folder" },
+      { id: "registered-id", name: "mussel" },
+    ]);
+    try {
+      await selectWorkspaceCardById(page, "registered-id");
+      assert.deepEqual(page.calls, [
+        ["click", "button", "Select mussel"],
+        ["wait", "Select mussel"],
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("resolves by id rather than position when the target is not first", async () => {
+    const { page, restore } = stubPage([
+      { id: "registered-id", name: "mussel" },
+      { id: "implicit-id", name: "folder" },
+    ]);
+    try {
+      await selectWorkspaceCardById(page, "implicit-id");
+      assert.deepEqual(page.calls, [
+        ["click", "button", "Select folder"],
+        ["wait", "Select folder"],
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("fails closed for an unregistered id without clicking anything", async () => {
+    const { page, restore } = stubPage([{ id: "only-id", name: "folder" }]);
+    try {
+      await assert.rejects(
+        () => selectWorkspaceCardById(page, "missing-id"),
+        /workspace missing-id is not registered/,
+      );
+      assert.deepEqual(page.calls, []);
+    } finally {
+      restore();
     }
   });
 });
