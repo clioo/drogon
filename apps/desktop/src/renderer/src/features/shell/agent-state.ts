@@ -55,18 +55,17 @@ export function agentStateOf(session: Session): AgentState {
 }
 
 /**
- * The agent-activity state for card sentences and rows (owner report
- * 2026-09-21, F1): a daemon predating the producer gate derives `working`
- * for a harness-less shell from any PTY output within its window (echo,
- * redraw, a hosted idle TUI repainting with no hooks firing), so old wire
- * can carry `working` where no turn is proven. That unproven `working`
- * reads `unknown` here — neither a
- * Working claim nor a manufactured Idle — while a `harness.start` launch
- * keeps its `working` (its whole PTY is the agent). An observed harness
- * keeps its identity (row title, glyph) through `resolveRowHarnessId`;
- * only its turn reads unknown. New daemons never emit harness-less
- * `working`, so this is a no-op for them. Every other state passes through
- * untouched, and the durable `needs_input` wait keeps its meaning.
+ * The agent-activity state every shell surface reads (rows, card sentence,
+ * tab badge, summary pill). A daemon predating the producer gate derives
+ * `working` for a harness-less shell from any PTY output in its window, so
+ * old wire can carry `working` where no turn is proven — that reads
+ * `unknown` here, never Working, never a manufactured Idle. A
+ * `harness.start` launch keeps its `working`: current daemons only emit it
+ * for a hook-reported turn, so the wire state is authoritative there.
+ * Old-daemon limitation: a launched idle repaint is indistinguishable on
+ * the wire (no turn-authority field), so old launched `working` still
+ * passes through — compatibility there is incomplete by design, pending a
+ * coordinator-approved wire field. Every other state passes through.
  */
 export function sessionAgentState(session: Session): AgentState {
   const state = sessionDotState(session);
@@ -75,25 +74,11 @@ export function sessionAgentState(session: Session): AgentState {
 }
 
 /**
- * The single agent-dot derivation for the whole shell (journey J1),
- * ported from the fork's `getAgentDotState` →
- * `agentRowDotState` (`src/renderer/src/components/sidebar/
- * worktree-card-agent-summary.ts`, `src/renderer/src/lib/
- * agent-row-dot-state.ts`: one function feeds the row dot, the card dot
- * and the summary text so they can never disagree). The fork maps an
- * agent row's (state, workingMode, interrupted) triple; this repo's
- * Session contract carries the already-derived `agentState` (daemon
- * `agent_state::derive`), so the single function reads it, defaulting an
- * unreported state to `unknown` — never a guess. The tab badge, the card
- * dot and the card summary text must all go through this function.
- *
- * `unverifiable` is a verdict, not an agent state: the daemon holds no
- * child for that id (a held, running child always reports `live`), so a
- * `working`/`idle` agent state is history, never a live claim. Rendering
- * it as-is put the owner's "green check" (the row's concluded-turn glyph)
- * and the working spinner on a dead tab. Those two map to `unknown` ("not
- * reporting") here instead; `needs_input`/`exited` keep their own honest
- * meaning (the durable wait signal survives a restart by design).
+ * The raw wire extraction: `session.agentState ?? "unknown"`, plus the
+ * `unverifiable` rule (the daemon holds no child for that id, so a
+ * `working`/`idle` state is history, never a live claim — those two map to
+ * `unknown`; `needs_input`/`exited` keep their meaning). UI surfaces read
+ * `sessionAgentState`, not this; this stays for wire-faithful needs only.
  */
 export function sessionDotState(session: Session): AgentState {
   const state = session.agentState ?? "unknown";

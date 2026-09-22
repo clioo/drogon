@@ -3,7 +3,7 @@ import type {
   AgentState,
   Session,
 } from "../../../../shared/session-contract";
-import { sessionDotState } from "./agent-state";
+import { sessionAgentState } from "./agent-state";
 import {
   cardDotState,
   summarizeCardAgentStates,
@@ -38,9 +38,11 @@ const STATES: AgentState[] = [
 describe("agent-state agreement (#194)", () => {
   test("one session renders the same state in the tab badge, card dot and card text", () => {
     for (const agentState of STATES) {
-      const item = session({ id: agentState, agentState });
+      // Launched agents: the wire `working` is a hook-reported turn, so
+      // every surface agrees with the daemon's own reading.
+      const item = session({ id: agentState, agentState, harnessId: "pi" });
       // Tab badge input and card dot share the single derivation.
-      expect(sessionDotState(item)).toBe(agentState);
+      expect(sessionAgentState(item)).toBe(agentState);
       expect(cardDotState([item])).toBe(agentState);
       // The card text names that same state for a uniform group.
       expect(summarizeCardSessions([item]).state).toBe(agentState);
@@ -54,6 +56,25 @@ describe("agent-state agreement (#194)", () => {
     }
   });
 
+  test("an old-daemon shell working reads unknown on every surface", () => {
+    // The F1 false positive, pinned once for all surfaces: harness-less
+    // `working` wire (and the observed-harness repaint) is an unproven
+    // turn, so the tab badge, card dot and card text agree on unknown.
+    for (const item of [
+      session({ id: "shell", agentState: "working" }),
+      session({
+        id: "observed",
+        agentState: "working",
+        observedHarnessId: "pi",
+      }),
+    ]) {
+      expect(sessionAgentState(item)).toBe("unknown");
+      expect(cardDotState([item])).toBe("unknown");
+      expect(summarizeCardSessions([item]).state).toBe("unknown");
+      expect(summarizeCardAgentStates([item])).toBe("1 session not reporting");
+    }
+  });
+
   test("a mixed card dots the priority group, never the freshest stamp", () => {
     // The issue's case: the freshest session is idle but an older one is
     // still working — the dot must stay working, matching the text.
@@ -61,11 +82,13 @@ describe("agent-state agreement (#194)", () => {
       session({
         id: "old-working",
         agentState: "working",
+        harnessId: "pi",
         agentStateAt: "2026-09-07T10:00:00Z",
       }),
       session({
         id: "new-idle",
         agentState: "idle",
+        harnessId: "pi",
         agentStateAt: "2026-09-07T11:30:00Z",
       }),
     ];
@@ -99,8 +122,8 @@ describe("agent-state agreement (#194)", () => {
     const summary = summarizeCardSessions(attached, now);
     expect(summary.state).toBe("idle");
     expect(cardDotState(attached)).toBe("idle");
-    expect(sessionDotState(attached[0])).toBe("idle");
-    expect(sessionDotState(attached[1])).toBe("idle");
+    expect(sessionAgentState(attached[0])).toBe("idle");
+    expect(sessionAgentState(attached[1])).toBe("idle");
     expect(summarizeCardAgentStates(attached)).toBe("All sessions idle");
     expect(summary.activeRelative).toBe("26m ago");
     expect(summary.unread).toBe(false);
@@ -148,7 +171,7 @@ describe("agent-state agreement (#194)", () => {
 
   test("unreported states dot unknown and count as not reporting", () => {
     const item = session({ id: "quiet" });
-    expect(sessionDotState(item)).toBe("unknown");
+    expect(sessionAgentState(item)).toBe("unknown");
     expect(cardDotState([item])).toBe("unknown");
     expect(summarizeCardSessions([item]).state).toBe("unknown");
     expect(summarizeCardAgentStates([item])).toBe("1 session not reporting");

@@ -1,38 +1,32 @@
 /* MIT Copyright (c) 2026 Lovecast Inc.
    The worktree card's agent-activity projection (owner's sidebar design,
-   2026-09-21). The card's left lane carries the workspace STATUS ring
-   (`workspace-status-ring.tsx`); the activity the ring used to carry lives
-   in two honest places instead: this module's one-line sentence under the
-   card title, and each row's own state dot + label
-   (`worktree-agent-rows.ts`). Both read `sessionAgentState` (the
-   shell-aware layer over the shared `sessionDotState` derivation), so no
-   surface can disagree about what an agent is doing.
-   The ring's own vocabulary (working / no active agents / no session) is
-   therefore expressed as text here, never as a second, competing colour.
-   Pure functions, unit-tested. */
+   2026-09-21). One uppercase sentence under the card title plus each row's
+   own state dot + label (`worktree-agent-rows.ts`). Both read
+   `sessionAgentState`, as do the tab badge and the summary pill. */
 import type { AgentState, Session } from "../../../../shared/session-contract";
 import { sessionAgentState } from "./agent-state";
+import { resolveRowHarnessId } from "./worktree-agent-rows";
 
 /**
  * The card's activity class, in the owner's design order: an agent waiting
  * on the user wins over work in progress, which wins over a quiet card; a
  * card whose sessions never reported is "not reporting", never "no active
- * agents" (that sentence would claim knowledge this repo does not have).
+ * agents". A card with no known agent at all (plain terminals only) is its
+ * own class: its sessions are not agents, so no agent noun may name them.
  */
 export type WorktreeActivityClass =
   | "needs-input"
   | "working"
   | "no-active-agents"
   | "not-reporting"
+  | "terminal-session"
   | "no-session";
 
-/**
- * How many sessions sit in the class the sentence names. States come from
- * `sessionAgentState`: a harness-less shell's PTY `working` (old-daemon
- * wire) reads `unknown` there — unproven as a turn with or without an
- * observed harness — so shell echo/redraw and idle repaints can never
- * count as agent work, while a `harness.start` launch still counts.
- */
+/** Sessions with a known harness (launched or observed): the only countable agents. */
+function knownAgentSessions(sessions: readonly Session[]): Session[] {
+  return sessions.filter((session) => resolveRowHarnessId(session) !== null);
+}
+
 function countInState(sessions: readonly Session[], state: AgentState): number {
   return sessions.filter((session) => sessionAgentState(session) === state).length;
 }
@@ -43,6 +37,10 @@ export function worktreeActivityClass(
   if (sessions.length === 0) return "no-session";
   if (countInState(sessions, "needs_input") > 0) return "needs-input";
   if (countInState(sessions, "working") > 0) return "working";
+  // Plain shells cannot report these states (harness-less `working` reads
+  // `unknown`; `needs_input` requires hooks, which require a launch), so
+  // the counts above are agent counts without further filtering.
+  if (knownAgentSessions(sessions).length === 0) return "terminal-session";
   const notReporting = sessions.filter(
     (session) => sessionAgentState(session) === "unknown",
   ).length;
@@ -55,10 +53,10 @@ function agentNoun(count: number): string {
 }
 
 /**
- * The uppercase sentence under the card title, e.g. `2 AGENTS WORKING`,
- * `1 AGENT NEEDS INPUT`, `NO ACTIVE AGENTS`, `NO SESSION`. Empty string is
- * never returned: the sentence is the card's whole activity statement, and
- * "nothing to say" does not exist here — an empty card says `NO SESSION`.
+ * The uppercase sentence under the card title. Agent nouns count known
+ * agents only: unidentified shells never inflate them, and a card holding
+ * only plain terminals names its sessions (`1 TERMINAL SESSION`), never a
+ * fabricated agent and never NO SESSION.
  */
 export function worktreeActivitySentence(
   sessions: readonly Session[],
@@ -73,17 +71,23 @@ export function worktreeActivitySentence(
     const count = countInState(sessions, "working");
     return `${count} ${agentNoun(count)} WORKING`;
   }
+  if (activity === "terminal-session") {
+    return sessions.length === 1
+      ? "1 TERMINAL SESSION"
+      : `${sessions.length} TERMINAL SESSIONS`;
+  }
   if (activity === "not-reporting") {
-    return `${sessions.length} ${agentNoun(sessions.length)} NOT REPORTING`;
+    const count = knownAgentSessions(sessions).filter(
+      (session) => sessionAgentState(session) === "unknown",
+    ).length;
+    return `${count} ${agentNoun(count)} NOT REPORTING`;
   }
   return "NO ACTIVE AGENTS";
 }
 
 /**
  * The card's live activity glyph (spinner while an agent works, the amber
- * bell while one waits for the user, nothing once the card is quiet): the
- * ring beside it belongs to the workspace status, so the one signal that
- * must never be hidden behind text keeps its own slot.
+ * bell while one waits for the user, nothing once the card is quiet).
  */
 export function worktreeActivityGlyph(
   sessions: readonly Session[],

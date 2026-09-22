@@ -354,7 +354,8 @@ fn hook_events_on_harness_less_sessions_are_refused() {
         "refused forgeries must not deposit idle or needs_input"
     );
 
-    // And the activity clock itself still works.
+    // And fresh activity still proves terminal liveness, never an agent
+    // turn: the harness-less row stays `unknown` (F1 gate), live throughout.
     ok(
         &engine,
         "session.write",
@@ -364,23 +365,19 @@ fn hook_events_on_harness_less_sessions_are_refused() {
             "dataBase64": base64_of("activity after refusals\n"),
         }),
     );
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let mut working = false;
-    while Instant::now() < deadline {
-        let listed = ok(&engine, "session.list", json!({}));
-        let row = listed["sessions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|s| s["id"] == session_id)
-            .expect("session must be listed");
-        if row["agentState"] == "working" {
-            working = true;
-            break;
-        }
-        sleep(Duration::from_millis(20));
-    }
-    assert!(working, "the activity clock must keep driving the row");
+    sleep(Duration::from_millis(500));
+    let listed = ok(&engine, "session.list", json!({}));
+    let row = listed["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == session_id)
+        .expect("session must be listed");
+    assert_eq!(row["verdict"], "live");
+    assert_eq!(
+        row["agentState"], "unknown",
+        "PTY bytes are not turn evidence, even right after a write: {row}"
+    );
 
     let stopped = ok(
         &engine,

@@ -90,7 +90,7 @@ describe("worktree card activity", () => {
     expect(worktreeActivityGlyph(sessions)).toBeNull();
   });
 
-  test("sessions that never reported are never claimed as inactive", () => {
+  test("agents that never reported are never claimed as inactive", () => {
     const sessions = [session(undefined)];
     expect(worktreeActivityClass(sessions)).toBe("not-reporting");
     expect(worktreeActivitySentence(sessions)).toBe("1 AGENT NOT REPORTING");
@@ -100,8 +100,6 @@ describe("worktree card activity", () => {
   });
 
   test("an unverifiable working verdict reads as not reporting, not as working", () => {
-    // `sessionDotState` owns this rule: a refused hold means the recorded
-    // working state is history, so the card must not spin for it.
     const sessions = [session("working", "unverifiable")];
     expect(worktreeActivitySentence(sessions)).toBe("1 AGENT NOT REPORTING");
     expect(worktreeActivityGlyph(sessions)).toBeNull();
@@ -115,17 +113,44 @@ describe("worktree card activity", () => {
 
   test("a shell with unproven working never spins the card (owner's report)", () => {
     // Old-daemon wire derives `working` for a shell from PTY echo/redraw;
-    // the turn is unproven, so the card reads not-reporting — never
-    // WORKING, and never a manufactured idle. The shell still exists
-    // (never NO SESSION).
+    // the turn is unproven, and a shell is not an agent — so the card
+    // names its session instead of spinning or claiming an agent.
     const shell = shellSession("working");
-    expect(worktreeActivityClass([shell])).toBe("not-reporting");
-    expect(worktreeActivitySentence([shell])).toBe("1 AGENT NOT REPORTING");
+    expect(worktreeActivityClass([shell])).toBe("terminal-session");
+    expect(worktreeActivitySentence([shell])).toBe("1 TERMINAL SESSION");
     expect(worktreeActivityGlyph([shell])).toBeNull();
   });
 
-  test("a busy shell beside a quiet agent still reports no active agents", () => {
-    const sessions = [shellSession("working"), session("idle")];
+  test("an all-shell card names its sessions, never an agent and never no session", () => {
+    expect(worktreeActivitySentence([shellSession("working")])).toBe(
+      "1 TERMINAL SESSION",
+    );
+    expect(
+      worktreeActivitySentence([shellSession("working"), shellSession("idle")]),
+    ).toBe("2 TERMINAL SESSIONS");
+    expect(worktreeActivitySentence([shellSession(undefined)])).toBe(
+      "1 TERMINAL SESSION",
+    );
+    expect(worktreeActivityClass([shellSession("idle")])).toBe(
+      "terminal-session",
+    );
+    expect(worktreeActivityGlyph([shellSession("idle")])).toBeNull();
+  });
+
+  test("a busy shell beside a known working agent is excluded from the agent count", () => {
+    const sessions = [
+      { ...shellSession("working"), hasForegroundChild: true },
+      session("working"),
+    ];
+    expect(worktreeActivityClass(sessions)).toBe("working");
+    expect(worktreeActivitySentence(sessions)).toBe("1 AGENT WORKING");
+    expect(worktreeActivityGlyph(sessions)).toBe("working");
+  });
+
+  test("mixed unknown and idle sessions stay quiet without inventing agents", () => {
+    // Known idle plus an unidentified shell of unknown activity: the known
+    // agent is quiet, the shell is not an agent — never NOT REPORTING.
+    const sessions = [session("idle"), shellSession("working")];
     expect(worktreeActivityClass(sessions)).toBe("no-active-agents");
     expect(worktreeActivitySentence(sessions)).toBe("NO ACTIVE AGENTS");
     expect(worktreeActivityGlyph(sessions)).toBeNull();
@@ -142,11 +167,14 @@ describe("worktree card activity", () => {
     expect(worktreeActivityGlyph(sessions)).toBe("working");
   });
 
-  test("an observed harness keeps identity but its repaint proves no turn", () => {
-    // Issue #622's shape: the agent started inside a plain shell, so only
-    // `observedHarnessId` names it — the row keeps the harness title (see
-    // worktree-agent-rows), but an idle repaint without hooks is an
-    // unproven turn, so the card never spins for it.
+  test("mixed known-not-reporting and shell sessions count known agents only", () => {
+    const sessions = [observedSession("working"), shellSession("working")];
+    expect(worktreeActivityClass(sessions)).toBe("not-reporting");
+    expect(worktreeActivitySentence(sessions)).toBe("1 AGENT NOT REPORTING");
+    expect(worktreeActivityGlyph(sessions)).toBeNull();
+  });
+
+  test("a known observed agent that never reports stays a named agent, not hidden", () => {
     expect(worktreeActivitySentence([observedSession("working")])).toBe(
       "1 AGENT NOT REPORTING",
     );
@@ -156,10 +184,24 @@ describe("worktree card activity", () => {
     );
   });
 
-  test("a fresh shell that never reported stays not reporting", () => {
+  test("an unverifiable plain shell names its session, never an agent", () => {
+    const shell = shellSession("working", "unverifiable");
+    expect(worktreeActivityClass([shell])).toBe("terminal-session");
+    expect(worktreeActivitySentence([shell])).toBe("1 TERMINAL SESSION");
+    expect(worktreeActivityGlyph([shell])).toBeNull();
+  });
+
+  test("a retained exited terminal is still a session, not no session", () => {
+    const retained = shellSession("exited", "exited");
+    expect(worktreeActivityClass([retained])).toBe("terminal-session");
+    expect(worktreeActivitySentence([retained])).toBe("1 TERMINAL SESSION");
+    expect(worktreeActivityGlyph([retained])).toBeNull();
+  });
+
+  test("a fresh shell that never reported names its session", () => {
     const sessions = [shellSession(undefined)];
-    expect(worktreeActivityClass(sessions)).toBe("not-reporting");
-    expect(worktreeActivitySentence(sessions)).toBe("1 AGENT NOT REPORTING");
+    expect(worktreeActivityClass(sessions)).toBe("terminal-session");
+    expect(worktreeActivitySentence(sessions)).toBe("1 TERMINAL SESSION");
     expect(worktreeActivityGlyph(sessions)).toBeNull();
   });
 });

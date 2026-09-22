@@ -131,8 +131,11 @@ describe("WorktreeCard nested session rows", () => {
   test("focused highlight follows the active tab and summary matches rows", () => {
     const { container, unmount } = renderCard(
       [
-        session({ id: "s-1", agentState: "working" }),
-        session({ id: "s-2", agentState: "idle" }),
+        // F1 sidebar truth (coordinator grant): launched agents, so the
+        // launch record rides along — harness-less `working` wire is the
+        // old-daemon false positive, never an agent turn.
+        session({ id: "s-1", agentState: "working", harnessId: "pi" }),
+        session({ id: "s-2", agentState: "idle", harnessId: "pi" }),
       ],
       "s-2",
     );

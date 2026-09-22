@@ -27,6 +27,10 @@ function session(id: string, agentState: Session["agentState"]): Session {
     exitCode: null,
     createdAt: "",
     agentState,
+    // F1 sidebar truth (coordinator grant): these fixtures describe launched
+    // agents, so they carry the launch record — harness-less `working` wire
+    // is the old-daemon false positive, never an agent turn.
+    harnessId: "pi",
   };
 }
 

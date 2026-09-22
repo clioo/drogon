@@ -126,8 +126,8 @@ describe("buildWorktreeAgentRows", () => {
   it("derives the collapsed summary counts from the same rows", () => {
     const rows = buildWorktreeAgentRows(
       [
-        session({ id: "s-1", agentState: "working" }),
-        session({ id: "s-2", agentState: "idle" }),
+        session({ id: "s-1", agentState: "working", harnessId: "pi" }),
+        session({ id: "s-2", agentState: "idle", harnessId: "pi" }),
       ],
       { nowMs: NOW },
     );
@@ -142,6 +142,20 @@ describe("buildWorktreeAgentRows", () => {
     expect(summarizeCardAgentStates(lone.map((row) => row.session))).toBe(
       "1 session not reporting",
     );
+  });
+
+  it("groups a shell's unproven working with the not-reporting rows", () => {
+    const rows = buildWorktreeAgentRows(
+      [
+        session({ id: "s-1", agentState: "working", harnessId: null }),
+        session({ id: "s-2", agentState: "idle", harnessId: "pi" }),
+      ],
+      { nowMs: NOW },
+    );
+    expect(rows.map((row) => row.state)).toEqual(["unknown", "idle"]);
+    expect(
+      summarizeCardAgentStates(rows.map((row) => row.session)),
+    ).toBe("1 not reporting, 1 idle");
   });
 });
 

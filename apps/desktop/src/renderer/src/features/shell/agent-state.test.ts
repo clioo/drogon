@@ -90,7 +90,10 @@ describe("shell-aware agent activity (owner's report, F1)", () => {
   });
 
   test("a harness.start launch keeps its working", () => {
-    // The launch's whole PTY is the agent, so its bytes are the agent's.
+    // Current daemons only emit launch `working` for a hook-reported turn,
+    // so the wire state is authoritative there. Old-daemon limitation: a
+    // launched idle repaint is indistinguishable on the wire (no
+    // turn-authority field), so old launched `working` still passes through.
     expect(sessionAgentState(launched({ agentState: "working" }))).toBe(
       "working",
     );
