@@ -350,6 +350,49 @@ pub(crate) fn resolve_bot_owning_folder_and_workspace(
     Ok((folder, resolved_workspace_id))
 }
 
+/// [`resolve_bot_owning_workspace`] for the work that runs in the Bot's OWN
+/// home -- `bot.run` (Open session, a chat turn, Run now) and the monitor
+/// read on the same Bots card. When the record folder has left the registry
+/// (the worktree or project it was created in was removed), the Bot's
+/// provisioned home is still a workspace registered on this host, and it is
+/// where an open session runs anyway, so it answers instead of a refusal
+/// whose only advice is to re-register a folder that may no longer exist on
+/// disk. A Bot with no registered home keeps the named refusal.
+pub(crate) fn resolve_bot_workspace_or_home(
+    conn: &Connection,
+    derived_host_id: &str,
+    workspace_id: &str,
+    asserted_host_id: &str,
+    bot_id: &str,
+) -> Result<(String, String), RpcError> {
+    let (folder, resolved) = resolve_bot_owning_folder_and_workspace(
+        conn,
+        derived_host_id,
+        workspace_id,
+        asserted_host_id,
+        bot_id,
+    )?;
+    if let Some(workspace_id) = resolved {
+        return Ok((folder, workspace_id));
+    }
+    let home = crate::bot_self_mgmt::home_for_bot(conn, bot_id)
+        .map_err(crate::bot_self_mgmt::self_storage_error)?;
+    let registered_home: Option<String> = match home {
+        Some(home) => conn
+            .query_row(
+                "SELECT id FROM workspaces WHERE id = ?1 AND host_id = ?2",
+                rusqlite::params![home.home_workspace_id, derived_host_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| storage_error(format!("home workspace lookup failed: {e}")))?,
+        None => None,
+    };
+    let home_workspace_id =
+        registered_home.ok_or_else(|| deregistered_workspace(folder_notice(bot_id, &folder)))?;
+    Ok((folder, home_workspace_id))
+}
+
 /// One sentence, used both by the strict resolver's refusal and by the
 /// notice `bot.self_list` puts on an otherwise successful read, so the
 /// operator sees the same diagnosis either way.

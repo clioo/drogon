@@ -598,8 +598,16 @@ impl crate::Engine {
         let scope = parse_scope_relaxed_workspace(params, "bot.monitor_list")?;
         let conn = self.db.lock().unwrap();
         // Scope-proof first: the Bot must live in the asserted (or resolved)
-        // workspace.
-        let (_folder, resolved_workspace_id) = resolve_bot_scope(&conn, &self.host_id, &scope)?;
+        // workspace. A read, so a Bot whose record folder left the registry
+        // answers from its own home instead of failing the whole card.
+        let (_folder, resolved_workspace_id) =
+            crate::bot_mutation_rpc::resolve_bot_workspace_or_home(
+                &conn,
+                &self.host_id,
+                &scope.workspace_id,
+                &scope.host_id,
+                &scope.bot_id,
+            )?;
         let mut result = monitor_list_in_conn(&conn, &scope, crate::now_unix_ms() as f64)?;
         if let Some(object) = result.as_object_mut() {
             object.insert("hostId".to_string(), json!(self.host_id));
