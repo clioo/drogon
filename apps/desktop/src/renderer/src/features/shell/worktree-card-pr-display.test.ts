@@ -52,7 +52,7 @@ describe("card PR state", () => {
     expect(resolveCardPrState({ ...base, state: "open", isDraft: true })).toBe("draft");
   });
 
-  test("ready is a confirmed claim: open, MERGEABLE, no failing checks, no requested changes", () => {
+  test("ready is a confirmed claim: open, MERGEABLE, passing checks, approved or no known review requirement", () => {
     expect(
       resolveCardPrState({ ...base, state: "open", mergeable: "MERGEABLE" }),
     ).toBe("ready");
@@ -65,6 +65,27 @@ describe("card PR state", () => {
         reviewDecision: "APPROVED",
       }),
     ).toBe("ready");
+  });
+
+  test("an outstanding required review stays open even when MERGEABLE with green checks", () => {
+    // REVIEW_REQUIRED names a required review still outstanding: the branch
+    // may be conflict-free with passing checks, but the card must not claim
+    // merge-readiness until the review lands (APPROVED) or no requirement
+    // is known (absent decision).
+    const green: WorktreeCardPrDisplay = {
+      ...base,
+      state: "open",
+      mergeable: "MERGEABLE",
+      checks: "success",
+    };
+    expect(resolveCardPrState({ ...green, reviewDecision: "REVIEW_REQUIRED" })).toBe(
+      "open",
+    );
+    expect(resolveCardPrState({ ...green, reviewDecision: "APPROVED" })).toBe("ready");
+    expect(resolveCardPrState(green)).toBe("ready");
+    expect(resolveCardPrState({ ...green, reviewDecision: "CHANGES_REQUESTED" })).toBe(
+      "open",
+    );
   });
 
   test("unknown mergeability never reads as ready", () => {

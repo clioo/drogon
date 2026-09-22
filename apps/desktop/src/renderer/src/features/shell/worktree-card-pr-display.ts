@@ -97,10 +97,11 @@ export type WorktreeCardPrDisplay = {
  *    that will not merge until a human acts, so it outranks `ready`.
  *  - `draft`: still a draft (never "ready").
  *  - `ready`: open, not a draft, confirmed MERGEABLE, checks passing (or
- *    no checks at all), no requested changes — the only state that claims
- *    "Ready to merge".
+ *    no checks at all), and no outstanding review — APPROVED or no known
+ *    review requirement — the only state that claims "Ready to merge".
  *  - `open`: live but unconfirmed (unknown mergeability, failing/pending/
- *    neutral checks, or requested changes) — honest, never "Ready to merge".
+ *    neutral checks, requested changes, or a required review still
+ *    outstanding) — honest, never "Ready to merge".
  *  - `closed`: closed without merging.
  * `null` means no review is linked: the card draws no icon at all rather
  * than a placeholder claiming a state.
@@ -125,13 +126,16 @@ export function resolveCardPrState(
     // "Ready" is a confirmed claim: the provider computed MERGEABLE and
     // nothing on record blocks the merge. Unknown mergeability (gh reports
     // UNKNOWN while computing, and for every concluded review), a
-    // failing/pending/neutral check rollup, or requested changes all stay
-    // honestly `open` — pending required checks are not a merge confirmation.
+    // failing/pending/neutral check rollup, requested changes, or a still
+    // outstanding required review (REVIEW_REQUIRED) all stay honestly
+    // `open` — pending required checks are not a merge confirmation, and a
+    // conflict-free branch alone never claims merge-readiness.
     if (
       pr.mergeable === "MERGEABLE" &&
       pr.checks !== "failure" &&
       pr.checks !== "pending" &&
-      pr.reviewDecision !== "CHANGES_REQUESTED"
+      pr.reviewDecision !== "CHANGES_REQUESTED" &&
+      pr.reviewDecision !== "REVIEW_REQUIRED"
     ) {
       return "ready";
     }

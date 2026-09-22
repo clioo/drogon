@@ -862,12 +862,7 @@ fn fake_gh_pr_state_field_aware() -> String {
 /// Human-readable `--json` field assertion: the producer must name `state`
 /// for both PR call shapes, since `gh` returns only requested fields.
 fn assert_pr_argv_requests_state(argv: &str, shape: &str) {
-    let json_fields = argv
-        .split("--json")
-        .nth(1)
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let json_fields = argv.split("--json").nth(1).unwrap_or("").trim().to_string();
     assert!(
         argv.contains(shape) && json_fields.split(',').any(|field| field.trim() == "state"),
         "core must request the state field via --json for {shape}, got: {argv}"
@@ -890,9 +885,7 @@ fn pulls_list_state_all_reaches_gh_and_maps_concluded_states() {
     );
     let argv = fx.last_argv();
     assert!(
-        argv.contains("pr list")
-            && argv.contains("--state all")
-            && argv.contains("--limit 101"),
+        argv.contains("pr list") && argv.contains("--state all") && argv.contains("--limit 101"),
         "core must derive pr list --state all with the fetch-one-extra probe row, got: {argv}"
     );
     // The lifecycle field itself must be requested: real `gh` omits
