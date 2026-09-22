@@ -233,7 +233,24 @@ export interface TasksRpcBridge {
   tasksList?: (input: {
     projectId: string;
     mode?: "issues" | "pulls";
+    /** `"all"` keeps a worktree's already-concluded (merged/closed) review
+     *  visible on its card (`gh`'s default is open only); the shared bridge
+     *  declares the same param. */
+    state?: "open" | "closed" | "all";
+    /** Bounded page size; the sidebar asks for the full page so the
+     *  default window cannot hide a branch's PRs. */
+    perPage?: number;
   }) => Promise<Result<{ pulls?: import("../../../../shared/tasks-contract").TaskPullRequest[] }>>;
+  /** Targeted single-review lookup for a stored `linkedPr` whose branch
+   *  matched no listed pull (the additive `mode: "pulls"` composer lookup,
+   *  `gh pr view` behind it). */
+  tasksShow?: (input: {
+    projectId: string;
+    number: number;
+    mode?: "issues" | "pulls";
+  }) => Promise<
+    Result<{ pull?: import("../../../../shared/tasks-contract").TaskPullRequest }>
+  >;
 }
 
 /** Reads the live `tasks` namespace off `window.drogon` (absent → {}). */

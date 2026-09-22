@@ -769,6 +769,84 @@ fn pulls_list_returns_prs_with_rollup_draft_and_empty_issues() {
     assert!(listed.get("total").is_none());
 }
 
+/// A fake `gh` whose `pr list` reports the sidebar's real failure shape: one
+/// head branch carrying both concluded history and its next review (MERGED
+/// #641 beneath OPEN #642 on `collapsable-widgets`), plus a CLOSED row, so
+/// the `state: "all"` sidebar page is exercised end to end.
+fn fake_gh_pr_list_all_states() -> String {
+    const ROWS: &str = r#"[
+  {"number":642,"title":"Sidebar follow-up","state":"OPEN","isDraft":false,
+   "labels":[],"assignees":[],"author":{"login":"helix"},
+   "reviewDecision":"","statusCheckRollup":[
+     {"name":"build","status":"COMPLETED","conclusion":"SUCCESS"},
+     {"name":"discrimination","status":"COMPLETED","conclusion":"FAILURE"}],
+   "mergeable":"MERGEABLE",
+   "headRefName":"collapsable-widgets","baseRefName":"v2",
+   "updatedAt":"2026-09-21T20:53:17Z",
+   "url":"https://github.com/example/repo/pull/642"},
+  {"number":641,"title":"The card design","state":"MERGED","isDraft":false,
+   "labels":[],"assignees":[],"author":{"login":"helix"},
+   "reviewDecision":"APPROVED","statusCheckRollup":[],
+   "mergeable":"UNKNOWN",
+   "headRefName":"collapsable-widgets","baseRefName":"v2",
+   "updatedAt":"2026-09-20T10:00:00Z",
+   "url":"https://github.com/example/repo/pull/641"},
+  {"number":638,"title":"Ask for state","state":"CLOSED","isDraft":false,
+   "labels":[],"assignees":[],
+   "reviewDecision":"","statusCheckRollup":[],
+   "mergeable":"UNKNOWN",
+   "headRefName":"pr-not-reflected-2","baseRefName":"v2",
+   "updatedAt":"2026-09-19T10:00:00Z",
+   "url":"https://github.com/example/repo/pull/638"}
+]"#;
+    format!(
+        "#!/bin/sh\necho \"$*\" > \"$PWD/.gh-argv-last\"\n\
+         if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then\ncat <<'EOF'\n{ROWS}\nEOF\n\
+         else\necho 'could not resolve to a PR' >&2\nexit 1\nfi\n"
+    )
+}
+
+#[test]
+fn pulls_list_state_all_reaches_gh_and_maps_concluded_states() {
+    let fx = Fixture::new(
+        Some("https://github.com/example/repo.git"),
+        Some(&fake_gh_pr_list_all_states()),
+    );
+    // The sidebar's page: every state, one bounded window. Without
+    // `state: "all"` the producer asks `gh` for open reviews only and the
+    // concluded markers below are unreachable.
+    let listed = ok(
+        &fx.engine,
+        "tasks.list",
+        json!({"projectId": fx.project_id, "mode": "pulls", "state": "all", "perPage": 100}),
+    );
+    let argv = fx.last_argv();
+    assert!(
+        argv.contains("pr list")
+            && argv.contains("--state all")
+            && argv.contains("--limit 101"),
+        "core must derive pr list --state all with the fetch-one-extra probe row, got: {argv}"
+    );
+    let pulls = listed["pulls"].as_array().unwrap();
+    assert_eq!(pulls.len(), 3);
+    // The live review keeps the fields the card's ready-claim inspects:
+    // mergeability, the failing check rollup, and its head branch.
+    assert_eq!(pulls[0]["number"], 642);
+    assert_eq!(pulls[0]["state"], "open");
+    assert_eq!(pulls[0]["mergeable"], "MERGEABLE");
+    assert_eq!(pulls[0]["checks"]["state"], "failure");
+    assert_eq!(pulls[0]["checks"]["failed"], 1);
+    assert_eq!(pulls[0]["headRefName"], "collapsable-widgets");
+    // Concluded history on the same branch stays visible with its own
+    // state — never folded into open, never dropped.
+    assert_eq!(pulls[1]["number"], 641);
+    assert_eq!(pulls[1]["state"], "merged");
+    assert_eq!(pulls[1]["headRefName"], "collapsable-widgets");
+    assert_eq!(pulls[2]["number"], 638);
+    assert_eq!(pulls[2]["state"], "closed");
+    assert_eq!(listed["perPage"], 100);
+}
+
 #[test]
 fn pulls_list_pages_with_proven_has_next() {
     let fx = Fixture::new(

@@ -100,6 +100,16 @@ import {
 import type { WorkspaceUIPreferences } from "../../../../shared/workspace-ui-preferences-contract";
 import { WorkspaceOptionsMenuSections } from "./WorkspaceOptionsMenuSections";
 import { resolveCardPullRequest } from "./worktree-card-pr-display";
+import {
+  mergeSidebarLinkedPrResults,
+  mergeSidebarPrResults,
+  pruneSidebarPrCache,
+  selectSidebarLinkedPrLookups,
+  selectSidebarPrFetchIds,
+  SIDEBAR_PULLS_PER_PAGE,
+  sidebarPrFetchSignature,
+  sidebarPrProjectIds,
+} from "./sidebar-pr-fetch";
 import { useWorkspaceCardPorts } from "./use-workspace-card-ports";
 import { useWorktreeIssueLinks } from "./use-worktree-issue-links";
 import type { WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
@@ -832,60 +842,108 @@ export function ProjectList({
   const [pullsByProjectId, setPullsByProjectId] = useState<
     ReadonlyMap<string, readonly TaskPullRequest[] | null>
   >(new Map());
+  // Latest PR fetch generation: overlapping list/show responses merge only
+  // while they still belong to the newest run, so a slow earlier response
+  // can never clobber newer data (unmounted results are dropped outright).
+  const pullsFetchGenerationRef = useRef(0);
+  // Project-set signature of the last attempted list fetch: a recorded
+  // failure retries only when this changes (the registry refresh already
+  // re-renders the sidebar during app lifetime), never per render.
+  const pullsFetchSignatureRef = useRef<string | null>(null);
+  // Stored linked-PR numbers already given their one targeted lookup.
+  const linkedPrAttemptedRef = useRef<Set<number>>(new Set());
   // Real provider fetch (the existing `tasks.list(mode: "pulls")` bridge,
-  // never a new RPC): one call per git project actually shown, cached by
-  // project id, only while "PR status" grouping is selected -- never spawn
-  // `gh` for a grouping mode the user is not looking at. A folder project
-  // has no branch/PR concept at all, so it is seeded straight to `[]`
-  // ("no pull request", never queried and never "unavailable" -- that
-  // bucket is reserved for a real fetch failure). An unknown/not-yet-
-  // fetched git project is left OUT of the map on purpose: `derivePrStatusBucket`
+  // never a new RPC): one bounded `state: "all"` page per git project
+  // actually shown, cached by project id, only while the PR marker or the
+  // "PR status" grouping is visible -- never spawn `gh` for a surface the
+  // user is not looking at. `gh`'s default is open reviews only, and a
+  // worktree's review is usually already concluded by the time anyone looks
+  // at the sidebar, so asking for every state keeps merged/closed markers
+  // visible; the card deterministically prefers the live review when one
+  // branch carries both (see selectCardPull). A folder project has no
+  // branch/PR concept at all, so it is seeded straight to `[]` ("no pull
+  // request", never queried and never "unavailable" -- that bucket is
+  // reserved for a real fetch failure). An unknown/not-yet-fetched git
+  // project is left OUT of the map on purpose: `derivePrStatusBucket`
   // treats absence as `unavailable`, distinct from a real empty `none`.
   useEffect(() => {
     if (workspaceOptions.groupBy !== "pr-status" && !workspaceOptions.showProperties.pr) return;
     const bridge = windowTasksBridge(window.drogon);
     if (!bridge.tasksList) return;
-    const gitProjectIds = [
-      ...new Set(
-        hideFiltered
-          .filter((group) => group.project.kind === "git")
-          .map((group) => group.project.id),
-      ),
-    ];
-    const folderProjectIds = hideFiltered
-      .filter((group) => group.project.kind === "folder")
-      .map((group) => group.project.id);
-    if (folderProjectIds.length > 0) {
-      setPullsByProjectId((current) => {
-        let changed = false;
-        const next = new Map(current);
-        for (const id of folderProjectIds) {
-          if (!next.has(id)) {
-            next.set(id, []);
-            changed = true;
-          }
+    const { git: gitProjectIds, folder: folderProjectIds } =
+      sidebarPrProjectIds(hideFiltered);
+    const liveIds = new Set(hideFiltered.map((group) => group.project.id));
+    setPullsByProjectId((current) => {
+      const pruned = pruneSidebarPrCache(current, liveIds);
+      const next = new Map(pruned);
+      let changed = next.size !== pruned.size || pruned !== current;
+      for (const id of folderProjectIds) {
+        if (!next.has(id)) {
+          next.set(id, []);
+          changed = true;
         }
-        return changed ? next : current;
+      }
+      return changed ? next : current;
+    });
+    const signature = sidebarPrFetchSignature(gitProjectIds);
+    const toFetch = selectSidebarPrFetchIds(
+      pullsByProjectId,
+      gitProjectIds,
+      pullsFetchSignatureRef.current !== signature,
+    );
+    // Targeted number fallback for stored links the bounded page missed;
+    // a real stored number, never a guessed one, at most once per number.
+    const lookups =
+      typeof bridge.tasksShow === "function"
+        ? selectSidebarLinkedPrLookups(
+            hideFiltered,
+            pullsByProjectId,
+            linkedPrAttemptedRef.current,
+          )
+        : [];
+    if (toFetch.length === 0 && lookups.length === 0) return;
+    const generation = pullsFetchGenerationRef.current + 1;
+    pullsFetchGenerationRef.current = generation;
+    let cancelled = false;
+    if (toFetch.length > 0) {
+      pullsFetchSignatureRef.current = signature;
+      void Promise.all(
+        toFetch.map((projectId) =>
+          bridge
+            .tasksList!({
+              projectId,
+              mode: "pulls",
+              state: "all",
+              perPage: SIDEBAR_PULLS_PER_PAGE,
+            })
+            .then((result) => [projectId, result.ok ? result.result.pulls ?? [] : null] as const)
+            .catch(() => [projectId, null] as const),
+        ),
+      ).then((entries) => {
+        if (cancelled || generation !== pullsFetchGenerationRef.current) return;
+        // Removal-safe: a project that left while its fetch was in flight
+        // is pruned, not re-added.
+        const live = entries.filter(([projectId]) => liveIds.has(projectId));
+        setPullsByProjectId((current) => mergeSidebarPrResults(current, live));
       });
     }
-    const toFetch = gitProjectIds.filter((id) => !pullsByProjectId.has(id));
-    if (toFetch.length === 0) return;
-    let cancelled = false;
-    void Promise.all(
-      toFetch.map((projectId) =>
-        bridge
-          .tasksList!({ projectId, mode: "pulls" })
-          .then((result) => [projectId, result.ok ? result.result.pulls ?? [] : null] as const)
-          .catch(() => [projectId, null] as const),
-      ),
-    ).then((entries) => {
-      if (cancelled) return;
-      setPullsByProjectId((current) => {
-        const next = new Map(current);
-        for (const [projectId, pulls] of entries) next.set(projectId, pulls);
-        return next;
+    if (lookups.length > 0 && typeof bridge.tasksShow === "function") {
+      const show = bridge.tasksShow;
+      for (const lookup of lookups) linkedPrAttemptedRef.current.add(lookup.number);
+      void Promise.all(
+        lookups.map((lookup) =>
+          show({ projectId: lookup.projectId, number: lookup.number, mode: "pulls" })
+            .then((result) => ({
+              projectId: lookup.projectId,
+              pull: result.ok ? (result.result.pull ?? null) : null,
+            }))
+            .catch(() => ({ projectId: lookup.projectId, pull: null })),
+        ),
+      ).then((results) => {
+        if (cancelled || generation !== pullsFetchGenerationRef.current) return;
+        setPullsByProjectId((current) => mergeSidebarLinkedPrResults(current, results));
       });
-    });
+    }
     return () => {
       cancelled = true;
     };

@@ -7,10 +7,44 @@
 
 import type { Worktree } from "../../../../shared/session-contract";
 import type { TaskPullRequest } from "../../../../shared/tasks-contract";
-import { findPullRequestForWorktree } from "../../../../shared/workspace-pr-status";
+
+/**
+ * The review the card's marker names: every pull whose head branch IS this
+ * worktree's branch, best first. A branch routinely carries both concluded
+ * history and its next review (e.g. `collapsable-widgets` holds MERGED
+ * #641 beneath OPEN #642), and the provider's order is not a recency
+ * contract — so a still-live review (open/draft) deterministically wins
+ * over concluded history, and the newest number wins within each group.
+ * A worktree with no branch (a folder project's implicit worktree, or a
+ * detached HEAD) never matches: there is nothing to correlate.
+ */
+export function selectCardPull(
+  worktree: Pick<Worktree, "branch">,
+  pulls: readonly TaskPullRequest[],
+): TaskPullRequest | null {
+  const branch = worktree.branch;
+  if (!branch) return null;
+  const matching = pulls.filter((pull) => pull.headRefName === branch);
+  if (matching.length === 0) return null;
+  const live = matching.filter(
+    (pull) => pull.state === "open" || pull.state === "draft",
+  );
+  const candidates = live.length > 0 ? live : matching;
+  return candidates.reduce((best, pull) =>
+    pull.number > best.number ? pull : best,
+  );
+}
 
 export function resolveCardPullRequest(worktree: Worktree, pulls: readonly TaskPullRequest[]): WorktreeCardPrDisplay | null {
-  const pull = findPullRequestForWorktree(worktree, pulls);
+  // A stored link names the review explicitly (retargeted since, or paged
+  // out of the bounded listing); the branch correlation below stays the
+  // primary path, never a guess.
+  const linked = worktree.linkedPr ?? null;
+  const pull =
+    selectCardPull(worktree, pulls) ??
+    (linked !== null && Number.isInteger(linked) && linked > 0
+      ? (pulls.find((candidate) => candidate.number === linked) ?? null)
+      : null);
   if (!pull) return null;
   return {
     provider: "github",
@@ -21,9 +55,19 @@ export function resolveCardPullRequest(worktree: Worktree, pulls: readonly TaskP
     // Owner's sidebar design (2026-09-21): the card's right-hand icon names
     // the review's own state, so the fields that decide it travel with the
     // display — the provider's mergeable flag and draft flag, never a guess.
+    // Checks arrive as the producer's rollup summary; only a terminal
+    // failure/success/pending verdict travels (neutral/none carry no claim).
     mergeable: pull.mergeable,
     isDraft: pull.isDraft,
     reviewDecision: pull.reviewDecision,
+    checks:
+      pull.checks?.state === "failure"
+        ? "failure"
+        : pull.checks?.state === "pending"
+          ? "pending"
+          : pull.checks?.state === "success"
+            ? "success"
+            : undefined,
   };
 }
 
@@ -42,14 +86,17 @@ export type WorktreeCardPrDisplay = {
 };
 
 /**
- * The four states the card's right-hand icon can draw (owner's sidebar
- * design), plus `closed` for a review that was abandoned rather than
- * merged:
+ * The states the card's right-hand icon can draw (owner's sidebar design),
+ * plus `closed` for a review that was abandoned rather than merged, plus
+ * `open` for a live review whose mergeability is not confirmed:
  *  - `merged`: the review landed.
  *  - `conflicts`: the provider reports a conflicting branch — the one state
  *    that will not merge until a human acts, so it outranks `ready`.
  *  - `draft`: still a draft (never "ready").
- *  - `ready`: open, not a draft, no conflicts.
+ *  - `ready`: open, not a draft, confirmed MERGEABLE, no failing checks,
+ *    no requested changes — the only state that claims "Ready to merge".
+ *  - `open`: live but unconfirmed (unknown mergeability, failing checks,
+ *    or requested changes) — honest, never "Ready to merge".
  *  - `closed`: closed without merging.
  * `null` means no review is linked: the card draws no icon at all rather
  * than a placeholder claiming a state.
@@ -59,6 +106,7 @@ export type WorktreeCardPrState =
   | "conflicts"
   | "draft"
   | "ready"
+  | "open"
   | "closed";
 
 export function resolveCardPrState(
@@ -69,7 +117,21 @@ export function resolveCardPrState(
   if (pr.mergeable === "CONFLICTING") return "conflicts";
   if (pr.state === "closed") return "closed";
   if (pr.state === "draft" || pr.isDraft === true) return "draft";
-  return "ready";
+  if (pr.state === "open" || pr.state === undefined) {
+    // "Ready" is a confirmed claim: the provider computed MERGEABLE and
+    // nothing on record blocks the merge. Unknown mergeability (gh reports
+    // UNKNOWN while computing, and for every concluded review), a failing
+    // check rollup, or requested changes all stay honestly `open`.
+    if (
+      pr.mergeable === "MERGEABLE" &&
+      pr.checks !== "failure" &&
+      pr.reviewDecision !== "CHANGES_REQUESTED"
+    ) {
+      return "ready";
+    }
+    return "open";
+  }
+  return null;
 }
 
 function providerLabel(provider: WorktreeCardPrDisplay["provider"]): string {
@@ -92,6 +154,8 @@ export function getPrStateLabel(state: WorktreeCardPrState): string {
       return "Draft";
     case "ready":
       return "Ready to merge";
+    case "open":
+      return "Open";
     case "closed":
       return "Closed";
   }
