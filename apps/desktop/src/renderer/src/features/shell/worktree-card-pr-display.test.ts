@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 import type { TaskPullRequest } from "../../../../shared/tasks-contract";
 import {
+  derivePrStatusBucket,
+  selectCanonicalPullRequest,
+} from "../../../../shared/workspace-pr-status";
+import {
   applySidebarPrStaleness,
   getPrStateLabel,
   resolveCardPullRequest,
@@ -251,5 +255,52 @@ describe("resolveCardPullRequest", () => {
     const display = resolveCardPullRequest(worktree("feature"), [failing]);
     expect(display?.checks).toBe("failure");
     expect(resolveCardPrState(display)).toBe("open");
+  });
+
+  test("the card and the grouping name the same review: linked contradiction", () => {
+    // The reported contradiction: branch "feature" matched nothing while
+    // the stored link #7 names a merged review on another branch. The card
+    // shows PR #7, so the grouping must bucket "merged" — never "none".
+    const pulls = [pull({ number: 7, state: "merged", headRefName: "renamed" })];
+    const linked = { ...worktree("feature"), linkedPr: 7 };
+    const display = resolveCardPullRequest(linked, pulls);
+    expect(display?.number).toBe(7);
+    expect(derivePrStatusBucket(linked, pulls)).toBe("merged");
+  });
+
+  test("the card and the grouping agree across permutations", () => {
+    const cases: {
+      worktree: import("../../../../shared/session-contract").Worktree;
+      pulls: TaskPullRequest[];
+    }[] = [
+      // Live-first on a shared branch.
+      {
+        worktree: worktree("w"),
+        pulls: [
+          pull({ number: 1, state: "closed", headRefName: "w" }),
+          pull({ number: 2, state: "open", headRefName: "w" }),
+        ],
+      },
+      // Retargeted branch with a stored link.
+      {
+        worktree: { ...worktree("new-branch"), linkedPr: 5 },
+        pulls: [pull({ number: 5, state: "draft", headRefName: "old-branch" })],
+      },
+      // No review anywhere.
+      {
+        worktree: worktree("lonely"),
+        pulls: [pull({ number: 3, state: "open", headRefName: "elsewhere" })],
+      },
+    ];
+    for (const { worktree: wt, pulls } of cases) {
+      const display = resolveCardPullRequest(wt, pulls);
+      const bucket = derivePrStatusBucket(wt, pulls);
+      if (display === null) {
+        expect(bucket).toBe("none");
+      } else {
+        expect(display.number).toBe(selectCanonicalPullRequest(wt, pulls)?.number);
+        expect(bucket).toBe(display.state);
+      }
+    }
   });
 });

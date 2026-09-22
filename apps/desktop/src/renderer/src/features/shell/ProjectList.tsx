@@ -116,10 +116,12 @@ import {
   sidebarLinkedPrAttemptKey,
   sidebarPrFetchSignature,
   sidebarPrNextWakeDelayMs,
-  sidebarProjectHasUnresolvedBranches,
+  sidebarProjectHasUnresolvedLiveBranches,
   sidebarPrProjectIds,
+  sidebarPullsWalkErrorOutcome,
   type SidebarPullsCache,
   type SidebarPullsFreshness,
+  type SidebarPullsWalkOutcome,
 } from "./sidebar-pr-fetch";
 import { useWorkspaceCardPorts } from "./use-workspace-card-ports";
 import { useWorktreeIssueLinks } from "./use-worktree-issue-links";
@@ -896,8 +898,11 @@ export function ProjectList({
   // at the sidebar, so asking for every state keeps merged/closed markers
   // visible; the card deterministically prefers the live review when one
   // branch carries both (see selectCardPull). Follow-up pages walk
-  // `hasNextPage` while visible branches stay unmatched, within
-  // `SIDEBAR_PULLS_MAX_PAGES` with early stop. Listings revalidate on a
+  // `hasNextPage` while a visible branch still lacks a LIVE match (a
+  // concluded-only match never stops the walk — a later page may carry
+  // the live review), within `SIDEBAR_PULLS_MAX_PAGES` with early stop.
+  // A mid-walk failure keeps the fetched pages, marked incomplete and
+  // failed so the ready-claim lapses and the backoff retries. Listings revalidate on a
   // bounded schedule (stale-while-revalidate with backoff) so a review
   // merged while the sidebar stays open appears without any project-set
   // change. A folder project has no branch/PR concept at all, so it is
@@ -986,10 +991,17 @@ export function ProjectList({
     if (toFetch.length > 0) {
       const groupById = new Map(hideFiltered.map((group) => [group.project.id, group]));
       void Promise.all(
-        toFetch.map(async (projectId) => {
+        toFetch.map(async (projectId): Promise<SidebarPullsWalkOutcome | null> => {
           try {
             // Bounded page walk: page 1 replaces, later pages append while
-            // the provider has more AND visible branches stay unmatched.
+            // the provider has more AND a visible branch still lacks a
+            // LIVE match. A concluded-only match (merged/closed) does NOT
+            // stop the walk: a later page may carry the branch's live
+            // review, and stopping early would pin the concluded review
+            // while defeating live-first selection. A mid-walk failure
+            // keeps the successfully fetched earlier pages (marked
+            // incomplete + failed — no Ready claim from partial
+            // knowledge) instead of discarding them for null.
             let pages: SidebarPullsCache = new Map();
             let page = 0;
             let incomplete = false;
@@ -1006,23 +1018,23 @@ export function ProjectList({
                   ...(page > 1 ? { page } : {}),
                 });
               } catch {
-                return { projectId, pulls: null, incomplete: false };
+                return sidebarPullsWalkErrorOutcome(pages, projectId);
               }
               if (cancelled || generation !== pullsFetchGenerationRef.current) return null;
-              if (!result.ok) return { projectId, pulls: null, incomplete: false };
+              if (!result.ok) return sidebarPullsWalkErrorOutcome(pages, projectId);
               const rows = result.result.pulls ?? [];
               pages = mergeSidebarPrPageResults(pages, projectId, rows, page);
               const merged = pages.get(projectId) ?? [];
               if (result.result.hasNextPage !== true) break;
               const group = groupById.get(projectId);
-              if (group && !sidebarProjectHasUnresolvedBranches(group, merged)) break;
+              if (group && !sidebarProjectHasUnresolvedLiveBranches(group, merged)) break;
               if (page >= SIDEBAR_PULLS_MAX_PAGES) {
                 incomplete =
-                  !group || sidebarProjectHasUnresolvedBranches(group, merged);
+                  !group || sidebarProjectHasUnresolvedLiveBranches(group, merged);
                 break;
               }
             }
-            return { projectId, pulls: pages.get(projectId) ?? [], incomplete };
+            return { projectId, pulls: pages.get(projectId) ?? [], incomplete, failed: false };
           } finally {
             pullsInFlightRef.current.delete(projectId);
           }
@@ -1044,7 +1056,7 @@ export function ProjectList({
             outcome.projectId,
             recordSidebarPrFetchOutcome(
               pullsFreshnessRef.current.get(outcome.projectId),
-              outcome.pulls !== null,
+              !outcome.failed,
               finishedAt,
             ),
           );
@@ -1058,8 +1070,9 @@ export function ProjectList({
         }
         if (entries.length > 0) {
           // Removal-safe: a project that left while its fetch was in flight
-          // is pruned, not re-added; a later failure keeps the last good
-          // listing (the stale projection marks it, never blanks it).
+          // is pruned, not re-added; a page-1 failure keeps the last good
+          // listing, and a mid-walk failure keeps this walk's fetched
+          // pages (the stale projection marks either, never blanks them).
           setPullsByProjectId((current) =>
             mergeSidebarPrResults(
               pruneSidebarPrCache(current, liveIds),

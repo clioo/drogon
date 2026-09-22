@@ -7,44 +7,35 @@
 
 import type { Worktree } from "../../../../shared/session-contract";
 import type { TaskPullRequest } from "../../../../shared/tasks-contract";
+import {
+  selectBranchPullRequest,
+  selectCanonicalPullRequest,
+} from "../../../../shared/workspace-pr-status";
 
 /**
- * The review the card's marker names: every pull whose head branch IS this
- * worktree's branch, best first. A branch routinely carries both concluded
- * history and its next review (e.g. `collapsable-widgets` holds MERGED
- * #641 beneath OPEN #642), and the provider's order is not a recency
- * contract — so a still-live review (open/draft) deterministically wins
- * over concluded history, and the newest number wins within each group.
- * A worktree with no branch (a folder project's implicit worktree, or a
- * detached HEAD) never matches: there is nothing to correlate.
+ * The review the card's marker names: the canonical branch half of the
+ * shared selection policy (live open/draft first, newest number wins,
+ * order-independent — a branch routinely carries both concluded history
+ * and its next review, and the provider's order is not a recency
+ * contract). Delegates to the shared `selectBranchPullRequest` so the
+ * card and the "Group by: PR status" grouping can never name different
+ * reviews for the same data. A worktree with no branch (a folder
+ * project's implicit worktree, or a detached HEAD) never matches: there
+ * is nothing to correlate.
  */
 export function selectCardPull(
   worktree: Pick<Worktree, "branch">,
   pulls: readonly TaskPullRequest[],
 ): TaskPullRequest | null {
-  const branch = worktree.branch;
-  if (!branch) return null;
-  const matching = pulls.filter((pull) => pull.headRefName === branch);
-  if (matching.length === 0) return null;
-  const live = matching.filter(
-    (pull) => pull.state === "open" || pull.state === "draft",
-  );
-  const candidates = live.length > 0 ? live : matching;
-  return candidates.reduce((best, pull) =>
-    pull.number > best.number ? pull : best,
-  );
+  return selectBranchPullRequest(worktree, pulls);
 }
 
 export function resolveCardPullRequest(worktree: Worktree, pulls: readonly TaskPullRequest[]): WorktreeCardPrDisplay | null {
-  // A stored link names the review explicitly (retargeted since, or paged
-  // out of the bounded listing); the branch correlation below stays the
-  // primary path, never a guess.
-  const linked = worktree.linkedPr ?? null;
-  const pull =
-    selectCardPull(worktree, pulls) ??
-    (linked !== null && Number.isInteger(linked) && linked > 0
-      ? (pulls.find((candidate) => candidate.number === linked) ?? null)
-      : null);
+  // The shared canonical policy: branch correlation first, then the
+  // worktree's real stored linked number (retargeted since, or paged out
+  // of the bounded listing) — the same review the grouping buckets, never
+  // a guess.
+  const pull = selectCanonicalPullRequest(worktree, pulls);
   if (!pull) return null;
   return {
     provider: "github",
