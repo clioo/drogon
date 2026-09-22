@@ -366,7 +366,11 @@ describe("review marker", () => {
     [{ state: "merged" } as const, "merged", "Linked PR #7: Merged"],
     [{ state: "open", mergeable: "CONFLICTING" } as const, "conflicts", "Linked PR #7: Conflicts with the base branch"],
     [{ state: "draft" } as const, "draft", "Linked PR #7: Draft"],
-    [{ state: "open" } as const, "ready", "Linked PR #7: Open"],
+    // "Ready" is a confirmed claim (F2): an open review with unknown
+    // mergeability stays honestly open, never "Ready to merge".
+    [{ state: "open" } as const, "open", "Linked PR #7: Open"],
+    [{ state: "open", mergeable: "MERGEABLE" } as const, "ready", "Linked PR #7: Open"],
+    [{ state: "open", mergeable: "MERGEABLE", checks: "failure" } as const, "open", "Linked PR #7 checks: Failed"],
   ])("draws %s as %s", (prFields, state, label) => {
     const { container } = renderCard({
       sessions: [session()],

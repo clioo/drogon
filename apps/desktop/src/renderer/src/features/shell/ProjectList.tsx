@@ -99,7 +99,28 @@ import {
 } from "./workspace-options-state";
 import type { WorkspaceUIPreferences } from "../../../../shared/workspace-ui-preferences-contract";
 import { WorkspaceOptionsMenuSections } from "./WorkspaceOptionsMenuSections";
-import { resolveCardPullRequest } from "./worktree-card-pr-display";
+import { applySidebarPrStaleness, resolveCardPullRequest } from "./worktree-card-pr-display";
+import {
+  mergeSidebarLinkedPrResults,
+  mergeSidebarPrPageResults,
+  mergeSidebarPrResults,
+  pruneSidebarPrCache,
+  pruneSidebarLinkedPrAttempts,
+  pruneSidebarPrFreshness,
+  recordSidebarPrFetchOutcome,
+  selectSidebarLinkedPrLookups,
+  selectSidebarPrDueIds,
+  selectStaleSidebarPrProjects,
+  SIDEBAR_PULLS_MAX_PAGES,
+  SIDEBAR_PULLS_PER_PAGE,
+  sidebarLinkedPrAttemptKey,
+  sidebarPrFetchSignature,
+  sidebarPrNextWakeDelayMs,
+  sidebarProjectHasUnresolvedBranches,
+  sidebarPrProjectIds,
+  type SidebarPullsCache,
+  type SidebarPullsFreshness,
+} from "./sidebar-pr-fetch";
 import { useWorkspaceCardPorts } from "./use-workspace-card-ports";
 import { useWorktreeIssueLinks } from "./use-worktree-issue-links";
 import type { WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
@@ -832,64 +853,251 @@ export function ProjectList({
   const [pullsByProjectId, setPullsByProjectId] = useState<
     ReadonlyMap<string, readonly TaskPullRequest[] | null>
   >(new Map());
+  // Latest PR fetch generation: overlapping list/show responses merge only
+  // while they still belong to the newest run, so a slow earlier response
+  // can never clobber newer data (unmounted results are dropped outright).
+  const pullsFetchGenerationRef = useRef(0);
+  // Project-set signature of the last attempted list fetch: a recorded
+  // failure retries when this changes (the registry refresh already
+  // re-renders the sidebar during app lifetime), plus scheduled revalidation
+  // below — never per render.
+  const pullsFetchSignatureRef = useRef<string | null>(null);
+  // Stored linked-PR lookups already given their one targeted attempt, keyed
+  // by owning project + number (the same number in two repos names two
+  // different reviews).
+  const linkedPrAttemptedRef = useRef<Set<string>>(new Set());
+  // Per-project listing health (last confirmation, failure streak) behind
+  // the cache; mutated only on fetch settle, always alongside a cache
+  // state update so the stale projection below re-derives.
+  const pullsFreshnessRef = useRef<Map<string, SidebarPullsFreshness>>(new Map());
+  // Projects with a list fetch in flight this generation: the due check
+  // skips them (single-flight — a wake or re-render never doubles a
+  // request), and settle always releases them, even when superseded.
+  const pullsInFlightRef = useRef<Set<string>>(new Set());
+  // Projects whose page walk exhausted the page budget with branches still
+  // unmatched: the honest record behind `sidebarPrBranchCoverage`'s
+  // `incomplete` (retryable, never "no PR").
+  const pullsIncompleteRef = useRef<Set<string>>(new Set());
+  // One scheduled wake for the next due moment (stale listing or elapsed
+  // backoff); a wake alone never fetches, it only re-runs the due check.
+  const [prRefreshTick, setPrRefreshTick] = useState(0);
+  // Projects showing last-good markers behind a failed refresh: the card
+  // keeps their facts but lets the ready-claim lapse (derived, not stored).
+  const stalePrProjectIds = useMemo(
+    () => selectStaleSidebarPrProjects(pullsByProjectId, pullsFreshnessRef.current),
+    [pullsByProjectId],
+  );
   // Real provider fetch (the existing `tasks.list(mode: "pulls")` bridge,
-  // never a new RPC): one call per git project actually shown, cached by
-  // project id, only while "PR status" grouping is selected -- never spawn
-  // `gh` for a grouping mode the user is not looking at. A folder project
-  // has no branch/PR concept at all, so it is seeded straight to `[]`
-  // ("no pull request", never queried and never "unavailable" -- that
-  // bucket is reserved for a real fetch failure). An unknown/not-yet-
-  // fetched git project is left OUT of the map on purpose: `derivePrStatusBucket`
-  // treats absence as `unavailable`, distinct from a real empty `none`.
+  // never a new RPC): one bounded `state: "all"` page per git project
+  // actually shown, cached by project id, only while the PR marker or the
+  // "PR status" grouping is visible -- never spawn `gh` for a surface the
+  // user is not looking at. `gh`'s default is open reviews only, and a
+  // worktree's review is usually already concluded by the time anyone looks
+  // at the sidebar, so asking for every state keeps merged/closed markers
+  // visible; the card deterministically prefers the live review when one
+  // branch carries both (see selectCardPull). Follow-up pages walk
+  // `hasNextPage` while visible branches stay unmatched, within
+  // `SIDEBAR_PULLS_MAX_PAGES` with early stop. Listings revalidate on a
+  // bounded schedule (stale-while-revalidate with backoff) so a review
+  // merged while the sidebar stays open appears without any project-set
+  // change. A folder project has no branch/PR concept at all, so it is
+  // seeded straight to `[]` ("no pull request", never queried and never
+  // "unavailable" -- that bucket is reserved for a real fetch failure). An
+  // unknown/not-yet-fetched git project is left OUT of the map on purpose:
+  // `derivePrStatusBucket` treats absence as `unavailable`, distinct from a
+  // real empty `none`.
   useEffect(() => {
     if (workspaceOptions.groupBy !== "pr-status" && !workspaceOptions.showProperties.pr) return;
     const bridge = windowTasksBridge(window.drogon);
     if (!bridge.tasksList) return;
-    const gitProjectIds = [
-      ...new Set(
-        hideFiltered
-          .filter((group) => group.project.kind === "git")
-          .map((group) => group.project.id),
-      ),
-    ];
-    const folderProjectIds = hideFiltered
-      .filter((group) => group.project.kind === "folder")
-      .map((group) => group.project.id);
-    if (folderProjectIds.length > 0) {
-      setPullsByProjectId((current) => {
-        let changed = false;
-        const next = new Map(current);
-        for (const id of folderProjectIds) {
-          if (!next.has(id)) {
-            next.set(id, []);
-            changed = true;
+    const { git: gitProjectIds, folder: folderProjectIds } =
+      sidebarPrProjectIds(hideFiltered);
+    const liveIds = new Set(hideFiltered.map((group) => group.project.id));
+    setPullsByProjectId((current) => {
+      const pruned = pruneSidebarPrCache(current, liveIds);
+      const next = new Map(pruned);
+      let changed = next.size !== pruned.size || pruned !== current;
+      for (const id of folderProjectIds) {
+        if (!next.has(id)) {
+          next.set(id, []);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+    // Removal-safe: attempts, health records and budget flags for projects
+    // that left never come back or leak.
+    linkedPrAttemptedRef.current = new Set(
+      pruneSidebarLinkedPrAttempts(linkedPrAttemptedRef.current, hideFiltered),
+    );
+    pullsFreshnessRef.current = new Map(
+      pruneSidebarPrFreshness(pullsFreshnessRef.current, liveIds),
+    );
+    for (const id of [...pullsIncompleteRef.current]) {
+      if (!liveIds.has(id)) pullsIncompleteRef.current.delete(id);
+    }
+    const signature = sidebarPrFetchSignature(gitProjectIds);
+    const nowMs = Date.now();
+    const toFetch = selectSidebarPrDueIds({
+      cache: pullsByProjectId,
+      gitIds: gitProjectIds,
+      freshness: pullsFreshnessRef.current,
+      nowMs,
+      signatureChanged: pullsFetchSignatureRef.current !== signature,
+    }).filter((id) => !pullsInFlightRef.current.has(id));
+    // Targeted number fallback for stored links the bounded pages missed;
+    // a real stored number, never a guessed one, at most once per project
+    // + number.
+    const lookups =
+      typeof bridge.tasksShow === "function"
+        ? selectSidebarLinkedPrLookups(
+            hideFiltered,
+            pullsByProjectId,
+            linkedPrAttemptedRef.current,
+          )
+        : [];
+    // Single-flight starts here: ids fetched this generation are released
+    // on settle (even when superseded), so registering before the wake
+    // computation keeps an in-flight project from scheduling an immediate
+    // re-wake behind itself.
+    if (toFetch.length > 0) {
+      pullsFetchSignatureRef.current = signature;
+      for (const id of toFetch) pullsInFlightRef.current.add(id);
+    }
+    // Next scheduled wake: the nearest upcoming due moment, ignoring fetches
+    // already in flight; cleaned up below on every re-run and on unmount.
+    const wakeTimer = setTimeout(
+      () => setPrRefreshTick((tick) => tick + 1),
+      sidebarPrNextWakeDelayMs({
+        cache: pullsByProjectId,
+        gitIds: gitProjectIds,
+        freshness: pullsFreshnessRef.current,
+        nowMs,
+        exclude: pullsInFlightRef.current,
+      }),
+    );
+    if (toFetch.length === 0 && lookups.length === 0) {
+      return () => clearTimeout(wakeTimer);
+    }
+    const generation = pullsFetchGenerationRef.current + 1;
+    pullsFetchGenerationRef.current = generation;
+    let cancelled = false;
+    const finish = () => clearTimeout(wakeTimer);
+    if (toFetch.length > 0) {
+      const groupById = new Map(hideFiltered.map((group) => [group.project.id, group]));
+      void Promise.all(
+        toFetch.map(async (projectId) => {
+          try {
+            // Bounded page walk: page 1 replaces, later pages append while
+            // the provider has more AND visible branches stay unmatched.
+            let pages: SidebarPullsCache = new Map();
+            let page = 0;
+            let incomplete = false;
+            for (;;) {
+              if (cancelled || generation !== pullsFetchGenerationRef.current) return null;
+              page += 1;
+              let result;
+              try {
+                result = await bridge.tasksList!({
+                  projectId,
+                  mode: "pulls",
+                  state: "all",
+                  perPage: SIDEBAR_PULLS_PER_PAGE,
+                  ...(page > 1 ? { page } : {}),
+                });
+              } catch {
+                return { projectId, pulls: null, incomplete: false };
+              }
+              if (cancelled || generation !== pullsFetchGenerationRef.current) return null;
+              if (!result.ok) return { projectId, pulls: null, incomplete: false };
+              const rows = result.result.pulls ?? [];
+              pages = mergeSidebarPrPageResults(pages, projectId, rows, page);
+              const merged = pages.get(projectId) ?? [];
+              if (result.result.hasNextPage !== true) break;
+              const group = groupById.get(projectId);
+              if (group && !sidebarProjectHasUnresolvedBranches(group, merged)) break;
+              if (page >= SIDEBAR_PULLS_MAX_PAGES) {
+                incomplete =
+                  !group || sidebarProjectHasUnresolvedBranches(group, merged);
+                break;
+              }
+            }
+            return { projectId, pulls: pages.get(projectId) ?? [], incomplete };
+          } finally {
+            pullsInFlightRef.current.delete(projectId);
+          }
+        }),
+      ).then((outcomes) => {
+        if (cancelled || generation !== pullsFetchGenerationRef.current) {
+          // Superseded mid-walk: a newer generation owns the wire now. Tick
+          // once so it reconciles any project this run covered but never
+          // recorded (its due check skipped them as in flight).
+          setPrRefreshTick((tick) => tick + 1);
+          return;
+        }
+        const finishedAt = Date.now();
+        const entries: [string, readonly TaskPullRequest[] | null][] = [];
+        for (const outcome of outcomes) {
+          if (!outcome) continue;
+          if (!liveIds.has(outcome.projectId)) continue;
+          pullsFreshnessRef.current.set(
+            outcome.projectId,
+            recordSidebarPrFetchOutcome(
+              pullsFreshnessRef.current.get(outcome.projectId),
+              outcome.pulls !== null,
+              finishedAt,
+            ),
+          );
+          if (outcome.pulls !== null) {
+            entries.push([outcome.projectId, outcome.pulls]);
+            if (outcome.incomplete) pullsIncompleteRef.current.add(outcome.projectId);
+            else pullsIncompleteRef.current.delete(outcome.projectId);
+          } else {
+            entries.push([outcome.projectId, null]);
           }
         }
-        return changed ? next : current;
+        if (entries.length > 0) {
+          // Removal-safe: a project that left while its fetch was in flight
+          // is pruned, not re-added; a later failure keeps the last good
+          // listing (the stale projection marks it, never blanks it).
+          setPullsByProjectId((current) =>
+            mergeSidebarPrResults(
+              pruneSidebarPrCache(current, liveIds),
+              entries.filter(([projectId]) => liveIds.has(projectId)),
+            ),
+          );
+        }
       });
     }
-    const toFetch = gitProjectIds.filter((id) => !pullsByProjectId.has(id));
-    if (toFetch.length === 0) return;
-    let cancelled = false;
-    void Promise.all(
-      toFetch.map((projectId) =>
-        bridge
-          .tasksList!({ projectId, mode: "pulls" })
-          .then((result) => [projectId, result.ok ? result.result.pulls ?? [] : null] as const)
-          .catch(() => [projectId, null] as const),
-      ),
-    ).then((entries) => {
-      if (cancelled) return;
-      setPullsByProjectId((current) => {
-        const next = new Map(current);
-        for (const [projectId, pulls] of entries) next.set(projectId, pulls);
-        return next;
+    if (lookups.length > 0 && typeof bridge.tasksShow === "function") {
+      const show = bridge.tasksShow;
+      for (const lookup of lookups) {
+        linkedPrAttemptedRef.current.add(
+          sidebarLinkedPrAttemptKey(lookup.projectId, lookup.number),
+        );
+      }
+      void Promise.all(
+        lookups.map((lookup) =>
+          show({ projectId: lookup.projectId, number: lookup.number, mode: "pulls" })
+            .then((result) => ({
+              projectId: lookup.projectId,
+              pull: result.ok ? (result.result.pull ?? null) : null,
+            }))
+            .catch(() => ({ projectId: lookup.projectId, pull: null })),
+        ),
+      ).then((results) => {
+        if (cancelled || generation !== pullsFetchGenerationRef.current) return;
+        const live = results.filter((result) => liveIds.has(result.projectId));
+        if (live.length > 0) {
+          setPullsByProjectId((current) => mergeSidebarLinkedPrResults(current, live));
+        }
       });
-    });
+    }
     return () => {
       cancelled = true;
+      finish();
     };
-  }, [hideFiltered, workspaceOptions.groupBy, workspaceOptions.showProperties.pr, pullsByProjectId]);
+  }, [hideFiltered, workspaceOptions.groupBy, workspaceOptions.showProperties.pr, pullsByProjectId, prRefreshTick]);
   const prGroups = useMemo(
     () =>
       groupWorktreesByPrStatus(hideFiltered, pullsByProjectId).map((group) => ({
@@ -1150,6 +1358,7 @@ export function ProjectList({
               portsByWorkspaceId={portsByWorkspaceId}
               issueLinksByWorktree={issueLinksByWorktree}
               pullsByProjectId={pullsByProjectId}
+              stalePrProjectIds={stalePrProjectIds}
               cardOptions={workspaceOptions}
               showBranch={workspaceOptions.showProperties.branch}
               showPr={workspaceOptions.showProperties.pr}
@@ -1189,6 +1398,7 @@ export function ProjectList({
             portsByWorkspaceId={portsByWorkspaceId}
             issueLinksByWorktree={issueLinksByWorktree}
             pullsByProjectId={pullsByProjectId}
+            stalePrProjectIds={stalePrProjectIds}
             cardOptions={workspaceOptions}
             showBranch={workspaceOptions.showProperties.branch}
             showPr={workspaceOptions.showProperties.pr}
@@ -1342,6 +1552,7 @@ function EntryGroupRow({
   multiSelect,
   portsByWorkspaceId,
   pullsByProjectId,
+  stalePrProjectIds,
   cardOptions,
   showBranch = true,
   showPr = true,
@@ -1376,6 +1587,9 @@ function EntryGroupRow({
   multiSelect: WorktreeMultiSelectBinding;
   portsByWorkspaceId?: ReadonlyMap<string, readonly number[]>;
   pullsByProjectId?: ReadonlyMap<string, readonly TaskPullRequest[] | null>;
+  /** Projects showing last-good markers behind a failed refresh: their
+   *  cards keep the facts but let the ready-claim lapse. */
+  stalePrProjectIds?: ReadonlySet<string>;
   cardOptions?: Pick<WorkspaceOptionsState, "showProperties" | "agentActivityDisplayMode">;
   showBranch?: boolean;
   showPr?: boolean;
@@ -1431,7 +1645,10 @@ function EntryGroupRow({
                 showPr={showPr}
                 ports={portsByWorkspaceId?.get(worktree.workspaceId)}
                 issueLinks={issueLinksByWorktree?.get(worktree.id)}
-                pr={resolveCardPullRequest(worktree, pullsByProjectId?.get(project.id) ?? [])}
+                pr={applySidebarPrStaleness(
+                  resolveCardPullRequest(worktree, pullsByProjectId?.get(project.id) ?? []),
+                  stalePrProjectIds?.has(project.id) ?? false,
+                )}
                 graphBridge={graphBridge}
                 {...cardOptions}
                 onRemove={
@@ -1496,6 +1713,7 @@ function ProjectRow({
   onToggleCollapsed,
   portsByWorkspaceId,
   pullsByProjectId,
+  stalePrProjectIds,
   cardOptions,
   showBranch = true,
   showPr = true,
@@ -1559,6 +1777,9 @@ function ProjectRow({
   showPr?: boolean;
   portsByWorkspaceId?: ReadonlyMap<string, readonly number[]>;
   pullsByProjectId?: ReadonlyMap<string, readonly TaskPullRequest[] | null>;
+  /** Projects showing last-good markers behind a failed refresh: their
+   *  cards keep the facts but let the ready-claim lapse. */
+  stalePrProjectIds?: ReadonlySet<string>;
   cardOptions?: Pick<WorkspaceOptionsState, "showProperties" | "agentActivityDisplayMode">;
   /** Workspace options "Card layout": toggles a density class on each
    *  card's wrapper only -- WorktreeCard's own markup is untouched. */
@@ -1722,7 +1943,10 @@ function ProjectRow({
                   showPr={showPr}
                   ports={portsByWorkspaceId?.get(worktree.workspaceId)}
                   issueLinks={issueLinksByWorktree?.get(worktree.id)}
-                  pr={resolveCardPullRequest(worktree, pullsByProjectId?.get(project.id) ?? [])}
+                  pr={applySidebarPrStaleness(
+                    resolveCardPullRequest(worktree, pullsByProjectId?.get(project.id) ?? []),
+                    stalePrProjectIds?.has(project.id) ?? false,
+                  )}
                   graphBridge={graphBridge}
                   {...cardOptions}
                   onRemove={
