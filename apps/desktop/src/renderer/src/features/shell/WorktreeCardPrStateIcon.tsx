@@ -28,11 +28,28 @@ const STATE_TONE: Record<string, string> = {
 
 export function WorktreeCardPrStateIcon({
   pr,
+  showNone = false,
 }: {
   pr: WorktreeCardPrDisplay | null;
+  /** Card use (owner's guideline): keep the slot with a faint glyph that
+   *  says "no pull request", never a state it does not have. */
+  showNone?: boolean;
 }) {
   const state = resolveCardPrState(pr);
-  if (!pr || !state) return null;
+  if (!pr || !state) {
+    if (!showNone) return null;
+    return (
+      <span
+        className="relative inline-flex size-3.5 shrink-0 items-center justify-center text-muted-foreground/40"
+        data-worktree-card-pr-none=""
+        role="img"
+        aria-label="No pull request"
+        title="No pull request"
+      >
+        <GitMerge className="size-3.5" aria-hidden="true" />
+      </span>
+    );
+  }
   return (
     <span
       className={`relative inline-flex size-3.5 shrink-0 items-center justify-center ${STATE_TONE[state]}`}

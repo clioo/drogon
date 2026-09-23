@@ -127,13 +127,10 @@ describe("card fold over nested worktrees", () => {
     expect(card("child-b")).not.toBeNull();
   });
 
-  test("a card with no agents and no children offers no chevron", () => {
+  test("every card keeps its chevron, as the guideline draws it", () => {
     mount();
-    expect(fold("loner")).toBeNull();
-    expect(fold("child-a")).toBeNull();
-    expect(
-      card("loner")?.querySelector(".shell-worktree-card-fold-spacer"),
-    ).not.toBeNull();
+    expect(fold("loner")?.getAttribute("aria-label")).toBe("Hide agents in loner");
+    expect(fold("child-a")).not.toBeNull();
   });
 
   test("the child fold survives a renderer reload", () => {

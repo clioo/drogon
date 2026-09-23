@@ -18,7 +18,6 @@ import { cn } from "../../lib/utils";
 import type { GraphBridge } from "../../../../shared/graph-contract";
 import type { Session, Worktree } from "../../../../shared/session-contract";
 import { AgentStateIcon } from "./AgentStateIcon";
-import { WorktreeCardAffordances } from "./WorktreeCardAffordances";
 import { worktreeCardBranchLabel } from "./worktree-card-branch-identity";
 import {
   getWorktreeIssueNumber,
@@ -33,7 +32,7 @@ import { WorktreeTitleInlineRename } from "./WorktreeTitleInlineRename";
 import { WorktreeCardMetaBadges } from "./WorktreeCardMetaBadges";
 import { WorktreeCardLinkedMetadata } from "./WorktreeCardLinkedMetadata";
 import { WorktreeCardPrStateIcon } from "./WorktreeCardPrStateIcon";
-import { WorkspaceStatusRing } from "./WorkspaceStatusRing";
+import { WorktreeActivityRing } from "./WorktreeActivityRing";
 import { WorktreeWorkflow } from "./WorktreeWorkflow";
 import {
   formatWorktreeCardSummaryLine,
@@ -433,9 +432,8 @@ export function WorktreeCard({
   const showAgentRows =
     showProperties["inline-agents"] !== false && rows.length > 0;
   const showAgentTree = showAgentRows && !cardFolded;
-  // The fold hides the agent list and any nested child worktrees; with
-  // neither there is nothing to fold, so no chevron is offered.
-  const canFold = showAgentRows || hasChildWorktrees;
+  // The fold hides the agent list and any nested child worktrees. Every
+  // card keeps its chevron (owner's guideline), so the lane stays aligned.
   const foldSubject =
     showAgentRows && hasChildWorktrees
       ? "agents and workspaces"
@@ -473,57 +471,46 @@ export function WorktreeCard({
         onClickCapture={onCardClickCapture}
         aria-label={`${name}${summary.unread ? ", needs input" : ""}${summaryLine ? `, ${summaryLine}` : ""}${note ? `, Note: ${note}` : ""}`}
       >
-        {/* The card's own fold (owner's design, 2026-09-21): the leading
-            chevron folds the whole agent list and any nested child
-            worktrees, mirroring the guide. The
+        {/* The card's own fold (owner's guideline): the leading chevron
+            folds the whole agent list and any nested child worktrees. The
             sentence stays visible, so a folded card still says what its
             agents are doing; folding a single agent's branch is the row's
             own chevron's job, never this one's. */}
-        {canFold ? (
-          <button
-            type="button"
-            className="shell-worktree-card-fold"
-            data-worktree-card-fold={cardFolded ? "folded" : "expanded"}
-            aria-label={`${cardFolded ? "Show" : "Hide"} ${foldSubject} in ${name}`}
-            aria-expanded={!cardFolded}
-            disabled={disabled}
-            onClick={(event) => {
-              // The card surface selects on click: folding is not selecting.
-              event.preventDefault();
-              event.stopPropagation();
-              toggleCardFolded();
-            }}
-            onMouseDown={stopCardDragPropagation}
-            onPointerDown={stopCardDragPropagation}
-          >
-            <ChevronRight
-              className={
-                "size-3.5 transition-transform duration-150" +
-                (!cardFolded ? " rotate-90" : "")
-              }
-              aria-hidden="true"
-            />
-          </button>
-        ) : (
-          <span className="shell-worktree-card-fold-spacer" aria-hidden="true" />
-        )}
-        {/* Status lane (the source's WorktreeCardStatusSlot column, owner's
-            vocabulary): the workspace STATUS ring first — the same icon and
-            colour the status carries in the board — then the one live
-            activity glyph that must never be hidden behind text: the
-            working spinner, or the amber bell while an agent waits for the
-            user. */}
+        <button
+          type="button"
+          className="shell-worktree-card-fold"
+          data-worktree-card-fold={cardFolded ? "folded" : "expanded"}
+          aria-label={`${cardFolded ? "Show" : "Hide"} ${foldSubject} in ${name}`}
+          aria-expanded={!cardFolded}
+          disabled={disabled}
+          onClick={(event) => {
+            // The card surface selects on click: folding is not selecting.
+            event.preventDefault();
+            event.stopPropagation();
+            toggleCardFolded();
+          }}
+          onMouseDown={stopCardDragPropagation}
+          onPointerDown={stopCardDragPropagation}
+        >
+          <ChevronRight
+            className={
+              "size-3.5 transition-transform duration-150" +
+              (!cardFolded ? " rotate-90" : "")
+            }
+            aria-hidden="true"
+          />
+        </button>
+        {/* Status lane (owner's guideline: "agent activity, left status"):
+            the activity ring, plus the amber bell while an agent waits for
+            the user, which must never hide behind text. The workspace's
+            board status lives in the card menu and on the board. */}
         <div
           className="shell-worktree-card-status-lane"
           data-worktree-card-status-slot=""
         >
-          <WorkspaceStatusRing statuses={statuses} statusId={worktree.workspaceStatus} />
-          {activityGlyph ? (
-            <AgentStateIcon
-              state={activityGlyph === "working" ? "working" : "needs_input"}
-              size={13}
-              variant="card"
-            />
+          <WorktreeActivityRing sessions={rowSessions} />
+          {activityGlyph === "needs-input" ? (
+            <AgentStateIcon state="needs_input" size={13} variant="card" />
           ) : null}
         </div>
         {/* Header column: the card's first flex line (fold, status lane,
@@ -574,7 +561,9 @@ export function WorktreeCard({
                   replaces the old "PR #123" chip; the accessible label is
                   the chip's own string, so nothing the card announced
                   before is lost. */}
-              {showPr ? <WorktreeCardPrStateIcon pr={pr} /> : null}
+              {showPr ? (
+                <WorktreeCardPrStateIcon pr={pr} showNone />
+              ) : null}
             </span>
             {/* The card's activity sentence (owner's design): the uppercase
                 line under the title. It is aria-hidden because the card's
@@ -693,13 +682,8 @@ export function WorktreeCard({
             )}
           </div>
         ) : null}
-        {/* Right-side affordances (the fork's MetaIconBadge shell): the
-            terminal marker for a workspace that owns sessions and the
-            branch marker, ahead of the kebab. */}
-        <WorktreeCardAffordances
-          branch={worktree.branch}
-          sessionCount={rows.length}
-        />
+        {/* Owner's guideline: the right side is the review marker (in the
+            title line) and the kebab — no other card glyphs. */}
         <span className="shell-worktree-card-menu">
           <button
             type="button"

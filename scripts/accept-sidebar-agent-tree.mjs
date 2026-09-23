@@ -674,7 +674,7 @@ export async function runSidebarAgentTreeAcceptance() {
         const stateOf = (row) => row.querySelector("[data-worktree-agent-state]")?.getAttribute("data-worktree-agent-state") ?? null;
         const sentence = card?.querySelector(".shell-worktree-card-sentence")?.textContent?.trim() ?? null;
         const fold = card?.querySelector(".shell-worktree-card-fold");
-        const statusRing = card?.querySelector('[data-worktree-card-status-slot] [role="img"]');
+        const ring = card?.querySelector("[data-worktree-card-status-slot] [data-worktree-activity]");
         const badge = card?.querySelector(".shell-worktree-agent-main-badge");
         return {
           sentence,
@@ -682,9 +682,8 @@ export async function runSidebarAgentTreeAcceptance() {
           labels: rows.map((row) => row.querySelector(".shell-worktree-agent-state-label")?.textContent?.trim() ?? null),
           rowIds: rows.map((row) => row.getAttribute("data-worktree-agent-row")),
           mainBadgeRowId: badge?.closest("[data-worktree-agent-row]")?.getAttribute("data-worktree-agent-row") ?? null,
-          statusLabel: statusRing?.getAttribute("aria-label") ?? null,
-          statusTone: statusRing?.className ?? null,
-          statusDashed: Boolean(statusRing?.querySelector(".border-dashed")),
+          ringTone: ring?.getAttribute("data-worktree-activity") ?? null,
+          ringLabel: ring?.getAttribute("aria-label") ?? null,
           foldExpanded: fold?.getAttribute("aria-expanded") ?? null,
           foldLabel: fold?.getAttribute("aria-label") ?? null,
           rootSessionId,
@@ -720,20 +719,21 @@ export async function runSidebarAgentTreeAcceptance() {
     assert.ok(design.labels.every((label) => typeof label === "string" && label.length > 0), `each row names its state (${JSON.stringify(design.labels)})`);
     assert.equal(design.mainBadgeRowId, l1id, "the root that owns subagents is the MAIN row");
     report.checks.push("every-row-states-its-condition-and-the-root-reads-main");
-    // No status is set yet: the lane's ring says so instead of claiming one.
-    assert.equal(design.statusLabel, "No status", "an unset status draws the dashed neutral ring");
-    assert.equal(design.statusDashed, true, "the unset ring is the dashed one");
+    // Owner's guideline: the left ring is the card's agent activity, and
+    // it agrees with the sentence under the title.
+    const expectedTone = /WORKING|NEEDS? INPUT/.test(design.sentence)
+      ? "active"
+      : design.sentence === "NO ACTIVE AGENTS" || /TERMINAL SESSION/.test(design.sentence)
+        ? "quiet"
+        : "none";
+    assert.equal(design.ringTone, expectedTone, `the activity ring matches the sentence (${design.sentence} -> ${design.ringLabel})`);
     assert.equal(design.foldExpanded, "true", "the card starts expanded");
-    // The owner's decision, proven end to end: setting the worktree's
-    // workspace status re-colours the lane's ring with the status' own icon.
+    // Setting a board status must not repaint the activity ring.
     await cliJson(["rpc", "worktree.update", "--params", JSON.stringify({ worktreeId, workspaceStatus: "in-review" })], { env, cwd: fixture });
-    const withStatus = await until(async () => {
-      const next = await readCardDesign();
-      return next.statusLabel === "Status In review" ? next : false;
-    }, "setting the workspace status re-colours the card ring");
-    assert.equal(withStatus.statusDashed, false, "a real status draws the status glyph, not the dashed ring");
-    assert.ok(withStatus.statusTone.includes("text-[#16a34a]"), `the ring keeps the status' own colour (${withStatus.statusTone})`);
-    report.checks.push("the-card-ring-carries-the-workspace-status");
+    await delay(1000);
+    const withStatus = await readCardDesign();
+    assert.ok(withStatus.ringLabel?.startsWith("Agent activity"), "the ring keeps reading agent activity after a status change");
+    report.checks.push("the-card-ring-carries-agent-activity");
     // The card's own chevron folds the whole tree and keeps the sentence.
     await page.locator(".shell-worktree-card-fold").click();
     await until(async () => (await readCardDesign()).rowIds.length === 0, "the card chevron folds the whole agent list");

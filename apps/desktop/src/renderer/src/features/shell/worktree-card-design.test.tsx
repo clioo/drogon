@@ -177,62 +177,46 @@ describe("card activity sentence", () => {
     ).toBe(sentence);
   });
 
-  test("the working glyph rides the lane only while an agent works or waits", () => {
+  test("the lane draws the activity ring, plus the bell only while an agent waits", () => {
     const working = renderCard({ sessions: [session({ agentState: "working" })] });
-    expect(
-      working.container.querySelector(
-        '[data-worktree-card-status-slot] [aria-label="Working"]',
-      ),
-    ).not.toBeNull();
+    const lane = working.container.querySelector("[data-worktree-card-status-slot]")!;
+    expect(lane.querySelector('[aria-label="Needs input"], [aria-label="Waiting for input"]')).toBeNull();
+    expect(lane.querySelector("[data-worktree-activity]")?.getAttribute("data-worktree-activity")).toBe("active");
     working.unmount();
-    const quiet = renderCard({ sessions: [session({ agentState: "idle" })] });
-    // A quiet card states its condition in the sentence; the lane keeps only
-    // the status ring, so no state glyph competes with it.
+    const waiting = renderCard({ sessions: [session({ agentState: "needs_input" })] });
+    const waitingLane = waiting.container.querySelector("[data-worktree-card-status-slot]")!;
+    expect(waitingLane.querySelector('[aria-label="Waiting for input"]')).not.toBeNull();
     expect(
-      quiet.container.querySelector(
-        '[data-worktree-card-status-slot] [aria-label="Idle"]',
-      ),
-    ).toBeNull();
+      waitingLane.querySelector("[data-worktree-activity]")?.getAttribute("aria-label"),
+    ).toBe("Agent activity: needs input");
   });
 });
 
-describe("card status ring", () => {
-  test("draws the workspace status with its own icon and colour", () => {
+describe("card activity ring (owner's guideline: agent activity, left status)", () => {
+  const ringOf = (container: HTMLElement) =>
+    container.querySelector(
+      "[data-worktree-card-status-slot] [data-worktree-activity]",
+    ) as HTMLElement;
+
+  test.each([
+    ["working", [session({ agentState: "working" })], "active", "Agent activity: working"],
+    ["idle", [session({ agentState: "idle" })], "quiet", "Agent activity: no active agents"],
+    ["no session", [], "none", "Agent activity: none"],
+  ] as const)("a %s card draws the %s ring", (_name, sessions, tone, label) => {
+    const { container } = renderCard({ sessions: [...sessions] });
+    const ring = ringOf(container);
+    expect(ring.getAttribute("data-worktree-activity")).toBe(tone);
+    expect(ring.getAttribute("aria-label")).toBe(label);
+  });
+
+  test("the ring follows agent activity, never the workspace board status", () => {
     const { container } = renderCard({
-      sessions: [session()],
+      sessions: [session({ agentState: "idle" })],
       statusId: "in-review",
     });
-    const ring = container.querySelector(
-      '[data-worktree-card-status-slot] [role="img"]',
-    ) as HTMLElement;
-    expect(ring.getAttribute("aria-label")).toBe("Status In review");
-    // The status' own colour tone travels with the definition (kanban
-    // workspace-status.ts), so the card and the board cannot drift.
-    expect(ring.className).toContain("text-[#16a34a]");
-  });
-
-  test("no status is the dashed neutral ring, never a status the owner did not set", () => {
-    const { container } = renderCard({ sessions: [session()], statusId: null });
-    const ring = container.querySelector(
-      '[data-worktree-card-status-slot] [role="img"]',
-    ) as HTMLElement;
-    expect(ring.getAttribute("aria-label")).toBe("No status");
-    expect(
-      ring.querySelector(".border-dashed"),
-      "the unset ring reads as its own state",
-    ).not.toBeNull();
-  });
-
-  test("a status id this profile no longer defines degrades to no status", () => {
-    const { container } = renderCard({
-      sessions: [session()],
-      statusId: "deleted-status",
-    });
-    expect(
-      container
-        .querySelector('[data-worktree-card-status-slot] [role="img"]')!
-        .getAttribute("aria-label"),
-    ).toBe("No status");
+    expect(ringOf(container).getAttribute("data-worktree-activity")).toBe("quiet");
+    expect(container.querySelector('[aria-label="Status In review"]')).toBeNull();
+    expect(container.querySelector('[aria-label="No status"]')).toBeNull();
   });
 });
 
@@ -581,28 +565,14 @@ describe("concise row identity", () => {
 });
 
 describe("right-slot affordances", () => {
-  test("no generic branch glyph poses as the review indicator", () => {
+  test("the right side keeps only the review marker and the kebab", () => {
     const { container } = renderCard({ sessions: [session({ id: "a" })] });
-    // The session marker stays; the branch glyph is gone (the branch reads
-    // as text in the meta row, the right slot keeps the real PR icon).
-    expect(
-      container.querySelector("[data-worktree-card-affordances]"),
-    ).not.toBeNull();
-    expect(
-      container.querySelector(".shell-worktree-card-affordance-branch"),
-    ).toBeNull();
-    expect(
-      container.querySelector(
-        '[data-worktree-card-affordances] svg.lucide-git-branch',
-      ),
-    ).toBeNull();
-  });
-
-  test("a card with no sessions draws no affordance cluster", () => {
-    const { container } = renderCard({ sessions: [] });
-    expect(
-      container.querySelector("[data-worktree-card-affordances]"),
-    ).toBeNull();
+    expect(container.querySelector("[data-worktree-card-affordances]")).toBeNull();
+    expect(container.querySelector("svg.lucide-square-terminal")).toBeNull();
+    // No PR known: a faint marker says so instead of claiming a state.
+    const none = container.querySelector("[data-worktree-card-pr-none]");
+    expect(none?.getAttribute("aria-label")).toBe("No pull request");
+    expect(container.querySelector("[data-worktree-card-pr-state]")).toBeNull();
   });
 });
 

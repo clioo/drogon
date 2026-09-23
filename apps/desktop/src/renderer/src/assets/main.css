@@ -1645,6 +1645,35 @@ footer[data-testid="status-bar"] {
   justify-content: center;
   line-height: 0;
 }
+/* Agent-activity ring (owner's sidebar guideline): amber while an agent
+   works or waits, green when sessions are quiet, neutral with no session.
+   Solid, so it never reads as the dashed "no status" ring it replaced. */
+.shell-worktree-card-activity-ring {
+  display: inline-block;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border-radius: 9999px;
+  border: 2.5px solid color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+}
+.shell-worktree-card-activity-ring[data-worktree-activity="active"] {
+  border-color: #eab308;
+}
+.dark .shell-worktree-card-activity-ring[data-worktree-activity="active"] {
+  border-color: #facc15;
+}
+.shell-worktree-card-activity-ring[data-worktree-activity="quiet"] {
+  border-color: #16a34a;
+}
+.dark .shell-worktree-card-activity-ring[data-worktree-activity="quiet"] {
+  border-color: #4ade80;
+}
+/* Guideline: a hairline separates each top-level card; nested child cards
+   keep their indented guide instead. */
+.shell-project-cards > [data-worktree-nesting-depth="0"]:not(:first-child) {
+  border-top: 1px solid
+    color-mix(in srgb, var(--worktree-sidebar-border) 70%, transparent);
+  padding-top: 1px;
+}
 /* The card's fold chevron (owner's design): the leading affordance that
    folds the whole agent list. Silence the card's own background/selection
    so the 16px hit target reads as a control, not as card chrome. */
@@ -1675,12 +1704,6 @@ footer[data-testid="status-bar"] {
 .shell-worktree-card-fold:disabled {
   opacity: 0.4;
   cursor: default;
-}
-/* Keeps the status lane aligned on cards with nothing to fold. */
-.shell-worktree-card-fold-spacer {
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
 }
 /* Right-side card affordances (fork MetaIconBadge shell): terminal marker
    and branch marker, ahead of the kebab. */

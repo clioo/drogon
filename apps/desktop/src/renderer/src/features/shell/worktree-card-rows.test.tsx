@@ -227,17 +227,12 @@ describe("WorktreeCard nested session rows", () => {
       expect(
         shellRow.querySelector('[title="Shell"] svg.lucide-terminal'),
       ).not.toBeNull();
-      // The card lane draws the workspace status ring (no status set here:
-      // the dashed neutral ring, never a status the owner did not choose).
+      // The card lane draws the agent-activity ring: amber while one works.
       expect(
-        container.querySelector('[role="img"][aria-label="No status"]'),
-      ).not.toBeNull();
-      // The live activity glyph beside it is the working spinner.
-      expect(
-        container.querySelector(
-          '[data-worktree-card-status-slot] [aria-label="Working"]',
-        ),
-      ).not.toBeNull();
+        container
+          .querySelector("[data-worktree-card-status-slot] [data-worktree-activity]")
+          ?.getAttribute("data-worktree-activity"),
+      ).toBe("active");
     } finally {
       unmount();
     }

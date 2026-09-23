@@ -367,18 +367,8 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
           </span>
         )}
       </span>
-      {secondary && (
-        <span
-          data-worktree-agent-secondary=""
-          className={
-            "shell-worktree-agent-secondary " +
-            (focused ? "text-foreground/70" : "text-muted-foreground/65")
-          }
-          aria-hidden="true"
-        >
-          {" "}- {secondary}
-        </span>
-      )}
+      {/* Owner's guideline: a row reads provider, MAIN and state only. The
+          title (secondary) stays in the row's tooltip and accessible name. */}
     </>
   );
 
