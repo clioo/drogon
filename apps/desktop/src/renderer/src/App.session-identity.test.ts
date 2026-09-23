@@ -1551,6 +1551,80 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     expect(result[0].hasForegroundChild).toBe(false);
   });
 
+  test("retiring bounded proof twice cannot revive an older poll", () => {
+    const ledger = createObservationLedger();
+    const rows = Array.from(
+      { length: 2 * OBSERVATION_LEDGER_MAX_ENTRIES + 1 },
+      (_, index) => target({ id: `s${index}`, hasForegroundChild: false }),
+    );
+    const newer = settleSelectedWorkspaceFetch({
+      visible: rows,
+      workspaceId: "w1",
+      requestSeq: 2,
+      ledger,
+      workspaceProof: new Map(),
+    });
+    const selected = applySelectedFetch([], newer.plan!);
+    const old = target({ id: "s0", ...freshPi });
+    const projection = planQueuedAdopt([old], "w1", never, {
+      freshKeys: new Set([observationKeyOf(old)]),
+      seq: 1,
+      ledger,
+    });
+    expect(applyQueuedAdopt(selected, projection)[0].observedHarnessId ?? null).toBeNull();
+  });
+
+  test("an inadmissible selected value never falls through when no admitted value remains", () => {
+    const ledger = createObservationLedger();
+    const rows = Array.from(
+      { length: OBSERVATION_LEDGER_MAX_ENTRIES + 1 },
+      (_, index) => target({ id: `s${index}`, hasForegroundChild: false }),
+    );
+    const projection = planQueuedAdopt(rows, "w1", never, {
+      freshKeys: new Set(rows.map(observationKeyOf)),
+      seq: 2,
+      ledger,
+    });
+    commitObservationProof(ledger, projection.appliedObservations, 2);
+    const older = settleSelectedWorkspaceFetch({
+      visible: [target({ id: "s0", ...freshPi })],
+      workspaceId: "w1",
+      requestSeq: 1,
+      ledger,
+      workspaceProof: new Map(),
+    });
+    expect(ledger.shouldApply(observationKeyOf(target({ id: "s0" })), 1)).toBe(false);
+    expect(applySelectedFetch([], older.plan!)[0].observedHarnessId ?? null).toBeNull();
+  });
+
+  test("selection round trip pruning does not forget a newer selected clear", () => {
+    const ledger = createObservationLedger();
+    const workspaceProof = new Map<string, number>();
+    const selected = settleSelectedWorkspaceFetch({
+      visible: [target({ hasForegroundChild: false })],
+      workspaceId: "w1",
+      requestSeq: 2,
+      ledger,
+      workspaceProof,
+    });
+    expect(applySelectedFetch([], selected.plan!)[0].observedHarnessId ?? null).toBeNull();
+    pruneObservationProofForSessions(ledger, []);
+    settleSelectedWorkspaceFetch({
+      visible: [],
+      workspaceId: "w2",
+      requestSeq: 3,
+      ledger,
+      workspaceProof,
+    });
+    const old = target(freshPi);
+    const stale = planQueuedAdopt([old], "w1", never, {
+      freshKeys: new Set([observationKeyOf(old)]),
+      seq: 1,
+      ledger,
+    });
+    expect(applyQueuedAdopt([], stale).some((item) => item.observedHarnessId === "pi")).toBe(false);
+  });
+
   test("production selected settlement stores admitted values on equal rereads", () => {
     const ledger = createObservationLedger();
     const workspaceProof = new Map<string, number>();

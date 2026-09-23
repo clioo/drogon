@@ -99,44 +99,30 @@ export function createObservationLedger(
   maxEntries: number = OBSERVATION_LEDGER_MAX_ENTRIES,
 ): ObservationLedger {
   const applied = new Map<string, AdmittedObservation>();
-  // Bounded tombstones for evicted proof. Without this, a selected workspace
-  // read at the cap can evict a live key and an older poll can re-admit it
-  // as if it had never been seen. Tombstones retain only the last seq, not
-  // the value, so stale writes stay fenced while admitted values remain
-  // bounded by `applied`.
-  const retiredSeq = new Map<string, number>();
+  // Global read-order floor for keys whose bounded value proof was evicted
+  // or pruned. Values remain bounded by `applied`, but an older in-flight
+  // request can never treat forgotten proof as if no newer read existed.
+  let floorSeq = 0;
   const bound = Math.max(1, Math.floor(maxEntries));
   return {
     shouldApply(key, seq) {
       const last = applied.get(key);
       if (last !== undefined) return seq > last.seq;
-      const retired = retiredSeq.get(key);
-      return retired === undefined || seq > retired;
+      return seq >= floorSeq;
     },
     markApplied(key, seq, snapshot = null) {
       const last = applied.get(key);
       if (last !== undefined && seq <= last.seq) return;
+      floorSeq = Math.max(floorSeq, seq);
       if (!applied.has(key)) {
         while (applied.size >= bound) {
           const oldest = applied.keys().next();
           if (oldest.done) break;
-          const evicted = oldest.value;
-          const evictedValue = applied.get(evicted);
-          applied.delete(evicted);
-          if (evictedValue) {
-            if (retiredSeq.has(evicted)) retiredSeq.delete(evicted);
-            while (retiredSeq.size >= bound) {
-              const retiredOldest = retiredSeq.keys().next();
-              if (retiredOldest.done) break;
-              retiredSeq.delete(retiredOldest.value);
-            }
-            retiredSeq.set(evicted, evictedValue.seq);
-          }
+          applied.delete(oldest.value);
         }
       } else {
         applied.delete(key);
       }
-      retiredSeq.delete(key);
       applied.set(key, { seq, snapshot });
     },
     admitted(key) {
@@ -146,9 +132,6 @@ export function createObservationLedger(
     prune(keep) {
       for (const key of [...applied.keys()]) {
         if (!keep.has(key)) applied.delete(key);
-      }
-      for (const key of [...retiredSeq.keys()]) {
-        if (!keep.has(key)) retiredSeq.delete(key);
       }
     },
     get size() {

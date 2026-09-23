@@ -941,12 +941,17 @@ export function applySelectedFetch(
     const key = observationKeyOf(row);
     const actual = actualByKey.get(key);
     const admitted = plan.admittedObservationValues.get(key);
+    const fetchWins = plan.fetchWinsObservation.get(key) === true;
     if (!actual) {
-      next.push(admitted ? { ...row, ...admitted } : row);
+      next.push(
+        fetchWins
+          ? row
+          : { ...row, ...(admitted ?? readObservationSnapshot({})) },
+      );
       continue;
     }
     let merged = row;
-    if (plan.fetchWinsObservation.get(key) !== true)
+    if (!fetchWins)
       merged = { ...merged, ...(admitted ?? readObservationSnapshot(actual)) };
     const probe = applySessionStatePush([actual], {
       sessionId: row.id,
