@@ -1055,7 +1055,9 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     commitObservationProof(ledger, projection.appliedObservations, settled.seq);
     const selected = applyQueuedAdopt([], projection);
     const rendered = sidebarSessionView(settled.sessions, selected, new Set());
-    expect(rendered.find((item) => item.id === "s1")?.observedHarnessId ?? null).not.toBe("pi");
+    const row = rendered.find((item) => item.id === "s1");
+    expect(row).toBeDefined();
+    expect(row?.observedHarnessId ?? null).toBeNull();
   });
 
   test("an older host-wide poll cannot resurrect membership after a selected empty read", async () => {
@@ -1096,6 +1098,38 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     expect(tabs.some((item) => item.id === "s1")).toBe(false);
     expect(sidebarSessionView(settled.sessions, tabs, new Set()).some((item) => item.id === "s1")).toBe(false);
   });
+
+  for (const pollRows of [[], [session("new", freshPi)]]) {
+    test(`newer poll membership (${pollRows.length} rows) beats an older selected response`, () => {
+      const ledger = createObservationLedger();
+      const workspaceProof = new Map<string, number>();
+      const collector = createSidebarSessionCollector();
+      collector.noteHostWide(pollRows, ["w1"]);
+      const settled = settleSidebarPoll([], collector.view(), 2, workspaceProof);
+      const projection = planQueuedAdopt(settled.sessions, "w1", never, {
+        seq: settled.seq,
+        freshKeys: settled.freshKeys,
+        freshWorkspaceIds: settled.freshWorkspaceIds,
+        ledger,
+        workspaceProof,
+      });
+      commitObservationProof(ledger, projection.appliedObservations, 2);
+      let selected = applyQueuedAdopt([], projection);
+
+      const older = settleSelectedWorkspaceFetch({
+        visible: [session("old")],
+        workspaceId: "w1",
+        requestSeq: 1,
+        ledger,
+        workspaceProof,
+      });
+      selected = applySelectedFetch(selected, older.plan!);
+      const active = chooseActiveAfterSelectedFetch("", older.plan!.rows);
+
+      expect(selected.map((item) => item.id)).toEqual(pollRows.map((item) => item.id));
+      expect(active).toBe(pollRows.at(-1)?.id ?? "");
+    });
+  }
 
   test("an unchanged successful read re-proves the selected copy after a stale selected-fetch overwrite", () => {
     const ledger = createObservationLedger();
@@ -1758,7 +1792,8 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
       ledger,
       workspaceProof,
     });
-    expect(older).toEqual({ stale: true, plan: null });
+    expect(older.stale).toBe(false);
+    expect(older.plan?.rows.map((item) => item.id)).toEqual(["new"]);
   });
 
   test("workspace selected-read proof is bounded", () => {

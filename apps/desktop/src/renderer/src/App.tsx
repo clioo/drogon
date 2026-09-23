@@ -1017,6 +1017,38 @@ export type SidebarPollSettlement = {
  */
 export const WORKSPACE_READ_PROOF_MAX_ENTRIES = 512;
 
+const WORKSPACE_READ_STATE = Symbol("drogonWorkspaceReadState");
+
+type WorkspaceReadState = {
+  rows: Map<string, Session[]>;
+};
+
+type WorkspaceReadProofWithState = Map<string, number> & {
+  [WORKSPACE_READ_STATE]?: WorkspaceReadState;
+};
+
+function workspaceReadState(
+  proof: Map<string, number>,
+): WorkspaceReadState {
+  const stateful = proof as WorkspaceReadProofWithState;
+  if (!stateful[WORKSPACE_READ_STATE]) {
+    Object.defineProperty(stateful, WORKSPACE_READ_STATE, {
+      value: { rows: new Map<string, Session[]>() },
+      enumerable: false,
+    });
+  }
+  return stateful[WORKSPACE_READ_STATE]!;
+}
+
+function workspaceRows(
+  proof: ReadonlyMap<string, number>,
+  workspaceId: string,
+): Session[] | null {
+  const state = (proof as WorkspaceReadProofWithState)[WORKSPACE_READ_STATE];
+  const rows = state?.rows.get(workspaceId);
+  return rows ? [...rows] : null;
+}
+
 export function markWorkspaceReadProof(
   proof: Map<string, number>,
   workspaceIds: Iterable<string>,
@@ -1024,6 +1056,7 @@ export function markWorkspaceReadProof(
   maxEntries: number = WORKSPACE_READ_PROOF_MAX_ENTRIES,
 ): void {
   const bound = Math.max(1, Math.floor(maxEntries));
+  const state = workspaceReadState(proof);
   for (const workspaceId of workspaceIds) {
     const last = proof.get(workspaceId);
     if (last !== undefined && seq <= last) continue;
@@ -1032,9 +1065,22 @@ export function markWorkspaceReadProof(
       const oldest = proof.keys().next();
       if (oldest.done) break;
       proof.delete(oldest.value);
+      state.rows.delete(oldest.value);
     }
     proof.set(workspaceId, seq);
   }
+}
+
+function markWorkspaceRows(
+  proof: Map<string, number>,
+  workspaceId: string,
+  rows: readonly Session[],
+  seq: number,
+): void {
+  const previous = proof.get(workspaceId);
+  markWorkspaceReadProof(proof, [workspaceId], seq);
+  if (previous !== undefined && seq <= previous) return;
+  workspaceReadState(proof).rows.set(workspaceId, [...rows]);
 }
 
 export function isStaleWorkspaceRead(
@@ -1046,8 +1092,6 @@ export function isStaleWorkspaceRead(
   return last !== undefined && requestSeq < last;
 }
 
-let latestWorkspaceReadProof: ReadonlyMap<string, number> | null = null;
-
 export function settleSelectedWorkspaceFetch(args: {
   visible: readonly Session[];
   workspaceId: string;
@@ -1058,12 +1102,15 @@ export function settleSelectedWorkspaceFetch(args: {
   if (
     isStaleWorkspaceRead(args.workspaceProof, args.workspaceId, args.requestSeq)
   ) {
-    return { stale: true, plan: null };
+    const effectiveRows = workspaceRows(args.workspaceProof, args.workspaceId);
+    return {
+      stale: false,
+      plan: planSelectedFetch(effectiveRows ?? [], args.requestSeq, args.ledger),
+    };
   }
   const plan = planSelectedFetch(args.visible, args.requestSeq, args.ledger);
   commitObservationProof(args.ledger, plan.appliedObservations, args.requestSeq);
-  markWorkspaceReadProof(args.workspaceProof, [args.workspaceId], args.requestSeq);
-  latestWorkspaceReadProof = args.workspaceProof;
+  markWorkspaceRows(args.workspaceProof, args.workspaceId, plan.rows, args.requestSeq);
   return { stale: false, plan };
 }
 
@@ -1071,25 +1118,72 @@ export function settleSidebarPoll(
   previousSessions: Session[],
   view: SidebarSessionSourceView,
   requestSeq: number,
-  workspaceProof: ReadonlyMap<string, number> | null = latestWorkspaceReadProof,
+  workspaceProof?: Map<string, number>,
 ): SidebarPollSettlement {
+  if (!workspaceProof) {
+    const dataChanged = !sameSessions(previousSessions, view.sessions);
+    return {
+      sessions: dataChanged ? view.sessions : previousSessions,
+      seq: requestSeq,
+      freshKeys: view.freshKeys,
+      freshWorkspaceIds: view.freshWorkspaceIds,
+      dataChanged,
+    };
+  }
+
+  const incomingByWorkspace = new Map<string, Session[]>();
+  for (const session of view.sessions) {
+    const rows = incomingByWorkspace.get(session.workspaceId) ?? [];
+    rows.push(session);
+    incomingByWorkspace.set(session.workspaceId, rows);
+  }
+
   const staleWorkspaces = new Set<string>();
   if (workspaceProof) {
-    for (const session of view.sessions) {
-      if (isStaleWorkspaceRead(workspaceProof, session.workspaceId, requestSeq))
-        staleWorkspaces.add(session.workspaceId);
+    for (const workspaceId of view.freshWorkspaceIds) {
+      const rows = incomingByWorkspace.get(workspaceId) ?? [];
+      if (isStaleWorkspaceRead(workspaceProof, workspaceId, requestSeq)) {
+        staleWorkspaces.add(workspaceId);
+      } else {
+        markWorkspaceRows(workspaceProof, workspaceId, rows, requestSeq);
+      }
+    }
+    for (const workspaceId of incomingByWorkspace.keys()) {
+      if (view.freshWorkspaceIds.has(workspaceId)) continue;
+      if (
+        workspaceRows(workspaceProof, workspaceId) !== null ||
+        isStaleWorkspaceRead(workspaceProof, workspaceId, requestSeq)
+      )
+        staleWorkspaces.add(workspaceId);
     }
   }
-  const sessions =
-    staleWorkspaces.size === 0
-      ? view.sessions
-      : view.sessions.filter((session) => !staleWorkspaces.has(session.workspaceId));
+
+  const sessions: Session[] = [];
+  const replaced = new Set<string>();
+  for (const session of view.sessions) {
+    if (!staleWorkspaces.has(session.workspaceId)) {
+      sessions.push(session);
+      continue;
+    }
+    if (replaced.has(session.workspaceId)) continue;
+    replaced.add(session.workspaceId);
+    sessions.push(...(workspaceRows(workspaceProof, session.workspaceId) ?? []));
+  }
+  for (const workspaceId of staleWorkspaces) {
+    if (replaced.has(workspaceId)) continue;
+    sessions.push(...(workspaceRows(workspaceProof, workspaceId) ?? []));
+  }
+
   const remainingFreshKeys =
     staleWorkspaces.size === 0
       ? view.freshKeys
       : new Set(
           [...view.freshKeys].filter((key) =>
-            sessions.some((session) => observationKeyOf(session) === key),
+            sessions.some(
+              (session) =>
+                !staleWorkspaces.has(session.workspaceId) &&
+                observationKeyOf(session) === key,
+            ),
           ),
         );
   const dataChanged = !sameSessions(previousSessions, sessions);
