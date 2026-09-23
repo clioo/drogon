@@ -1,15 +1,15 @@
 /* MIT Copyright (c) 2026 Lovecast Inc.
    The card's right-hand review marker (owner's design, 2026-09-21): one
-   merge glyph whose colour names the review's state — emerald with a check
-   for a merged review, cyan for a confirmed-ready one, neutral for a live
-   but unconfirmed review, muted for a draft, rose for a branch that
+   merge glyph whose colour alone names the review's state — emerald for a
+   merged review, cyan for a confirmed-ready one, blue for a live but
+   unconfirmed review, muted for a draft, rose for a branch that
    conflicts. Class-compatible with the reference's MetaIconBadge
    shell (`WorktreeCardMetadataControls.tsx`): `size-3.5`, muted by default,
    label in an sr-only span; here the label is the same accessible string the
    meta row's chip used (`getPrChipAccessibleLabel`), and the title is the
    review's own title. A worktree with no known review draws nothing — never
    a placeholder claiming a state. */
-import { Check, GitMerge } from "lucide-react";
+import { GitMerge } from "lucide-react";
 import {
   getPrChipAccessibleLabel,
   resolveCardPrState,
@@ -66,17 +66,10 @@ export function WorktreeCardPrStateIcon({
       aria-label={getPrChipAccessibleLabel(pr)}
       title={pr.title}
     >
+      {/* Owner: the colour alone names the review state (green merged,
+          cyan ready, blue open, red conflicts, grey draft/none); no extra
+          check badge, which read as an agent status next to the ring. */}
       <GitMerge className="size-3.5 shrink-0" aria-hidden="true" />
-      {state === "merged" ? (
-        // Owner's guideline: a filled green check BESIDE the merge glyph.
-        // Overlaid on the glyph it covered the glyph's right node.
-        <Check
-          data-worktree-card-pr-merged-check=""
-          className="size-3 shrink-0 rounded-full bg-emerald-500 p-px text-worktree-sidebar"
-          strokeWidth={4}
-          aria-hidden="true"
-        />
-      ) : null}
     </span>
   );
 }

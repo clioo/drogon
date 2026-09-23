@@ -815,7 +815,7 @@ export async function runSidebarPrStatesAcceptance() {
 
     // Phase A: every marker state on its own card, through the real
     // gh -> tasks RPC -> ProjectList -> WorktreeCard path.
-    await expectMarker(cardIdByRole.merged, "merged", { label: "Linked PR #11: Merged", check: true });
+    await expectMarker(cardIdByRole.merged, "merged", { label: "Linked PR #11: Merged", check: false });
     report.checks.push("merged-review-renders-green-with-check");
     await expectMarker(cardIdByRole.ready, "ready", { label: "Linked PR #12 checks: Passing", check: false });
     report.checks.push("confirmed-ready-renders-cyan");
@@ -897,7 +897,7 @@ export async function runSidebarPrStatesAcceptance() {
     }, "the merged review re-renders after scheduled revalidation", 180000);
     const cardsAfter = (await readMarkers()).map((m) => m.cardId).sort();
     assert.deepEqual(cardsAfter, cardsBefore, "the project set is stable across the refetch");
-    await expectMarker(cardIdByRole.merged, "merged", { label: "Linked PR #11: Merged", check: true });
+    await expectMarker(cardIdByRole.merged, "merged", { label: "Linked PR #11: Merged", check: false });
     report.checks.push("changed-status-refetches-on-a-stable-project-set");
     await shot("pr-states-revalidated.png");
     checkCancelled();
@@ -922,7 +922,7 @@ export async function runSidebarPrStatesAcceptance() {
     await rm(path.join(ghDataDir, "mode"), { force: true });
     await page.reload();
     await waitForCards("the sidebar renders again after recovery");
-    await expectMarker(cardIdByRole.ready, "merged", { label: "Linked PR #12: Merged", check: true });
+    await expectMarker(cardIdByRole.ready, "merged", { label: "Linked PR #12: Merged", check: false });
     report.checks.push("provider-error-renders-unavailable-never-empty");
     checkCancelled();
 
