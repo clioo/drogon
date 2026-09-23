@@ -702,7 +702,7 @@ try {
   await waitForTerminalText(page, marker);
   report.checks.push("rendered-terminal-command-output");
   const lookup = await page.evaluate(async ({ workspaceId, sessionId }) => {
-    const value = await window.drogon.sessions(workspaceId);
+    const value = await window.drogon.sessions(undefined);
     if (!value.ok) return { session: null, error: value.error, ids: [] };
     const sessions = value.result.sessions;
     return {
@@ -739,7 +739,7 @@ try {
   await page.reload();
   await waitForTerminalText(page, marker);
   const reconnected = await page.evaluate(async ({ workspaceId, sessionId }) => {
-    const value = await window.drogon.sessions(workspaceId);
+    const value = await window.drogon.sessions(undefined);
     return value.ok
       ? value.result.sessions.find((session) => session.id === sessionId) ?? null
       : null;
