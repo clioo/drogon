@@ -148,12 +148,10 @@ export async function probeClaudeTerminalInput({ page, workspaceId, output }) {
     await writeFile(path.join(output, "claude-keyboard-failure.json"), JSON.stringify({ stage, error: error.stack }, null, 2));
     throw error;
   } finally {
-    await page.evaluate(async (session) => {
+    await page.evaluate(() => {
       window.__drogonClaudeKeyboardProbe?.subscription.dispose();
       delete window.__drogonClaudeKeyboardProbe;
-      const result = await window.drogon.stop({ sessionId: session.id, incarnation: session.incarnation });
-      if (!result.ok) throw new Error(result.error.message);
-    }, session);
+    });
     const tab = page.locator(`[role="tab"][data-tab-id="${session.id}"]`);
     if (await tab.count()) await tab.getByRole("button", { name: /^Close / }).click();
   }
