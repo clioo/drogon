@@ -701,15 +701,19 @@ try {
   await page.keyboard.press("Enter");
   await waitForTerminalText(page, marker);
   report.checks.push("rendered-terminal-command-output");
-  const original = await page.evaluate(async ({ workspaceId, sessionId }) => {
+  const lookup = await page.evaluate(async ({ workspaceId, sessionId }) => {
     const value = await window.drogon.sessions(workspaceId);
-    return value.ok
-      ? value.result.sessions.find((session) => session.id === sessionId) ?? null
-      : null;
+    if (!value.ok) return { session: null, error: value.error, ids: [] };
+    const sessions = value.result.sessions;
+    return {
+      session: sessions.find((item) => item.id === sessionId) ?? null,
+      ids: sessions.map((item) => item.id),
+    };
   }, { workspaceId: registered.id, sessionId: originalSessionId });
+  const original = lookup.session;
   assert.ok(
     original?.incarnation,
-    `could not read the launched terminal session ${originalSessionId}: ${JSON.stringify(original)}`,
+    `could not read terminal session ${originalSessionId} (workspace ${registered.id}); ${JSON.stringify(lookup)}`,
   );
   if (process.platform !== "win32") {
     report.checks.push(...await probeTerminalInputLayout({ page, session: original, output, expectedHome: privateEnvironment.home, dataDir }));
