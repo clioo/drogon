@@ -46,7 +46,6 @@ import { readBuildInfo } from "./build-info";
 import { fileSha256Hex } from "./daemon-artifact";
 import {
   classifyDaemonUpdate,
-  handedOffNotice,
   shortRevision,
   updatedNotice,
   type DaemonUpdateState,
@@ -809,14 +808,7 @@ async function maybeRestartUpdatedDaemon(
       pollIntervalMs: 250,
       shutdownWaitMs: 12_000,
       spawnDeadlineMs: 10_000,
-      handoffDeadlineMs: 45_000,
     });
-    if (outcome.kind === "handed-off") {
-      const note = handedOffNotice(revision, outcome.sessions);
-      daemonUpdateState = { kind: "updated", revision, note };
-      console.log(`[drogon] install update: ${note}`);
-      return;
-    }
     if (outcome.kind === "restarted") {
       const note = updatedNotice(revision);
       daemonUpdateState = { kind: "updated", revision, note };

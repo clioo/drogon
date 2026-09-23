@@ -24,6 +24,7 @@ import {
   previousBundleName,
   stalePreviousBundles,
   stopProcesses,
+  waitForBundledService,
 } from "./install-drogon.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -317,4 +318,45 @@ test("install refuses to reinstall the bundle already installed", darwinOnly, as
     install(["--bundle", path.join(applications, APP_NAME), "--applications", applications, "--no-restart"]),
     /already the installed one/,
   );
+});
+
+test("waitForBundledService waits through the handoff until the new build answers", async () => {
+  const info = { artifacts: { daemon: "d".repeat(64) } };
+  const replies = [
+    // The old build still answers, then nothing (the handoff), then the new one.
+    { ok: true, result: { processId: 11, daemonArtifactSha256: "a".repeat(64), serviceInstanceId: "old" } },
+    null,
+    { ok: true, result: { processId: 22, daemonArtifactSha256: "d".repeat(64), serviceInstanceId: "new" } },
+  ];
+  const calls = [];
+  const result = await waitForBundledService("/Applications/Drogon.app", info, 60000, {
+    run: async (file, args) => {
+      calls.push([file, ...args].join(" "));
+      const reply = replies.shift();
+      if (!reply) throw new Error("connection refused");
+      return { stdout: JSON.stringify(reply) };
+    },
+    sleep: async () => {},
+    now: () => 0,
+  });
+  assert.deepEqual(result, { verdict: "updated", pids: [22], serviceInstanceId: "new" });
+  assert.equal(calls.length, 3);
+  assert.equal(
+    calls[0],
+    "/Applications/Drogon.app/Contents/Resources/bin/drogon-cli --json rpc status --params {}",
+  );
+});
+
+test("waitForBundledService never claims an old build that keeps answering", async () => {
+  let clock = 0;
+  const result = await waitForBundledService("/Applications/Drogon.app", { artifacts: { daemon: "d".repeat(64) } }, 3000, {
+    run: async () => ({
+      stdout: JSON.stringify({ ok: true, result: { processId: 11, daemonArtifactSha256: "a".repeat(64) } }),
+    }),
+    sleep: async (ms) => {
+      clock += ms;
+    },
+    now: () => clock,
+  });
+  assert.deepEqual(result, { verdict: "unverifiable", pids: [11], answeringDigest: "a".repeat(64) });
 });

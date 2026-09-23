@@ -78,18 +78,6 @@ export function updatedNotice(revision: string | null): string {
     : "Drogon updated; restarting its background service.";
 }
 
-/** The notice line for an update that moved running sessions to the new
- *  service instead of restarting it. */
-export function handedOffNotice(revision: string | null, sessions: number): string {
-  const moved =
-    sessions === 1
-      ? "1 running session moved to it without stopping"
-      : `${sessions} running sessions moved to it without stopping`;
-  return revision
-    ? `Drogon updated to ${revision}; its background service was replaced and ${moved}.`
-    : `Drogon updated; its background service was replaced and ${moved}.`;
-}
-
 /** Shortens a full build revision for display; passes through unknown. */
 export function shortRevision(revision: string | null): string | null {
   return revision ? revision.slice(0, 12) : null;

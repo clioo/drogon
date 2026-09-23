@@ -1,20 +1,18 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
 // Install-resilience P5 sealed probe: a changed `drogond` binary behind a
 // still-running detached daemon must never become a silent mismatched
-// attach, and installing over running sessions must never stop them. The
-// probe builds a genuinely different daemon binary (a re-signed copy —
-// different sha256, still a runnable drogond), installs it as the incumbent
-// against the fixture data dir, and launches the app three times:
+// attach. The probe builds a genuinely different daemon binary (a re-signed
+// copy with extra bytes — different sha256, still a runnable drogond),
+// installs it as the incumbent against the fixture data dir, and launches
+// the app twice:
 //   1. clean session state → the app quiesces the changed daemon through
 //      its own `runtime.shutdown`, respawns the bundled build, and SHOWS
 //      the "Drogon updated …" notice;
-//   2. a terminal opened in the UI is running in the changed daemon → the
-//      app has it hand the live PTY to the bundled build (`runtime.handoff`
-//      + `--adopt-handoff`): the same shell process, in the same tab, keeps
-//      its scrollback and answers typed input through the new service;
-//   3. the changed daemon offers its sessions but no successor takes them
-//      → it resumes them, the app shows the honest "update pending" state,
+//   2. a live session in flight and a handoff nobody takes → the daemon
+//      refuses to quiesce, offers its sessions to no one and resumes them,
+//      the app keeps it attached, shows the honest "update pending" state,
 //      and the USER-chosen restart from the banner resolves the update.
+//      (A handoff that IS taken: scripts/accept-session-handoff.mjs.)
 // Daemon identity is proved through the daemon's own authenticated
 // `status` (serviceInstanceId + daemonArtifactSha256 + processId); exits
 // are proved with the kernel exit observer — the probe signals nothing.
@@ -22,7 +20,7 @@ import assert from "node:assert/strict";
 import { readFileSync, appendFileSync } from "node:fs";
 import { chmod, copyFile } from "node:fs/promises";
 import path from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -30,10 +28,6 @@ import {
   startAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { startExitObserver } from "./live-child-crash-fixture.mjs";
-import {
-  terminalBufferText,
-  waitForTerminalText,
-} from "./acceptance-terminal-text.mjs";
 
 // `fileURLToPath`, not `URL.pathname`: a checkout under a path with a space
 // (Drogon's own `~/Library/Application Support/Drogon/workspaces/...`) yields
@@ -99,32 +93,16 @@ async function waitForHealthyDaemon(cli, dataDir, deadlineMs = 30_000) {
  * the caller decides any last-resort termination with its own ownership
  * checks; this module never signals.
  */
-async function spawnIncumbentDaemon(
-  binaryPath,
-  dataDir,
-  cli,
-  { args = [], env } = {},
-) {
-  const child = startAcceptanceProcess(
-    binaryPath,
-    ["--data-dir", dataDir, ...args],
-    {
-      detached: true,
-      stdio: "ignore",
-      ...(env ? { env: { ...process.env, ...env } } : {}),
-    },
-  );
+async function spawnIncumbentDaemon(binaryPath, dataDir, cli, env) {
+  const child = startAcceptanceProcess(binaryPath, ["--data-dir", dataDir], {
+    detached: true,
+    stdio: "ignore",
+    ...(env ? { env: { ...process.env, ...env } } : {}),
+  });
   child.unref();
   const pid = child.pid;
   assert.ok(pid, "incumbent daemon spawn must produce a pid");
-  // A successor (`--adopt-handoff`) answers only once it serves; until then
-  // its predecessor may still be the one answering.
-  const deadline = Date.now() + 30_000;
-  let status = await waitForHealthyDaemon(cli, dataDir);
-  while (status.processId !== pid && Date.now() < deadline) {
-    await delay(100);
-    status = await waitForHealthyDaemon(cli, dataDir);
-  }
+  const status = await waitForHealthyDaemon(cli, dataDir);
   assert.equal(
     status.processId,
     pid,
@@ -270,128 +248,15 @@ export async function probeRenderedChangedDaemonBinary({
     });
 
     // ------------------------------------------------------------- phase 2
-    // Install over a running terminal. A terminal opened in the UI moves
-    // into the changed daemon (the "old build"), then a relaunch finds that
-    // build running and has it hand the live PTY to the bundled one.
-    const opened = await relaunch();
-    const nonce = randomUUID().replaceAll("-", "").slice(0, 12);
-    const tabsBefore = await opened.getByRole("tab").count();
-    await opened.getByRole("button", { name: "New tab", exact: true }).last().click();
-    await opened.getByRole("menuitem", { name: /^New Terminal/ }).click();
-    await opened.waitForFunction(
-      (count) => document.querySelectorAll('[role="tab"]').length === count + 1,
-      tabsBefore,
-    );
-    await opened.locator(".xterm-helper-textarea").last().focus();
-    await opened.keyboard.type(`printf 'HANDOFF_BEFORE_%s_%s\\n' ${nonce} $$`);
-    await opened.keyboard.press("Enter");
-    const beforeMarker = `HANDOFF_BEFORE_${nonce}_`;
-    await waitForTerminalText(opened, beforeMarker);
-    const shellPid = new RegExp(`${beforeMarker}(\\d+)`).exec(
-      await terminalBufferText(opened),
-    )?.[1];
-    assert.ok(shellPid, "the terminal must print its shell pid");
-    const handedSession = (
-      await rpc("session.list", { workspaceId }, cli, dataDir)
-    ).sessions
-      .filter((item) => item.verdict === "live")
-      .at(-1);
-    assert.ok(handedSession, "the UI terminal must be a live session");
-    logStep(`phase 2: UI session ${handedSession.id} shell pid ${shellPid}`);
-
-    // Move the running terminal into the changed daemon with the same
-    // mechanism under test: the bundled daemon hands it to the variant.
-    const bundled = await rpcStatus(cli, dataDir);
-    const bundledExit = await startExitObserver(bundled.processId, {
-      scriptPath: OBSERVER_SCRIPT,
-      deadlineMs: 30_000,
-    });
-    try {
-      const offered = await rpc(
-        "runtime.handoff",
-        { hostId: bundled.hostId, serviceInstanceId: bundled.serviceInstanceId },
-        cli,
-        dataDir,
-      );
-      assert.equal(offered.accepted, true);
-      skew = await spawnIncumbentDaemon(skewBinary, dataDir, cli, {
-        args: ["--adopt-handoff"],
-      });
-      assert.equal(await bundledExit.waitExit(30_000), "exit");
-    } finally {
-      await bundledExit.stop(3000);
-    }
-    assert.equal(skew.status.daemonArtifactSha256, variantDigest);
-    const inOldBuild = await rpc("session.list", { workspaceId }, cli, dataDir);
-    assert.equal(
-      inOldBuild.sessions.find((item) => item.id === handedSession.id)?.verdict,
-      "live",
-      "the terminal must be running in the changed daemon before the install",
-    );
-
-    logStep("phase 2: relaunching over the changed daemon with a live terminal");
-    const updated = await relaunch();
-    await updated
-      .getByText("Drogon updated", { exact: true })
-      .waitFor({ timeout: 90_000 });
-    const handedTo = await waitForHealthyDaemon(cli, dataDir);
-    assert.equal(
-      handedTo.daemonArtifactSha256,
-      bundledDigest,
-      "the bundled build must be the one serving after the install",
-    );
-    assert.notEqual(handedTo.serviceInstanceId, skew.status.serviceInstanceId);
-    await skew.exitProof();
-    checks.push("install-over-live-terminal-replaces-the-daemon-without-a-restart-prompt");
-
-    const survived = (
-      await rpc("session.list", { workspaceId }, cli, dataDir)
-    ).sessions.find((item) => item.id === handedSession.id);
-    assert.equal(survived?.verdict, "live", "the terminal must still be running");
-    assert.equal(survived.incarnation, handedSession.incarnation);
-    // Its scrollback came along, and the same shell answers typed input
-    // through the tab the user already had open.
-    await waitForTerminalText(updated, beforeMarker, { timeout: 30_000 });
-    await updated.locator(".xterm-helper-textarea").last().focus();
-    await updated.keyboard.type(`printf 'HANDOFF_AFTER_%s_%s\\n' ${nonce} $$`);
-    await updated.keyboard.press("Enter");
-    await waitForTerminalText(updated, `HANDOFF_AFTER_${nonce}_${shellPid}`, {
-      timeout: 30_000,
-    });
-    await updated.screenshot({
-      path: path.join(output, "changed-binary-handoff-terminal.png"),
-      animations: "disabled",
-    });
-    checks.push("install-over-live-terminal-keeps-the-same-shell-scrollback-and-input");
-
-    // Leave the tab population as this probe found it.
-    await updated.getByRole("button", { name: /^Close .* session$/ }).last().click();
-    await updated.waitForFunction(
-      (count) => document.querySelectorAll('[role="tab"]').length === count,
-      tabsBefore,
-    );
-    const closed = (
-      await rpc("session.list", { workspaceId }, cli, dataDir)
-    ).sessions.find((item) => item.id === handedSession.id);
-    if (closed && closed.verdict !== "exited")
-      await rpc(
-        "session.stop",
-        { sessionId: closed.id, incarnation: closed.incarnation },
-        cli,
-        dataDir,
-      );
-    skew = null;
-
-    // ------------------------------------------------------------- phase 3
-    // A live session in flight and a handoff nobody takes: the incumbent
-    // offers its sessions for no time at all (DROGON_HANDOFF_WAIT_MS=0),
-    // resumes them, and the app must NOT kill it; it stays attached and the
-    // state says "pending".
+    // A live session in flight: the daemon refuses to quiesce → the app
+    // must NOT kill it; it stays attached and the state says "pending".
     await relaunch();
     await stopBundledDaemon(daemonBinary, cli, dataDir);
 
+    // It offers its live session for no time at all, so the successor the
+    // app starts finds nothing to adopt and the incumbent resumes it.
     const skew2 = await spawnIncumbentDaemon(skewBinary, dataDir, cli, {
-      env: { DROGON_HANDOFF_WAIT_MS: "0" },
+      DROGON_HANDOFF_WAIT_MS: "0",
     });
     try {
       // Give the incumbent a LIVE session so quiescence is genuinely refused.
@@ -410,23 +275,23 @@ export async function probeRenderedChangedDaemonBinary({
 
       const pendingServiceInstanceId = skew2.status.serviceInstanceId;
       logStep(
-        `phase 3: incumbent ${pendingServiceInstanceId} pid ${skew2.pid} live session ${liveSessionId}; relaunching the app`,
+        `phase 2: incumbent ${pendingServiceInstanceId} pid ${skew2.pid} live session ${liveSessionId}; relaunching the app`,
       );
-      const relaunched3 = await relaunch();
-      logStep("phase 3: app relaunched");
+      const relaunched2 = await relaunch();
+      logStep("phase 2: app relaunched");
 
-      const banner = relaunched3.getByText("Service update pending", {
+      const banner = relaunched2.getByText("Service update pending", {
         exact: true,
       });
       await banner.waitFor({ timeout: 45_000 });
       checks.push("cannot-quiesce-launch-shows-honest-update-pending-state");
-      await relaunched3.screenshot({
+      await relaunched2.screenshot({
         path: path.join(output, "changed-binary-pending-banner.png"),
         animations: "disabled",
       });
 
       // The old daemon is still the one answering — never killed under the user.
-      logStep("phase 3: asserting the old daemon still answers");
+      logStep("phase 2: asserting the old daemon still answers");
       const stillOld = await rpcStatus(cli, dataDir);
       assert.equal(
         stillOld.serviceInstanceId,
@@ -442,20 +307,12 @@ export async function probeRenderedChangedDaemonBinary({
         "an untaken handoff resumes the session in the old daemon",
       );
       checks.push("cannot-quiesce-keeps-old-daemon-attached-with-skew-signal");
-      checks.push("untaken-handoff-resumes-the-live-session-in-place");
-      // The successor the app started finds nothing to adopt and exits on
-      // its own; it must not linger as a second daemon.
-      await waitForNoProcess(
-        `${daemonBinary} --data-dir ${dataDir} --adopt-handoff`,
-        30_000,
-      );
-      logStep("phase 3: the unused successor exited");
 
       // The user chooses the restart from the banner (stop-all → shutdown →
       // respawn bundled). Drive the same bridge the button calls, but log
       // main's exact result so a failure names its reason. The button is
       // still asserted enabled first — that is what the user clicks.
-      const restartButton = relaunched3.getByRole("button", {
+      const restartButton = relaunched2.getByRole("button", {
         name: "Restart service",
       });
       await restartButton.waitFor({ timeout: 10_000 });
@@ -464,7 +321,7 @@ export async function probeRenderedChangedDaemonBinary({
         true,
         "the Restart service affordance must be enabled",
       );
-      const restartResult = await relaunched3.evaluate(() =>
+      const restartResult = await relaunched2.evaluate(() =>
         window.drogon.daemon.restart(),
       );
       logStep(`banner restart bridge result: ${JSON.stringify(restartResult)}`);
@@ -481,10 +338,10 @@ export async function probeRenderedChangedDaemonBinary({
           throw new Error("banner restart never replaced the incumbent daemon");
         await delay(200);
       }
-      logStep("phase 3: waiting for the replacement to answer");
+      logStep("phase 2: waiting for the replacement to answer");
       const resolved = await waitForHealthyDaemon(cli, dataDir);
       assert.equal(resolved.daemonArtifactSha256, bundledDigest);
-      logStep(`phase 3: replacement healthy pid ${resolved.processId}`);
+      logStep(`phase 2: replacement healthy pid ${resolved.processId}`);
       await skew2.exitProof();
       checks.push("user-chosen-banner-restart-resolves-the-pending-update");
 
@@ -502,7 +359,7 @@ export async function probeRenderedChangedDaemonBinary({
       const clearedDeadline = Date.now() + 60_000;
       for (;;) {
         if (
-          (await relaunched3
+          (await relaunched2
             .getByText("Service update pending", { exact: true })
             .count()) === 0
         )
@@ -530,21 +387,6 @@ export async function probeRenderedChangedDaemonBinary({
     if (skew && !skew.exitProven()) await skew.abandon();
   }
   return checks;
-}
-
-/** Waits until no process runs exactly `command` (argv-boundary match). */
-async function waitForNoProcess(command, deadlineMs) {
-  const deadline = Date.now() + deadlineMs;
-  for (;;) {
-    const { stdout } = await runAcceptanceProcess("ps", ["-axo", "command="]);
-    const running = stdout
-      .split("\n")
-      .some((line) => line.trim() === command || line.trim().startsWith(`${command} `));
-    if (!running) return;
-    if (Date.now() >= deadline)
-      throw new Error(`still running after ${deadlineMs} ms: ${command}`);
-    await delay(250);
-  }
 }
 
 /** Gracefully stops the current bundled daemon through its own managed

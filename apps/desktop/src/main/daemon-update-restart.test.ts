@@ -37,7 +37,6 @@ function deps(overrides: Partial<DaemonUpdateRestartDeps> = {}): DaemonUpdateRes
     pollIntervalMs: 1,
     shutdownWaitMs: 50,
     spawnDeadlineMs: 1_000,
-    handoffDeadlineMs: 1_000,
     ...overrides,
   };
 }
@@ -308,7 +307,7 @@ describe("restartChangedDaemon: live session handoff", () => {
         },
       }),
     );
-    expect(outcome).toEqual({ kind: "handed-off", sessions: 2 });
+    expect(outcome).toEqual({ kind: "restarted", handedOffSessions: 2 });
     expect(spawned).toEqual([`${binaryPath} --data-dir /data --adopt-handoff`]);
     // Nothing destructive was ever asked for.
     expect(called).not.toContain("session.stop");
@@ -423,6 +422,18 @@ describe("restartChangedDaemon: live session handoff", () => {
     } finally {
       Date.now = realNow;
     }
+  });
+});
+
+describe("runtime.handoff reply contract", () => {
+  test("the daemon's admitted-handoff reply validates, anything else does not", () => {
+    const schema = resultSchemas["runtime.handoff"];
+    // Exactly what `do_runtime_handoff` (crates/drogon-core) serializes.
+    expect(
+      schema.parse({ hostId: "h1", serviceInstanceId: "svc1", accepted: true, sessions: 2 }),
+    ).toEqual({ hostId: "h1", serviceInstanceId: "svc1", accepted: true, sessions: 2 });
+    expect(() => schema.parse({ hostId: "h1", serviceInstanceId: "svc1", accepted: false, sessions: 2 })).toThrow();
+    expect(() => schema.parse({ hostId: "h1", serviceInstanceId: "svc1", accepted: true })).toThrow();
   });
 });
 

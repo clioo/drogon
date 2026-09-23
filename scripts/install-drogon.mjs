@@ -258,13 +258,22 @@ const liveProcessDeps = {
  * keeps the same argv. Covers the whole handoff (the old service first waits
  * for its successor) with room to spare.
  */
-async function waitForBundledService(target, info, budgetMs) {
+export async function waitForBundledService(
+  target,
+  info,
+  budgetMs,
+  {
+    run = runAcceptanceProcess,
+    sleep = liveProcessDeps.sleep,
+    now = () => Date.now(),
+  } = {},
+) {
   const cli = bundlePaths(target).cli;
-  const deadline = Date.now() + budgetMs;
+  const deadline = now() + budgetMs;
   let last = null;
   for (;;) {
     try {
-      const { stdout } = await runAcceptanceProcess(
+      const { stdout } = await run(
         cli,
         ["--json", "rpc", "status", "--params", "{}"],
         { timeout: 15000 },
@@ -280,13 +289,13 @@ async function waitForBundledService(target, info, budgetMs) {
     } catch {
       // Not answering yet (between the handoff's two services).
     }
-    if (Date.now() >= deadline)
+    if (now() >= deadline)
       return {
         verdict: "unverifiable",
         pids: last?.processId ? [last.processId] : [],
         answeringDigest: last?.daemonArtifactSha256 ?? null,
       };
-    await liveProcessDeps.sleep(1000);
+    await sleep(1000);
   }
 }
 
