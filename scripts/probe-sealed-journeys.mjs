@@ -1339,6 +1339,7 @@ export async function probeBotPresetManualRun({
       return {
         id: responsibility.trigger.automationId,
         responsibilityId: responsibility.id,
+        workspaceId: bot.home?.homeWorkspaceId ?? null,
       };
     }, { id: workspaceId, botId, name: dutyName });
     assert.ok(
@@ -1349,7 +1350,13 @@ export async function probeBotPresetManualRun({
     ownedAutomationId = owned.id;
     const scheduled = await runCliJson(cli, ["--data-dir", dataDir, "--json", "automation", "list"]);
     assert.equal(scheduled.ok, true, JSON.stringify(scheduled));
-    assert.equal(scheduled.result.automations.find((item) => item.id === ownedAutomationId)?.workspaceId, workspaceId);
+    assert.ok(owned.workspaceId, "the bot snapshot must expose its canonical home workspace");
+    assert.notEqual(owned.workspaceId, foreign.workspaceId);
+    assert.equal(
+      scheduled.result.automations.find((item) => item.id === ownedAutomationId)?.workspaceId,
+      owned.workspaceId,
+      "the responsibility automation must stay in the Bot's canonical home workspace",
+    );
     for (let attempt = 1; attempt <= RUN_ATTEMPTS && !markerVisible; attempt += 1) {
       // Same bounded fixture-readiness check as J7.
       assert.ok(
