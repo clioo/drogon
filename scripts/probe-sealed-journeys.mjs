@@ -1224,6 +1224,7 @@ export async function probeBotPresetManualRun({
   workspaceId,
   output,
 }) {
+  await selectWorkspaceCardById(page, workspaceId);
   const marker = `BOT_${Date.now()}`;
   const beforeAutomations = await runCliJson(cli, ["--data-dir", dataDir, "--json", "automation", "list"]);
   assert.equal(beforeAutomations.ok, true, JSON.stringify(beforeAutomations));
