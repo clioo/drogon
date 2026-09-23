@@ -209,6 +209,41 @@ export type WorktreeAgentRowInputs = {
 };
 
 /**
+ * The unrenamed default title per session, in row order: the harness label
+ * for launched or observed agents, otherwise the strip position's
+ * "Terminal N". Shared by row building and the stale-copy heal so both
+ * sides number shells identically.
+ */
+export function defaultTitleBySession(
+  sessions: Session[],
+  inputs: Pick<WorktreeAgentRowInputs, "stripOrder" | "pinnedIds"> = {},
+): Map<string, string> {
+  const ordered = [...sessions].sort(compareWorktreeAgentRows);
+  const stripSequence = partitionPinnedOrder(
+    reconcileTabOrder(
+      inputs.stripOrder,
+      ordered.map((session) => session.id),
+    ),
+    inputs.pinnedIds ?? [],
+  );
+  const positionById = new Map<string, number>();
+  stripSequence.forEach((id, index) => {
+    if (!positionById.has(id)) positionById.set(id, index + 1);
+  });
+  const defaults = new Map<string, string>();
+  for (const session of ordered) {
+    const resolvedHarnessId = resolveRowHarnessId(session);
+    defaults.set(
+      session.id,
+      resolvedHarnessId
+        ? formatRowHarnessLabel(resolvedHarnessId)
+        : defaultTerminalTabTitle(positionById.get(session.id) ?? 1),
+    );
+  }
+  return defaults;
+}
+
+/**
  * One nested card row per session, in row order. The caller passes the
  * sessions attached to one worktree (already strip-filtered); every
  * session yields a row, including one that never reported — that fallback
@@ -224,17 +259,7 @@ export function buildWorktreeAgentRows(
   // Title numbering reuses the strip's own order reconciliation (same
   // functions TabBar numbers "Terminal N" with), so the row title is the
   // tab title character for character.
-  const stripSequence = partitionPinnedOrder(
-    reconcileTabOrder(
-      inputs.stripOrder,
-      ordered.map((session) => session.id),
-    ),
-    inputs.pinnedIds ?? [],
-  );
-  const positionById = new Map<string, number>();
-  stripSequence.forEach((id, index) => {
-    if (!positionById.has(id)) positionById.set(id, index + 1);
-  });
+  const defaults = defaultTitleBySession(sessions, inputs);
   const customTitles = inputs.customTitles ?? {};
   return ordered.map((session) => {
     const evidenceMs = rowEvidenceMs(session);
@@ -242,13 +267,10 @@ export function buildWorktreeAgentRows(
     // harness reads the harness label, and only a session with no resolved
     // harness keeps `Terminal N`. Numbering still counts every session, so
     // plain shells keep their exact `Terminal N` titles.
-    const resolvedHarnessId = resolveRowHarnessId(session);
     const title = recoveryTabLabel({
       label: resolveTabTitle(
         session.id,
-        resolvedHarnessId
-          ? formatRowHarnessLabel(resolvedHarnessId)
-          : defaultTerminalTabTitle(positionById.get(session.id) ?? 1),
+        defaults.get(session.id) ?? defaultTerminalTabTitle(1),
         customTitles,
       ),
       verdict: session.verdict,

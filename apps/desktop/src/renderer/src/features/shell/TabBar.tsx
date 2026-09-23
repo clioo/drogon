@@ -50,6 +50,7 @@ import {
   reconcileTabOrder,
   resolveTabTitle,
   shiftTabOrder,
+  stripRedundantTitles,
 } from "./tab-order";
 import { defaultTerminalTabTitle } from "./tab-title";
 import {
@@ -571,7 +572,14 @@ export function TabBar({
                     item.id,
                     defaultTitleBySessionId.get(item.id) ??
                       defaultTerminalTabTitle(1),
-                    { ...generatedTitles, ...customTitles },
+                    {
+                      ...generatedTitles,
+                      ...stripRedundantTitles(
+                        customTitles,
+                        defaultTitleBySessionId,
+                        generatedTitles,
+                      ),
+                    },
                   ),
                   verdict: item.verdict,
                   id: item.id,

@@ -12,6 +12,7 @@ import {
   resolveTabTitle,
   saveTabStripState,
   shiftTabOrder,
+  stripRedundantTitles,
   tabStripStorageKey,
   togglePinnedOrder,
 } from "./tab-order";
@@ -408,6 +409,39 @@ describe("resolveTabTitle", () => {
   it("prefers the custom rename", () => {
     expect(resolveTabTitle("a", "Terminal 1", { a: "db" })).toBe("db");
     expect(resolveTabTitle("b", "Terminal 2", { a: "db" })).toBe("Terminal 2");
+  });
+});
+
+describe("stripRedundantTitles", () => {
+  const defaults = new Map([
+    ["a", "Claude"],
+    ["b", "Terminal 2"],
+  ]);
+  it("drops stored copies of the live default and generated titles", () => {
+    expect(
+      stripRedundantTitles({ a: "Claude", b: "Terminal 2" }, defaults, {
+        a: "something else",
+      }),
+    ).toEqual({});
+    expect(
+      stripRedundantTitles({ a: "Reply with exactly sb ok" }, defaults, {
+        a: "Reply with exactly sb ok",
+      }),
+    ).toEqual({});
+  });
+  it("keeps anything the user actually typed", () => {
+    expect(
+      stripRedundantTitles({ a: "mydb", b: "Terminal 2!" }, defaults, {
+        a: "Reply with exactly sb ok",
+      }),
+    ).toEqual({ a: "mydb", b: "Terminal 2!" });
+    expect(stripRedundantTitles(null, defaults)).toEqual({});
+    expect(stripRedundantTitles(undefined, defaults)).toEqual({});
+  });
+  it("drops stale default shapes even after shells renumber", () => {
+    expect(
+      stripRedundantTitles({ b: "Terminal 8", c: "Pi" }, defaults),
+    ).toEqual({});
   });
 });
 

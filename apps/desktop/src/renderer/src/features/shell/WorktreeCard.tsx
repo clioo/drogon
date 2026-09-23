@@ -50,7 +50,7 @@ import {
 } from "./worktree-card-compact-agents";
 import type { WorktreeCardPrDisplay } from "./worktree-card-pr-display";
 import { useWorktreeGitStatus } from "./use-worktree-git-status";
-import { buildWorktreeAgentRows, formatRowHarnessLabel, resolveRowHarnessId } from "./worktree-agent-rows";
+import { buildWorktreeAgentRows, defaultTitleBySession, formatRowHarnessLabel, resolveRowHarnessId } from "./worktree-agent-rows";
 import type { WorktreeAgentRow as WorktreeAgentRowData } from "./worktree-agent-rows";
 import { WorktreeAgentRow } from "./WorktreeAgentRow";
 import { useGeneratedAgentTitles } from "../settings/agent-generated-titles";
@@ -60,6 +60,7 @@ import {
   SidebarCardAttributionContext,
 } from "./sidebar-card-attribution";
 import type { TabStripState } from "./tab-order";
+import { stripRedundantTitles } from "./tab-order";
 import type { CardProperty } from "./workspace-options-state";
 import type { WorktreeIssueLink } from "../../../../shared/worktree-issue-contract";
 import type { WorkspaceStatusDefinition } from "../../../../shared/persistence-contracts/worktree-types";
@@ -313,10 +314,22 @@ export function WorktreeCard({
   // summary counts below derive from these same rows so the two can never
   // disagree — a session that never reported still owns its fallback row.
   const generatedTitles = useGeneratedAgentTitles(attached);
+  // Frozen prefill copies (a rename dialog saved unchanged) carry no
+  // information over the live default or generated title and would render
+  // verbatim forever, defeating the concise provider fold. Heal them for
+  // both the row merge and the verbatim path below; true renames survive.
+  const healedTitles = stripRedundantTitles(
+    tabStrip?.titles,
+    defaultTitleBySession(attached, {
+      stripOrder: tabStrip?.order,
+      pinnedIds: tabStrip?.pinned,
+    }),
+    generatedTitles,
+  );
   const rows = buildWorktreeAgentRows(attached, {
     stripOrder: tabStrip?.order,
     pinnedIds: tabStrip?.pinned,
-    customTitles: { ...generatedTitles, ...tabStrip?.titles },
+    customTitles: { ...generatedTitles, ...healedTitles },
     activeSessionId,
   });
   // Issue #359 (#359 parity): nest rows under the recorded parent session
@@ -639,7 +652,7 @@ export function WorktreeCard({
                       anyRootHasChildren,
                       disabled,
                       onSelect: handleSelectSession,
-                      customTitles: tabStrip?.titles ?? null,
+                      customTitles: healedTitles,
                       generatedTitles,
                     }),
                   )}
@@ -656,7 +669,7 @@ export function WorktreeCard({
                   anyRootHasChildren,
                   disabled,
                   onSelect: handleSelectSession,
-                  customTitles: tabStrip?.titles ?? null,
+                  customTitles: healedTitles,
                   generatedTitles,
                 }),
               )

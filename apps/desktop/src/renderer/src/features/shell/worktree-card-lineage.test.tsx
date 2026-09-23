@@ -17,6 +17,7 @@ import {
   useWorktreeAgentExpansionState,
 } from "./worktree-card-agents-expansion-state";
 import { EMPTY_TAB_STRIP_STATE } from "./tab-order";
+import type { TabStripState } from "./tab-order";
 import { TooltipProvider } from "../../components/ui/tooltip";
 
 function session(id: string, overrides: Partial<Session> = {}): Session {
@@ -61,6 +62,7 @@ function renderCard(
   treeId: string,
   sessions: Session[],
   agentActivityDisplayMode: "compact" | "full" = "full",
+  tabStrip: TabStripState = EMPTY_TAB_STRIP_STATE,
 ) {
   (window as unknown as { drogon?: unknown }).drogon ??= {};
   const selected: string[] = [];
@@ -77,7 +79,7 @@ function renderCard(
         onSelect={() => {}}
         onSelectSession={(id) => selected.push(id)}
         activeSessionId=""
-        tabStrip={EMPTY_TAB_STRIP_STATE}
+        tabStrip={tabStrip}
         onRemove={null}
         onRename={null}
         agentActivityDisplayMode={agentActivityDisplayMode}
@@ -398,6 +400,41 @@ describe("WorktreeCard subagent nesting box (issue #359)", () => {
     );
     expect(probe.result.current.collapsedLineageParents.has("o-1")).toBe(true);
     probe.unmount();
+    view.unmount();
+  });
+
+  test("rows inside the expanded compact pill heal frozen prefill copies", () => {
+    // The compact expansion renders rows through its own verbatim-title
+    // path: a frozen prefill copy ("Claude", a rename dialog saved
+    // unchanged) must heal to the concise provider fold there too, not
+    // just in full rows.
+    const { view } = renderCard(
+      "wt-pill-heal-1",
+      [
+        session("frozen-1", {
+          harnessId: "claude",
+          agentState: "idle",
+          agentStateAuthority: "hook",
+          agentPromptPreview: "Fix the sidebar card order for real",
+          createdAt: "2026-09-08T11:00:00.000Z",
+        }),
+        ...Array.from({ length: 5 }, (_, index) =>
+          session(`s-${index + 2}`, {
+            createdAt: `2026-09-08T11:${30 + index}:00.000Z`,
+          }),
+        ),
+      ],
+      "compact",
+      { ...EMPTY_TAB_STRIP_STATE, titles: { "frozen-1": "Claude" } },
+    );
+    fireEvent.click(view.getByRole("button", { name: /Expand 6 agents/ }));
+    const row = view.container.querySelector(
+      '[data-worktree-agent-row="frozen-1"]',
+    ) as HTMLElement;
+    const primary = row.querySelector(
+      "[data-worktree-agent-primary]",
+    ) as HTMLElement;
+    expect(primary?.textContent).toBe("Claude Code");
     view.unmount();
   });
 
