@@ -82,9 +82,11 @@ describe("createObservationLedger", () => {
   test("keys are independent and incarnation-exact", () => {
     const ledger = createObservationLedger();
     ledger.markApplied("h1:s1:inc-1", 6);
-    expect(ledger.shouldApply("h1:s1:inc-2", 6)).toBe(true);
-    expect(ledger.shouldApply("h2:s1:inc-1", 6)).toBe(true);
-    expect(ledger.shouldApply("h1:s2:inc-1", 6)).toBe(true);
+    // A successful admission alone does not raise a global floor: unrelated
+    // keys remain admissible until proof is actually evicted or pruned.
+    expect(ledger.shouldApply("h1:s1:inc-2", 1)).toBe(true);
+    expect(ledger.shouldApply("h2:s1:inc-1", 1)).toBe(true);
+    expect(ledger.shouldApply("h1:s2:inc-1", 1)).toBe(true);
   });
 
   test("state stays bounded: the oldest proof is evicted first", () => {
@@ -119,6 +121,17 @@ describe("createObservationLedger", () => {
     expect(isStalePollSettlement(5, 8)).toBe(true);
   });
 
+  test("stale markApplied below a retired floor is ignored", () => {
+    const ledger = createObservationLedger(1);
+    ledger.markApplied("h1:a:1", 5);
+    ledger.markApplied("h1:b:1", 6);
+    expect(ledger.size).toBe(1);
+    ledger.markApplied("h1:c:1", 4);
+    expect(ledger.size).toBe(1);
+    expect(ledger.shouldApply("h1:c:1", 4)).toBe(false);
+    expect(ledger.shouldApply("h1:c:1", 6)).toBe(true);
+  });
+
   test("prune keeps live selected proof and drops only unselected history", () => {
     const ledger = createObservationLedger();
     ledger.markApplied("h1:live:1", 6);
@@ -129,7 +142,9 @@ describe("createObservationLedger", () => {
     // Live proof survives: a stale write still loses.
     expect(ledger.shouldApply("h1:live:1", 5)).toBe(false);
     expect(ledger.shouldApply("h1:live:1", 7)).toBe(true);
-    // Pruned history only costs one redundant fresh re-apply.
+    // Pruned history keeps the stale floor: older in-flight reads lose,
+    // genuinely newer reads may re-admit a value.
+    expect(ledger.shouldApply("h1:gone:1", 5)).toBe(false);
     expect(ledger.shouldApply("h1:gone:1", 7)).toBe(true);
   });
 });
