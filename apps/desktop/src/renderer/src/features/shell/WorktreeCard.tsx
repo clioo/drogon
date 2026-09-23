@@ -205,6 +205,7 @@ export function WorktreeCard({
   projectKind,
   implicitFolderWorktree,
   primaryCheckout = false,
+  hasChildWorktrees = false,
   pr = null,
   onSelect,
   cardIndex = 0,
@@ -240,6 +241,8 @@ export function WorktreeCard({
   implicitFolderWorktree: boolean;
   /** The card is the project's main checkout (path === project.path). */
   primaryCheckout?: boolean;
+  /** Worktrees are nested under this card; its fold hides them too. */
+  hasChildWorktrees?: boolean;
   /** Known PR for the chip; null hides it (no PR store yet). */
   pr?: WorktreeCardPrDisplay | null;
   onSelect: (workspaceId: string) => void;
@@ -430,6 +433,15 @@ export function WorktreeCard({
   const showAgentRows =
     showProperties["inline-agents"] !== false && rows.length > 0;
   const showAgentTree = showAgentRows && !cardFolded;
+  // The fold hides the agent list and any nested child worktrees; with
+  // neither there is nothing to fold, so no chevron is offered.
+  const canFold = showAgentRows || hasChildWorktrees;
+  const foldSubject =
+    showAgentRows && hasChildWorktrees
+      ? "agents and workspaces"
+      : hasChildWorktrees
+        ? "workspaces"
+        : "agents";
   return (
     <WorktreeContextMenu
       worktree={worktree}
@@ -462,34 +474,39 @@ export function WorktreeCard({
         aria-label={`${name}${summary.unread ? ", needs input" : ""}${summaryLine ? `, ${summaryLine}` : ""}${note ? `, Note: ${note}` : ""}`}
       >
         {/* The card's own fold (owner's design, 2026-09-21): the leading
-            chevron folds the whole agent list, mirroring the guide. The
+            chevron folds the whole agent list and any nested child
+            worktrees, mirroring the guide. The
             sentence stays visible, so a folded card still says what its
             agents are doing; folding a single agent's branch is the row's
             own chevron's job, never this one's. */}
-        <button
-          type="button"
-          className="shell-worktree-card-fold"
-          data-worktree-card-fold={cardFolded ? "folded" : "expanded"}
-          aria-label={`${cardFolded ? "Show" : "Hide"} agents in ${name}`}
-          aria-expanded={!cardFolded}
-          disabled={disabled}
-          onClick={(event) => {
-            // The card surface selects on click: folding is not selecting.
-            event.preventDefault();
-            event.stopPropagation();
-            toggleCardFolded();
-          }}
-          onMouseDown={stopCardDragPropagation}
-          onPointerDown={stopCardDragPropagation}
-        >
-          <ChevronRight
-            className={
-              "size-3.5 transition-transform duration-150" +
-              (!cardFolded ? " rotate-90" : "")
-            }
-            aria-hidden="true"
-          />
-        </button>
+        {canFold ? (
+          <button
+            type="button"
+            className="shell-worktree-card-fold"
+            data-worktree-card-fold={cardFolded ? "folded" : "expanded"}
+            aria-label={`${cardFolded ? "Show" : "Hide"} ${foldSubject} in ${name}`}
+            aria-expanded={!cardFolded}
+            disabled={disabled}
+            onClick={(event) => {
+              // The card surface selects on click: folding is not selecting.
+              event.preventDefault();
+              event.stopPropagation();
+              toggleCardFolded();
+            }}
+            onMouseDown={stopCardDragPropagation}
+            onPointerDown={stopCardDragPropagation}
+          >
+            <ChevronRight
+              className={
+                "size-3.5 transition-transform duration-150" +
+                (!cardFolded ? " rotate-90" : "")
+              }
+              aria-hidden="true"
+            />
+          </button>
+        ) : (
+          <span className="shell-worktree-card-fold-spacer" aria-hidden="true" />
+        )}
         {/* Status lane (the source's WorktreeCardStatusSlot column, owner's
             vocabulary): the workspace STATUS ring first — the same icon and
             colour the status carries in the board — then the one live

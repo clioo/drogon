@@ -12,7 +12,14 @@
    control; each removable card's kebab menu opens the remove confirm
    dialog. All RPCs run in App; every submit resolves a verbatim error
    string or null on success. */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   Bell,
   ChevronDown,
@@ -47,6 +54,7 @@ import type { ProjectGroup } from "./project-adapter";
 import {
   filterProjectGroups,
   nestProjectWorktrees,
+  visibleNestedWorktrees,
   windowProjectBridge,
   windowTasksBridge,
   windowUiBridge,
@@ -57,6 +65,11 @@ import { AddProjectDialog } from "./AddProjectDialog";
 import { BulkDeleteWorktreesDialog } from "./BulkDeleteWorktreesDialog";
 import { DeleteWorktreeDialog } from "./DeleteWorktreeDialog";
 import { useWorktreeMultiSelect } from "./use-worktree-multi-select";
+import {
+  isWorktreeCardFolded,
+  subscribeWorktreeCardFolds,
+  worktreeCardFoldsVersion,
+} from "./worktree-card-agents-expansion-state";
 import type { WorktreeMultiSelectBinding } from "./use-worktree-multi-select";
 import { formatWorktreeSelectionSummary } from "./worktree-multi-select";
 import { readSkipDeleteWorktreeConfirm } from "./DeleteWorktreeSkipConfirmOption";
@@ -1135,6 +1148,11 @@ export function ProjectList({
   // Shift ranges are measured in what the sidebar actually draws, in the
   // order it draws it -- including the cross-project regroupings, where a
   // range can legitimately span buckets.
+  const cardFoldsVersion = useSyncExternalStore(
+    subscribeWorktreeCardFolds,
+    worktreeCardFoldsVersion,
+    worktreeCardFoldsVersion,
+  );
   const selectionOrder = useMemo(() => {
     if (workspaceOptions.groupBy === "workspace-status")
       return statusGroups.flatMap((group) =>
@@ -1145,9 +1163,12 @@ export function ProjectList({
         group.entries.map((entry) => entry.worktree.id),
       );
     return displayed.flatMap((group) =>
-      nestProjectWorktrees(group.worktrees).map((item) => item.worktree.id),
+      visibleNestedWorktrees(
+        nestProjectWorktrees(group.worktrees),
+        isWorktreeCardFolded,
+      ).map((item) => item.worktree.id),
     );
-  }, [workspaceOptions.groupBy, statusGroups, prGroups, displayed]);
+  }, [workspaceOptions.groupBy, statusGroups, prGroups, displayed, cardFoldsVersion]);
   const commitWorktreeUpdate = useCallback(
     (
       input: { worktreeId: string } & Partial<
@@ -1799,6 +1820,13 @@ function ProjectRow({
   cardLayout?: "comfortable" | "compact";
   graphBridge?: GraphBridge | null;
 }) {
+  // Re-render when any card fold changes: a folded card hides its child
+  // worktrees, which are rendered here as sibling cards.
+  useSyncExternalStore(
+    subscribeWorktreeCardFolds,
+    worktreeCardFoldsVersion,
+    worktreeCardFoldsVersion,
+  );
   const project: Project = group.project;
   // Kind decides the control's copy, never its presence (Orca's
   // repo-header-create-state rule): a folder project -- including the ones
@@ -1909,6 +1937,7 @@ function ProjectRow({
           const renderCard = (
             worktree: Worktree,
             depth: number,
+            hasChildWorktrees: boolean,
           ): React.JSX.Element => {
             const currentIndex = cardIndex++;
             const implicitFolderWorktree = isImplicitFolderWorktree(worktree);
@@ -1928,6 +1957,7 @@ function ProjectRow({
                 <WorktreeCard
                   worktree={worktree}
                   primaryCheckout={primaryCheckout}
+                  hasChildWorktrees={hasChildWorktrees}
                   workspaces={workspaces}
                   sessions={sessions}
                   selected={worktree.workspaceId === selectedWorkspaceId}
@@ -1989,8 +2019,11 @@ function ProjectRow({
               </div>
             );
           };
-          return nestProjectWorktrees(group.worktrees).map(
-            ({ worktree, depth }) => renderCard(worktree, depth),
+          return visibleNestedWorktrees(
+            nestProjectWorktrees(group.worktrees),
+            isWorktreeCardFolded,
+          ).map(({ worktree, depth, hasChildren }) =>
+            renderCard(worktree, depth, hasChildren),
           );
         })()}
       </div>

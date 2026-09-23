@@ -15,6 +15,7 @@ import {
   loadProjectView,
   nestProjectWorktrees,
   projectWorkspacesAsFolderProjects,
+  visibleNestedWorktrees,
   relativeActivityTime,
   reloadWorkspacesSnapshot,
   subscribeProjectRegistryRefresh,
@@ -207,6 +208,54 @@ test("sidebar nesting keeps parent order and flattens missing or cyclic parents"
   const cycleA = { ...base("cycle-a"), parentWorktreeId: "cycle-b" };
   const cycleB = { ...base("cycle-b"), parentWorktreeId: "cycle-a" };
   expect(nestProjectWorktrees([cycleA, cycleB])).toHaveLength(2);
+});
+
+test("a folded card hides every nested descendant but keeps itself and its siblings", () => {
+  const base = (id: string, parentWorktreeId?: string): Worktree => ({
+    id,
+    projectId: "p1",
+    workspaceId: id,
+    path: `/repo/${id}`,
+    branch: id,
+    head: "",
+    baseRef: null,
+    createdAt: "",
+    ...(parentWorktreeId ? { parentWorktreeId } : {}),
+  });
+  const rows = nestProjectWorktrees([
+    base("root"),
+    base("child-a", "root"),
+    base("grandchild", "child-a"),
+    base("child-b", "root"),
+    base("sibling"),
+  ]);
+  const shape = (folded: string[]) =>
+    visibleNestedWorktrees(rows, (id) => folded.includes(id)).map((row) => [
+      row.worktree.id,
+      row.depth,
+      row.hasChildren,
+    ]);
+  expect(shape([])).toEqual([
+    ["root", 0, true],
+    ["child-a", 1, true],
+    ["grandchild", 2, false],
+    ["child-b", 1, false],
+    ["sibling", 0, false],
+  ]);
+  // Folding the root hides its whole subtree, never the next root.
+  expect(shape(["root"])).toEqual([
+    ["root", 0, true],
+    ["sibling", 0, false],
+  ]);
+  // Folding a middle card hides only its own branch.
+  expect(shape(["child-a"])).toEqual([
+    ["root", 0, true],
+    ["child-a", 1, true],
+    ["child-b", 1, false],
+    ["sibling", 0, false],
+  ]);
+  // A fold on a card without children hides nothing.
+  expect(shape(["sibling", "grandchild"])).toHaveLength(5);
 });
 
 test("orphan worktrees never render without their project", () => {

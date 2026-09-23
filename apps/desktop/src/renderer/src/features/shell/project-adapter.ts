@@ -392,6 +392,31 @@ export function nestProjectWorktrees(
 }
 
 /**
+ * Applies the card folds to a nested list: a folded card stays visible but
+ * its descendants (the rows after it at a greater depth) are hidden.
+ * `hasChildren` reports the structural children whether or not they are
+ * currently hidden, so the card can still offer to unfold them.
+ */
+export function visibleNestedWorktrees(
+  rows: Array<{ worktree: Worktree; depth: number }>,
+  isFolded: (worktreeId: string) => boolean,
+): Array<{ worktree: Worktree; depth: number; hasChildren: boolean }> {
+  const visible: Array<{ worktree: Worktree; depth: number; hasChildren: boolean }> = [];
+  let hiddenBelowDepth: number | null = null;
+  rows.forEach((row, index) => {
+    if (hiddenBelowDepth !== null) {
+      if (row.depth > hiddenBelowDepth) return;
+      hiddenBelowDepth = null;
+    }
+    const next = rows[index + 1];
+    const hasChildren = next !== undefined && next.depth > row.depth;
+    visible.push({ ...row, hasChildren });
+    if (hasChildren && isFolded(row.worktree.id)) hiddenBelowDepth = row.depth;
+  });
+  return visible;
+}
+
+/**
  * Loads the sidebar view: real projects/worktrees when the service
  * advertises both capabilities and implements the RPCs, otherwise the
  * workspace projection above. An RPC failure also falls back to the

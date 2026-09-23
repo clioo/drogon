@@ -1676,6 +1676,12 @@ footer[data-testid="status-bar"] {
   opacity: 0.4;
   cursor: default;
 }
+/* Keeps the status lane aligned on cards with nothing to fold. */
+.shell-worktree-card-fold-spacer {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
 /* Right-side card affordances (fork MetaIconBadge shell): terminal marker
    and branch marker, ahead of the kebab. */
 .shell-worktree-card-affordances {

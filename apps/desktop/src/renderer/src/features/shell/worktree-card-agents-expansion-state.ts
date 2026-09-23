@@ -275,6 +275,31 @@ function persistExpansionState(
   persistLineageCollapseThrough();
 }
 
+// The card fold also hides the card's child worktrees, which ProjectList
+// renders as sibling cards: it subscribes here so a toggle inside one card
+// re-renders the list that owns those siblings.
+const cardFoldListeners = new Set<() => void>();
+let cardFoldVersion = 0;
+
+export function subscribeWorktreeCardFolds(listener: () => void): () => void {
+  cardFoldListeners.add(listener);
+  return () => cardFoldListeners.delete(listener);
+}
+
+/** Changes whenever any card's fold changes (useSyncExternalStore snapshot). */
+export function worktreeCardFoldsVersion(): number {
+  return cardFoldVersion;
+}
+
+export function isWorktreeCardFolded(worktreeId: string): boolean {
+  return readExpansionState(worktreeId).cardFolded;
+}
+
+function notifyCardFolds(): void {
+  cardFoldVersion += 1;
+  for (const listener of [...cardFoldListeners]) listener();
+}
+
 export type WorktreeAgentExpansionControls = {
   collapsedLineageParents: ReadonlySet<string>;
   compactRootListExpanded: boolean;
@@ -352,6 +377,7 @@ export function useWorktreeAgentExpansionState(
   const toggleCardFolded = useCallback(() => {
     const base = readExpansionState(worktreeId);
     commit({ ...base, cardFolded: !base.cardFolded });
+    notifyCardFolds();
   }, [commit, worktreeId]);
 
   return {
@@ -367,6 +393,7 @@ export function useWorktreeAgentExpansionState(
 export function clearWorktreeAgentExpansionStateForTests(): void {
   expansionByWorktreeId.clear();
   hydratedWorktreeIds.clear();
+  cardFoldVersion += 1;
   const storage = defaultStorage();
   if (storage) {
     try {
