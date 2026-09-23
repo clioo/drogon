@@ -684,7 +684,12 @@ try {
   await page
     .getByRole("menuitem", { name: /^New Terminal/ })
     .click();
-  await page.getByRole("tab").first().waitFor();
+  const terminalTab = page.locator(
+    '[role="tablist"][aria-label="Sessions"] [role="tab"]',
+  ).last();
+  await terminalTab.waitFor();
+  const originalSessionId = await terminalTab.getAttribute("data-tab-id");
+  assert.ok(originalSessionId, "new terminal tab must expose its session id");
   await page.locator(".xterm-helper-textarea").focus();
   const nonce = randomUUID().replaceAll("-", "");
   const marker = `DROGON_${nonce}`;
@@ -696,10 +701,12 @@ try {
   await page.keyboard.press("Enter");
   await waitForTerminalText(page, marker);
   report.checks.push("rendered-terminal-command-output");
-  const original = await page.evaluate(async (id) => {
-    const value = await window.drogon.sessions(id);
-    return value.ok ? value.result.sessions[0] : null;
-  }, registered.id);
+  const original = await page.evaluate(async ({ workspaceId, sessionId }) => {
+    const value = await window.drogon.sessions(workspaceId);
+    return value.ok
+      ? value.result.sessions.find((session) => session.id === sessionId) ?? null
+      : null;
+  }, { workspaceId: registered.id, sessionId: originalSessionId });
   assert.ok(original?.incarnation);
   if (process.platform !== "win32") {
     report.checks.push(...await probeTerminalInputLayout({ page, session: original, output, expectedHome: privateEnvironment.home, dataDir }));
@@ -724,10 +731,12 @@ try {
   }));
   await page.reload();
   await waitForTerminalText(page, marker);
-  const reconnected = await page.evaluate(async (id) => {
-    const value = await window.drogon.sessions(id);
-    return value.ok ? value.result.sessions[0] : null;
-  }, registered.id);
+  const reconnected = await page.evaluate(async ({ workspaceId, sessionId }) => {
+    const value = await window.drogon.sessions(workspaceId);
+    return value.ok
+      ? value.result.sessions.find((session) => session.id === sessionId) ?? null
+      : null;
+  }, { workspaceId: registered.id, sessionId: originalSessionId });
   assert.equal(reconnected?.id, original.id);
   assert.equal(reconnected?.incarnation, original.incarnation);
   report.checks.push("renderer-reload-retains-exact-session-and-output");
