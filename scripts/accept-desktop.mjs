@@ -678,6 +678,9 @@ try {
       skip: withAgents || withSessions ? [] : ["pi"],
     });
   await page
+    .getByRole("button", { name: `Select ${registered.name}`, exact: true })
+    .click();
+  await page
     .getByRole("button", { name: "New tab", exact: true })
     .last()
     .click();
