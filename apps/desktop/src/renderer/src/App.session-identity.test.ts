@@ -31,6 +31,7 @@ import {
   pollSidebarSessions,
   type SidebarSessionCollector,
 } from "./features/shell/sidebar-session-source";
+import { sidebarSessionView } from "./features/shell/sidebar-sessions";
 import {
   OBSERVATION_LEDGER_MAX_ENTRIES,
   createObservationLedger,
@@ -1010,6 +1011,90 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     expect(settled.sessions).toBe(next);
     expect(settled.seq).toBe(7);
     expect(settled.freshKeys).toBe(keys);
+  });
+
+  test("an older host-wide poll cannot render Pi after a selected clear was pruned", async () => {
+    const ledger = createObservationLedger();
+    const workspaceProof = new Map<string, number>();
+    const collector = createSidebarSessionCollector();
+    let resolveHostWide!: (value: { ok: boolean; sessions?: Session[] }) => void;
+    const pending = pollSidebarSessions({
+      collector: collector.fork(),
+      workspaceIds: ["w1", "w2"],
+      fetchHostWide: () => new Promise((resolve) => {
+        resolveHostWide = resolve;
+      }),
+      fetchScoped: async () => ({ ok: false }),
+    });
+
+    settleSelectedWorkspaceFetch({
+      visible: [session("s1")],
+      workspaceId: "w1",
+      requestSeq: 2,
+      ledger,
+      workspaceProof,
+    });
+    pruneObservationProofForSessions(ledger, []);
+    settleSelectedWorkspaceFetch({
+      visible: [],
+      workspaceId: "w2",
+      requestSeq: 3,
+      ledger,
+      workspaceProof,
+    });
+
+    resolveHostWide({ ok: true, sessions: [session("s1", freshPi)] });
+    const settled = settleSidebarPoll([], await pending, 1, workspaceProof);
+    const projection = planQueuedAdopt(settled.sessions, "w1", never, {
+      seq: settled.seq,
+      freshKeys: settled.freshKeys,
+      freshWorkspaceIds: settled.freshWorkspaceIds,
+      ledger,
+      workspaceProof,
+    });
+    commitObservationProof(ledger, projection.appliedObservations, settled.seq);
+    const selected = applyQueuedAdopt([], projection);
+    const rendered = sidebarSessionView(settled.sessions, selected, new Set());
+    expect(rendered.find((item) => item.id === "s1")?.observedHarnessId ?? null).not.toBe("pi");
+  });
+
+  test("an older host-wide poll cannot resurrect membership after a selected empty read", async () => {
+    const ledger = createObservationLedger();
+    const workspaceProof = new Map<string, number>();
+    const collector = createSidebarSessionCollector();
+    let resolveHostWide!: (value: { ok: boolean; sessions?: Session[] }) => void;
+    const pending = pollSidebarSessions({
+      collector: collector.fork(),
+      workspaceIds: ["w1"],
+      fetchHostWide: () => new Promise((resolve) => {
+        resolveHostWide = resolve;
+      }),
+      fetchScoped: async () => ({ ok: false }),
+    });
+
+    const newer = settleSelectedWorkspaceFetch({
+      visible: [],
+      workspaceId: "w1",
+      requestSeq: 2,
+      ledger,
+      workspaceProof,
+    });
+    const selected = applySelectedFetch([session("s1")], newer.plan!);
+
+    resolveHostWide({ ok: true, sessions: [session("s1", freshPi)] });
+    const settled = settleSidebarPoll([], await pending, 1, workspaceProof);
+    const projection = planQueuedAdopt(settled.sessions, "w1", never, {
+      seq: settled.seq,
+      freshKeys: settled.freshKeys,
+      freshWorkspaceIds: settled.freshWorkspaceIds,
+      ledger,
+      workspaceProof,
+    });
+    commitObservationProof(ledger, projection.appliedObservations, settled.seq);
+    const tabs = applyQueuedAdopt(selected, projection);
+
+    expect(tabs.some((item) => item.id === "s1")).toBe(false);
+    expect(sidebarSessionView(settled.sessions, tabs, new Set()).some((item) => item.id === "s1")).toBe(false);
   });
 
   test("an unchanged successful read re-proves the selected copy after a stale selected-fetch overwrite", () => {

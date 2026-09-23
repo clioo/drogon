@@ -595,8 +595,10 @@ export function sameBotsLoadResult(
  */
 export type ObservationProvenance = {
   freshKeys?: ReadonlySet<string>;
+  freshWorkspaceIds?: ReadonlySet<string>;
   seq?: number;
   ledger?: ObservationLedger;
+  workspaceProof?: ReadonlyMap<string, number>;
 };
 
 export type AdoptOutOfBandPlan = {
@@ -789,10 +791,21 @@ export function planQueuedAdopt(
   provenance: ObservationProvenance,
 ): QueuedAdoptProjection {
   const freshKeys = provenance.freshKeys;
+  const freshWorkspaceIds = provenance.freshWorkspaceIds;
   const seq = provenance.seq;
   const ledger = provenance.ledger;
-  const ordered = (key: string): boolean => {
+  const workspaceProof = provenance.workspaceProof;
+  const workspaceOrdered = (workspaceId: string): boolean => {
+    if (freshWorkspaceIds !== undefined && !freshWorkspaceIds.has(workspaceId))
+      return false;
+    if (seq !== undefined && workspaceProof !== undefined)
+      return !isStaleWorkspaceRead(workspaceProof, workspaceId, seq);
+    return true;
+  };
+  const ordered = (item: Session): boolean => {
+    const key = observationKeyOf(item);
     if (freshKeys !== undefined && !freshKeys.has(key)) return false;
+    if (!workspaceOrdered(item.workspaceId)) return false;
     if (seq !== undefined && ledger !== undefined)
       return ledger.shouldApply(key, seq);
     return true;
@@ -803,7 +816,7 @@ export function planQueuedAdopt(
   // dismissal-filtered for adoption). Both lists are frozen here; the
   // projection decides append vs overwrite against the actual rows.
   const admitted = hostWide.filter(
-    (item) => item.workspaceId === workspaceId && ordered(observationKeyOf(item)),
+    (item) => item.workspaceId === workspaceId && ordered(item),
   );
   const adopted = admitted
     .filter((item) => !isHidden(item))
@@ -989,6 +1002,8 @@ export type SidebarPollSettlement = {
   seq: number;
   /** Exact keys this poll actually read — the proof's scope. */
   freshKeys: ReadonlySet<string>;
+  /** Workspace ids whose membership this poll actually read and may adopt. */
+  freshWorkspaceIds: ReadonlySet<string>;
   /** True when `sessions` is a new reference the caller must commit. */
   dataChanged: boolean;
 };
@@ -1031,6 +1046,8 @@ export function isStaleWorkspaceRead(
   return last !== undefined && requestSeq < last;
 }
 
+let latestWorkspaceReadProof: ReadonlyMap<string, number> | null = null;
+
 export function settleSelectedWorkspaceFetch(args: {
   visible: readonly Session[];
   workspaceId: string;
@@ -1046,6 +1063,7 @@ export function settleSelectedWorkspaceFetch(args: {
   const plan = planSelectedFetch(args.visible, args.requestSeq, args.ledger);
   commitObservationProof(args.ledger, plan.appliedObservations, args.requestSeq);
   markWorkspaceReadProof(args.workspaceProof, [args.workspaceId], args.requestSeq);
+  latestWorkspaceReadProof = args.workspaceProof;
   return { stale: false, plan };
 }
 
@@ -1053,12 +1071,40 @@ export function settleSidebarPoll(
   previousSessions: Session[],
   view: SidebarSessionSourceView,
   requestSeq: number,
+  workspaceProof: ReadonlyMap<string, number> | null = latestWorkspaceReadProof,
 ): SidebarPollSettlement {
-  const dataChanged = !sameSessions(previousSessions, view.sessions);
+  const staleWorkspaces = new Set<string>();
+  if (workspaceProof) {
+    for (const session of view.sessions) {
+      if (isStaleWorkspaceRead(workspaceProof, session.workspaceId, requestSeq))
+        staleWorkspaces.add(session.workspaceId);
+    }
+  }
+  const sessions =
+    staleWorkspaces.size === 0
+      ? view.sessions
+      : view.sessions.filter((session) => !staleWorkspaces.has(session.workspaceId));
+  const remainingFreshKeys =
+    staleWorkspaces.size === 0
+      ? view.freshKeys
+      : new Set(
+          [...view.freshKeys].filter((key) =>
+            sessions.some((session) => observationKeyOf(session) === key),
+          ),
+        );
+  const dataChanged = !sameSessions(previousSessions, sessions);
   return {
-    sessions: dataChanged ? view.sessions : previousSessions,
+    sessions: dataChanged ? sessions : previousSessions,
     seq: requestSeq,
-    freshKeys: view.freshKeys,
+    freshKeys: remainingFreshKeys,
+    freshWorkspaceIds:
+      staleWorkspaces.size === 0
+        ? view.freshWorkspaceIds
+        : new Set(
+            [...view.freshWorkspaceIds].filter(
+              (workspaceId) => !staleWorkspaces.has(workspaceId),
+            ),
+          ),
     dataChanged,
   };
 }
@@ -2895,7 +2941,8 @@ export function App() {
   const sidebarObservationProvenance = useRef<{
     seq: number;
     freshKeys: ReadonlySet<string>;
-  }>({ seq: 0, freshKeys: new Set() });
+    freshWorkspaceIds: ReadonlySet<string>;
+  }>({ seq: 0, freshKeys: new Set(), freshWorkspaceIds: new Set() });
   // R3 selected-copy reconciliation, shared by the adopt effect below and
   // the poll settlement further down. Immutable successful-read facts are
   // admitted outside React (`planQueuedAdopt` over the poll rows, never a
@@ -2921,8 +2968,10 @@ export function App() {
       isHidden,
       {
         freshKeys: provenance.freshKeys,
+        freshWorkspaceIds: provenance.freshWorkspaceIds,
         seq: provenance.seq,
         ledger,
+        workspaceProof: workspaceReadProof.current,
       },
     );
     if (
@@ -3118,10 +3167,12 @@ export function App() {
           allBotSessionsRef.current,
           view,
           requestSeq,
+          workspaceReadProof.current,
         );
         sidebarObservationProvenance.current = {
           seq: settled.seq,
           freshKeys: settled.freshKeys,
+          freshWorkspaceIds: settled.freshWorkspaceIds,
         };
         if (settled.dataChanged) {
           allBotSessionsRef.current = settled.sessions;
