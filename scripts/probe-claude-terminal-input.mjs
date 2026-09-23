@@ -50,7 +50,14 @@ export async function probeClaudeTerminalInput({ page, workspaceId, output }) {
   assert.equal(session.harnessId, "claude");
   let stage = "startup";
   try {
-    const tab = page.locator(`[role="tab"][data-tab-id="${session.id}"]`);
+    // The bridge launch creates a daemon session but intentionally does not
+    // select a renderer tab. Activate the visible sidebar row as a user would
+    // before probing keyboard input; otherwise this waits on a tab the shell
+    // has no reason to mount.
+    const sidebarSession = page.locator(`[data-worktree-agent-row="${CSS.escape(session.id)}"]`);
+    await sidebarSession.waitFor();
+    await sidebarSession.click();
+    const tab = page.locator(`[role="tab"][data-tab-id="${CSS.escape(session.id)}"]`);
     await tab.waitFor();
     await tab.click();
     await page.waitForFunction((id) => {
