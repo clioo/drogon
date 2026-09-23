@@ -153,6 +153,11 @@ export async function probeClaudeTerminalInput({ page, workspaceId, output }) {
       delete window.__drogonClaudeKeyboardProbe;
     });
     const tab = page.locator(`[role="tab"][data-tab-id="${session.id}"]`);
-    if (await tab.count()) await tab.getByRole("button", { name: /^Close / }).click();
+    if (await tab.count()) {
+      await tab.getByRole("button", { name: /^Close / }).click();
+      const stopDialog = page.getByRole("dialog", { name: "Stop this agent?" });
+      if (await stopDialog.count())
+        await stopDialog.getByRole("button", { name: "Stop agent", exact: true }).click();
+    }
   }
 }
