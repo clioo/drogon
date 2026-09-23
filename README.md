@@ -315,15 +315,25 @@ make install                 # build, replace /Applications/Drogon.app, restart
 make install-main            # the same, from a fresh origin/main build
 make install BUNDLE=<path>   # install an already-packaged Drogon.app
 make install FLAGS=--no-restart
+make install FLAGS=--stop-daemon   # the old order: stop the service (and its sessions) first
 ```
 
 It runs the toolchain preflight (`node scripts/check-toolchains.mjs`) before
-building, then quits the running app, stops its detached daemon through that
-bundle's own scoped `drogon-stop-daemon`, swaps the bundle with two renames
+building, then quits the running app, swaps the bundle with two renames
 (keeping the previous build beside it for rollback), relaunches, and then
-reports whether the new service actually came back. Packaging refuses a dirty
+reports whether the service now runs the new build. Packaging refuses a dirty
 checkout, so commit first. The lower-level flow below stays available and is
 what a release uses.
+
+**Installing never interrupts running sessions.** The detached daemon owns
+every terminal and agent, so the install leaves it running. The relaunched
+app sees a service from another build and asks it to hand over
+(`runtime.handoff`): the old service pauses its sessions, passes each live
+PTY and its scrollback to the bundled service started with
+`--adopt-handoff`, and exits once that one serves. Shells and agents keep
+running in the same tabs, with the same process. A service that cannot hand
+over (one older than this feature, or with a Mentu recipe run in flight)
+stays attached as "Service update pending" until you restart it.
 
 `make install` always targets `/Applications/Drogon.app` — it quits the
 running app and replaces the bundle, so there is no isolated-prefix mode.

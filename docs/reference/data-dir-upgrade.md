@@ -85,7 +85,7 @@ anything — the directory is untouched.
 | Harness hook overlays | `<data-dir>/harness-hooks/<harness>/<nonce>/` | no | per-session, nonce-scoped, cleaned up with the session; a newer build simply writes new nonces |
 | Mentu runtime | `<data-dir>/mentu/runtime/` | optional; sha-verified on install | Apple silicon macOS users install it explicitly in Settings; `mentu.runtime_install` verifies the pinned sha before swapping |
 | Pre-migration backups | `<data-dir>/backups/pre-migration-*/` | n/a (manifest) | see §3 |
-| Session scrollback | in-memory only (`ring.rs`, 1 MiB/session) | n/a | daemon-owned PTYs die with the daemon by design; session *records* (sqlite) restore verdict/state across restart |
+| Session scrollback | in-memory only (`ring.rs`, 1 MiB/session) | handoff package `format` 1 | an update hands live PTYs and their rings to the new daemon (`session_handoff.rs`, `drogond/src/handoff.rs`); a daemon that stops or crashes instead takes its PTYs with it, and session *records* (sqlite) restore verdict/state across restart |
 
 ## 6. Electron userData stores
 

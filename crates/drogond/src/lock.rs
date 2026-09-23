@@ -93,6 +93,27 @@ mod unix {
 #[cfg(unix)]
 pub use unix::{DataDirLock, acquire_exclusive};
 
+/// [`acquire_exclusive`], retried until `wait` runs out: a handoff
+/// successor locks the directory the moment its predecessor lets go.
+#[cfg(unix)]
+pub fn acquire_exclusive_within(
+    data_dir: &std::path::Path,
+    wait: std::time::Duration,
+) -> std::io::Result<DataDirLock> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match acquire_exclusive(data_dir) {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AddrInUse
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            other => return other,
+        }
+    }
+}
+
 // Windows uses the OS file lock; data-file ACLs are inherited from the parent.
 #[cfg(windows)]
 mod windows {

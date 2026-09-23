@@ -224,13 +224,13 @@ pub(crate) fn resolve_harness(_pgid: i32) -> Option<String> {
 /// Foreground process group of the session PTY's master, via
 /// `tcgetpgrp` (portable-pty's `process_group_leader`).
 #[cfg(unix)]
-pub(crate) fn foreground_pgid(master: &dyn portable_pty::MasterPty) -> Option<i32> {
+pub(crate) fn foreground_pgid(master: &crate::session::PtyMaster) -> Option<i32> {
     master.process_group_leader().filter(|pid| *pid > 0)
 }
 
 /// Non-unix stub: no foreground group exists.
 #[cfg(not(unix))]
-pub(crate) fn foreground_pgid(_master: &dyn portable_pty::MasterPty) -> Option<i32> {
+pub(crate) fn foreground_pgid(_master: &crate::session::PtyMaster) -> Option<i32> {
     None
 }
 

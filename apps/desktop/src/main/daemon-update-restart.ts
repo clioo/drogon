@@ -11,6 +11,13 @@
 // the renderer's restart affordance lets the USER choose the destructive
 // stop-all path. A daemon that died between decision and shutdown is
 // replaced directly: the endpoint is free and nothing remains to quiesce.
+//
+// A daemon that refuses only because sessions are running, and that can
+// hand them over (`runtime.session-handoff.v1`), is replaced without
+// stopping anything: it parks its sessions, the bundled build starts with
+// `--adopt-handoff` and takes their PTYs over, and the old one exits once
+// the new one serves. If the new one never takes over, the old one resumes
+// its sessions and the outcome is the same honest "pending".
 import { bootstrapNativeRuntime } from "./native-runtime-bootstrap";
 import type { LocalEndpointObservation } from "./native-client";
 import { waitForEndpointAbsent } from "./daemon-restart";
@@ -32,10 +39,20 @@ export type DaemonUpdateRestartDeps = {
   shutdownWaitMs: number;
   /** One budget for the respawn, same role as the startup bootstrap budget. */
   spawnDeadlineMs: number;
+  /** Bound for a handoff successor to answer as the new service. Longer
+   *  than the old daemon's own wait for a successor, so a successor that
+   *  never arrives is seen as the old service resuming, not as silence. */
+  handoffDeadlineMs: number;
 };
+
+/** Status capability of a service that can hand its sessions over. */
+export const SESSION_HANDOFF_CAPABILITY = "runtime.session-handoff.v1";
 
 export type DaemonUpdateRestartOutcome =
   | { kind: "restarted" }
+  /** The bundled build now serves, and every running session moved to it
+   *  without stopping. */
+  | { kind: "handed-off"; sessions: number }
   /** The daemon is still needed (or cannot quiesce): keep it attached and
    *  tell the user the update is pending a service restart they choose. */
   | { kind: "pending"; reason: string }
@@ -87,10 +104,13 @@ export async function restartChangedDaemon(
     };
 
   // Graceful by construction: no session is ever stopped here. A busy or
-  // old daemon refuses and stays attached — that is the pending state.
+  // old daemon refuses and stays attached — that is the pending state,
+  // unless it can hand its running sessions to the new build instead.
   const shutdown = await deps.call("runtime.shutdown", { ...fences });
   if (!shutdown.ok) {
     const code = shutdown.error.code;
+    if (code === "runtime_busy" && canHandOff(status.result))
+      return handOff(deps, fences, shutdown.error.message);
     const contractGap =
       code === "internal_error" &&
       shutdown.error.message.includes("expected contract");
@@ -135,15 +155,92 @@ export async function restartChangedDaemon(
   return respawn(deps);
 }
 
+function canHandOff(status: unknown): boolean {
+  const capabilities = (status as { capabilities?: unknown }).capabilities;
+  return (
+    Array.isArray(capabilities) &&
+    capabilities.includes(SESSION_HANDOFF_CAPABILITY)
+  );
+}
+
+async function handOff(
+  deps: DaemonUpdateRestartDeps,
+  fences: { hostId: string; serviceInstanceId: string },
+  busyReason: string,
+): Promise<DaemonUpdateRestartOutcome> {
+  const accepted = await deps.call("runtime.handoff", { ...fences });
+  if (!accepted.ok)
+    return {
+      kind: "pending",
+      reason: `The running service could not quiesce (runtime_busy): ${busyReason}. It could not hand its sessions over either (${accepted.error.code}): ${accepted.error.message}`,
+    };
+  const sessions = Number(
+    (accepted.result as { sessions?: unknown }).sessions ?? 0,
+  );
+  try {
+    await deps.spawn(
+      deps.target.binaryPath,
+      [...deps.target.args, "--adopt-handoff"],
+      deps.env,
+    );
+  } catch (error) {
+    // The old service is parked waiting for a successor that will never
+    // come; it resumes on its own once its wait runs out.
+    return {
+      kind: "pending",
+      reason: `The new service could not be started to take the sessions over (${
+        error instanceof Error ? error.message : String(error)
+      }); the running service keeps them.`,
+    };
+  }
+  const bundleDigest = await promisedBundleDigest(deps);
+  const deadline = Date.now() + deps.handoffDeadlineMs;
+  for (;;) {
+    const status = await deps.call("status", {});
+    if (status.ok) {
+      const result = status.result as {
+        serviceInstanceId?: string;
+        daemonArtifactSha256?: string | null;
+      };
+      if (result.serviceInstanceId === fences.serviceInstanceId)
+        return {
+          kind: "pending",
+          reason:
+            "The new service did not take the sessions over, so the running service resumed them.",
+        };
+      if (
+        bundleDigest !== null &&
+        (result.daemonArtifactSha256 ?? null) === bundleDigest
+      )
+        return { kind: "handed-off", sessions };
+      return {
+        kind: "failed",
+        reason:
+          "A different service instance answered after the handoff, and its binary identity does not match this install.",
+      };
+    }
+    if (Date.now() >= deadline)
+      return {
+        kind: "failed",
+        reason:
+          "No service answered after the handoff; Drogon's service may need to be started again.",
+      };
+    await deps.sleep(deps.pollIntervalMs);
+  }
+}
+
+/** A plain restart never moves sessions, so it never reports a handoff. */
+type RespawnOutcome = Exclude<DaemonUpdateRestartOutcome, { kind: "handed-off" }>;
+
 async function respawn(
   deps: DaemonUpdateRestartDeps,
-): Promise<DaemonUpdateRestartOutcome> {
+): Promise<RespawnOutcome> {
   // A replacement that dies instantly has usually raced the old daemon's
   // data-dir lock release: the endpoint frees before the process-lifetime
   // flock does, so the replacement blocks on `Engine::open` and exits. Wait
   // for full teardown and retry, bounded — never a silent give-up.
   const attempts = 3;
-  let last: DaemonUpdateRestartOutcome = {
+  let last: RespawnOutcome = {
     kind: "failed",
     reason: "the replacement was not started",
   };
@@ -160,9 +257,7 @@ async function respawn(
 
 async function respawnOnce(
   deps: DaemonUpdateRestartDeps,
-): Promise<
-  DaemonUpdateRestartOutcome | { kind: "already-verified-healthy" }
-> {
+): Promise<RespawnOutcome | { kind: "already-verified-healthy" }> {
   const outcome = await bootstrapNativeRuntime({
     // Same explicit-operator-intent override the manual restart uses: the
     // caller has already decided a replacement must be started from a

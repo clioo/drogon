@@ -36,6 +36,7 @@ test("parseInstallArgs defaults to packaging this checkout and restarting", () =
     fromMain: false,
     applications: "/Applications",
     restart: true,
+    stopDaemon: false,
     keep: 1,
     source: "checkout",
   });
@@ -48,6 +49,7 @@ test("parseInstallArgs reads every supported flag", () => {
     "--applications",
     "/elsewhere",
     "--no-restart",
+    "--stop-daemon",
     "--keep",
     "3",
   ]);
@@ -55,6 +57,7 @@ test("parseInstallArgs reads every supported flag", () => {
   assert.equal(options.bundle, "/tmp/x/Drogon.app");
   assert.equal(options.applications, "/elsewhere");
   assert.equal(options.restart, false);
+  assert.equal(options.stopDaemon, true);
   assert.equal(options.keep, 3);
 });
 
@@ -266,6 +269,14 @@ test("install swaps the app, keeps one rollback copy and prunes the rest", darwi
 
   const upgrade = await install(["--bundle", second, ...flags]);
   assert.ok(upgrade.previousBundle?.includes(PREVIOUS_PREFIX));
+  // An upgrade leaves the running service (and every session it owns) for
+  // the relaunched app to hand over; it is never stopped by default.
+  assert.deepEqual(upgrade.stoppedDaemon, {
+    via: "kept-for-handoff",
+    daemon: null,
+    survivors: [],
+    verdict: "kept",
+  });
   const info = JSON.parse(await readFile(path.join(applications, APP_NAME, "Contents", "Resources", "build-info.json"), "utf8"));
   assert.equal(info.version, "0.0.2");
   assert.equal(JSON.parse(await readFile(path.join(upgrade.previousBundle, "Contents", "Resources", "build-info.json"), "utf8")).version, "0.0.1");

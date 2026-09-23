@@ -8,6 +8,7 @@ import { describe, expect, test } from "vitest";
 import {
   classifyDaemonUpdate,
   shortRevision,
+  handedOffNotice,
   updatedNotice,
 } from "./daemon-update";
 
@@ -73,6 +74,15 @@ describe("update notices", () => {
     );
     expect(updatedNotice(null)).toBe(
       "Drogon updated; restarting its background service.",
+    );
+  });
+
+  test("handedOffNotice says the sessions kept running, with the right plural", () => {
+    expect(handedOffNotice("0123456789ab", 1)).toBe(
+      "Drogon updated to 0123456789ab; its background service was replaced and 1 running session moved to it without stopping.",
+    );
+    expect(handedOffNotice(null, 3)).toBe(
+      "Drogon updated; its background service was replaced and 3 running sessions moved to it without stopping.",
     );
   });
 
