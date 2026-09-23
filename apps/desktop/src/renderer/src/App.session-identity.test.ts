@@ -32,6 +32,7 @@ import {
   type SidebarSessionCollector,
 } from "./features/shell/sidebar-session-source";
 import {
+  OBSERVATION_LEDGER_MAX_ENTRIES,
   createObservationLedger,
   isStalePollSettlement,
   observationKeyOf,
@@ -1502,6 +1503,52 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     const reconciled = applySelectedFetch([previousWorkspace], settlement.plan!);
     expect(reconciled.map((item) => item.id)).toEqual(["fresh"]);
     expect(chooseActiveAfterSelectedFetch("old", fetched)).toBe("fresh");
+  });
+
+  test("production cap eviction cannot rearm an older poll after a newer selected clear", () => {
+    const ledger = createObservationLedger();
+    const rows = Array.from({ length: OBSERVATION_LEDGER_MAX_ENTRIES + 1 }, (_, index) =>
+      target({ id: `s${index}`, hasForegroundChild: false }),
+    );
+    const newer = settleSelectedWorkspaceFetch({
+      visible: rows,
+      workspaceId: "w1",
+      requestSeq: 2,
+      ledger,
+      workspaceProof: new Map(),
+    });
+    const selected = applySelectedFetch([], newer.plan!);
+    const old = target({ id: "s0", ...freshPi });
+    const projection = planQueuedAdopt([old], "w1", never, {
+      freshKeys: new Set([observationKeyOf(old)]),
+      seq: 1,
+      ledger,
+    });
+    commitObservationProof(ledger, projection.appliedObservations, 1);
+    const result = applyQueuedAdopt(selected, projection);
+    expect(result[0].observedHarnessId ?? null).toBeNull();
+    expect(result[0].hasForegroundChild).toBe(false);
+  });
+
+  test("selected settlement projects admitted values when rendered row has no copy", () => {
+    const ledger = createObservationLedger();
+    const fresh = target({ hasForegroundChild: false });
+    const admitted = planQueuedAdopt([fresh], "w1", never, {
+      freshKeys: new Set([observationKeyOf(fresh)]),
+      seq: 2,
+      ledger,
+    });
+    commitObservationProof(ledger, admitted.appliedObservations, 2);
+    const older = settleSelectedWorkspaceFetch({
+      visible: [target(freshPi)],
+      workspaceId: "w1",
+      requestSeq: 1,
+      ledger,
+      workspaceProof: new Map(),
+    });
+    const result = applySelectedFetch([], older.plan!);
+    expect(result[0].observedHarnessId ?? null).toBeNull();
+    expect(result[0].hasForegroundChild).toBe(false);
   });
 
   test("production selected settlement stores admitted values on equal rereads", () => {

@@ -872,6 +872,7 @@ export function applyQueuedAdopt(
 export type SelectedFetchPlan = {
   rows: Session[];
   fetchWinsObservation: ReadonlyMap<string, boolean>;
+  admittedObservationValues: ReadonlyMap<string, ObservationSnapshot>;
   appliedKeys: string[];
   appliedObservations: { key: string; snapshot: ObservationSnapshot }[];
 };
@@ -883,6 +884,7 @@ export function planSelectedFetch(
 ): SelectedFetchPlan {
   const rows = [...visible];
   const fetchWinsObservation = new Map<string, boolean>();
+  const admittedObservationValues = new Map<string, ObservationSnapshot>();
   const appliedKeys: string[] = [];
   const appliedObservations: { key: string; snapshot: ObservationSnapshot }[] = [];
   for (const row of rows) {
@@ -892,9 +894,18 @@ export function planSelectedFetch(
     if (wins) {
       appliedKeys.push(key);
       appliedObservations.push({ key, snapshot: readObservationSnapshot(row) });
+    } else {
+      const admitted = ledger?.admitted(key)?.snapshot;
+      if (admitted) admittedObservationValues.set(key, admitted);
     }
   }
-  return { rows, fetchWinsObservation, appliedKeys, appliedObservations };
+  return {
+    rows,
+    fetchWinsObservation,
+    admittedObservationValues,
+    appliedKeys,
+    appliedObservations,
+  };
 }
 
 /**
@@ -929,13 +940,14 @@ export function applySelectedFetch(
   for (const row of plan.rows) {
     const key = observationKeyOf(row);
     const actual = actualByKey.get(key);
+    const admitted = plan.admittedObservationValues.get(key);
     if (!actual) {
-      next.push(row);
+      next.push(admitted ? { ...row, ...admitted } : row);
       continue;
     }
     let merged = row;
     if (plan.fetchWinsObservation.get(key) !== true)
-      merged = { ...merged, ...readObservationSnapshot(actual) };
+      merged = { ...merged, ...(admitted ?? readObservationSnapshot(actual)) };
     const probe = applySessionStatePush([actual], {
       sessionId: row.id,
       workspaceId: row.workspaceId,

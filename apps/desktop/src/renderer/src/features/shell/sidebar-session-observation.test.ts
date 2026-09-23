@@ -94,31 +94,28 @@ describe("createObservationLedger", () => {
     expect(ledger.size).toBe(2);
     ledger.markApplied("h1:c:1", 3);
     expect(ledger.size).toBe(2);
-    // Eviction re-arms the evicted key for ANY seq — including a stale one.
-    // The shell never relies on eviction being harmless: stale poll
-    // settlements and stale selected-workspace reads are fenced by read
-    // provenance before they reach the ledger, and the adopt path prunes to
-    // the live selected copy so unrelated history cannot evict a live key.
+    // Eviction keeps a bounded seq tombstone: values remain bounded, but a
+    // stale writer cannot treat an evicted key as never observed.
+    expect(ledger.shouldApply("h1:a:1", 1)).toBe(false);
     expect(ledger.shouldApply("h1:a:1", 4)).toBe(true);
     expect(ledger.shouldApply("h1:b:1", 2)).toBe(false);
     expect(OBSERVATION_LEDGER_MAX_ENTRIES).toBeGreaterThan(2);
   });
 
-  test("an evicted key re-arms for a stale seq: the global order gate must block it first", () => {
+  test("an evicted key keeps stale seq fenced", () => {
     // Regression: with a tiny bound, admitting a newer fact for a live key
-    // and then evicting it with unrelated keys lets an older seq win again.
-    // Production never lets that older seq reach the ledger when a newer
-    // read of the same authority already settled.
+    // and then evicting it with unrelated keys must not let an older seq win
+    // again. Values are bounded, but retired proof keeps the order floor.
     const ledger = createObservationLedger(2);
     ledger.markApplied("h1:live:1", 6);
     expect(ledger.shouldApply("h1:live:1", 5)).toBe(false);
     ledger.markApplied("h1:other:1", 7);
     ledger.markApplied("h1:third:1", 8);
     expect(ledger.size).toBe(2);
-    // The live proof was the oldest eviction victim: the stale seq wins the
-    // ledger check again — which is why the shell fences seq 5 before
-    // consulting the ledger once seq 8 settled for the same source.
-    expect(ledger.shouldApply("h1:live:1", 5)).toBe(true);
+    // The live proof was the oldest eviction victim, but the stale seq still
+    // loses; a newer observation may re-admit the value.
+    expect(ledger.shouldApply("h1:live:1", 5)).toBe(false);
+    expect(ledger.shouldApply("h1:live:1", 9)).toBe(true);
     expect(isStalePollSettlement(5, 8)).toBe(true);
   });
 
