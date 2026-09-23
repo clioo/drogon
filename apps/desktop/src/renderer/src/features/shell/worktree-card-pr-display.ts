@@ -152,6 +152,20 @@ export function applySidebarPrStaleness(
   return pr;
 }
 
+/**
+ * A project's PR listing is unknown when it was never fetched successfully:
+ * absent from the cache (pending) or recorded as `null` (the first fetch
+ * failed, e.g. a GitHub rate limit). Such a card must not claim "no PR".
+ */
+export function isSidebarPrListingUnknown(
+  pullsByProjectId: ReadonlyMap<string, readonly unknown[] | null> | undefined,
+  projectId: string,
+): boolean {
+  if (!pullsByProjectId) return false;
+  const listing = pullsByProjectId.get(projectId);
+  return listing === undefined || listing === null;
+}
+
 function providerLabel(provider: WorktreeCardPrDisplay["provider"]): string {
   return provider === "gitlab" ? "MR" : "PR";
 }

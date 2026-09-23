@@ -20,7 +20,8 @@ import {
 const STATE_TONE: Record<string, string> = {
   merged: "text-emerald-500",
   ready: "text-cyan-500 dark:text-cyan-400",
-  open: "text-muted-foreground",
+  // Owner: an open review must not read like "no PR" (grey).
+  open: "text-blue-500 dark:text-blue-400",
   draft: "text-muted-foreground/70",
   conflicts: "text-rose-500",
   closed: "text-muted-foreground/70",
@@ -29,8 +30,12 @@ const STATE_TONE: Record<string, string> = {
 export function WorktreeCardPrStateIcon({
   pr,
   showNone = false,
+  unknown = false,
 }: {
   pr: WorktreeCardPrDisplay | null;
+  /** The project's PR listing could not be fetched yet (e.g. GitHub rate
+   *  limit): the grey marker says the state is unknown, not "none". */
+  unknown?: boolean;
   /** Card use (owner's guideline): keep the slot with a faint glyph that
    *  says "no pull request", never a state it does not have. */
   showNone?: boolean;
@@ -38,13 +43,16 @@ export function WorktreeCardPrStateIcon({
   const state = resolveCardPrState(pr);
   if (!pr || !state) {
     if (!showNone) return null;
+    const label = unknown
+      ? "Pull request status unavailable"
+      : "No pull request";
     return (
       <span
-        className="relative inline-flex size-3.5 shrink-0 items-center justify-center text-muted-foreground/40"
-        data-worktree-card-pr-none=""
+        className="relative inline-flex size-3.5 shrink-0 items-center justify-center text-muted-foreground/70"
+        data-worktree-card-pr-none={unknown ? "unknown" : ""}
         role="img"
-        aria-label="No pull request"
-        title="No pull request"
+        aria-label={label}
+        title={label}
       >
         <GitMerge className="size-3.5" aria-hidden="true" />
       </span>

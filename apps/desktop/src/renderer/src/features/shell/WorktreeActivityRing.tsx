@@ -24,10 +24,12 @@ export function worktreeActivityTone(
   return "none";
 }
 
+// Owner's vocabulary for the ring: an agent is working, its work is done,
+// or the card is idle (no session / nothing reporting).
 const TONE_LABEL: Record<WorktreeActivityTone, string> = {
   active: "Agent activity: working",
-  quiet: "Agent activity: no active agents",
-  none: "Agent activity: none",
+  quiet: "Agent activity: done",
+  none: "Agent activity: idle",
 };
 
 function capitalize(text: string): string {
@@ -44,7 +46,9 @@ export function WorktreeActivityRing({
   const activity = worktreeActivityClass(sessions);
   const tone = worktreeActivityTone(activity);
   const label =
-    activity === "needs-input" ? "Agent activity: needs input" : TONE_LABEL[tone];
+    activity === "needs-input"
+      ? "Agent activity: waiting for input"
+      : TONE_LABEL[tone];
   return (
     <span
       className="shell-worktree-card-activity-ring"

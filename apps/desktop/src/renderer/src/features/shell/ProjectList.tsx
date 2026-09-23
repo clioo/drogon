@@ -112,7 +112,11 @@ import {
 } from "./workspace-options-state";
 import type { WorkspaceUIPreferences } from "../../../../shared/workspace-ui-preferences-contract";
 import { WorkspaceOptionsMenuSections } from "./WorkspaceOptionsMenuSections";
-import { applySidebarPrStaleness, resolveCardPullRequest } from "./worktree-card-pr-display";
+import {
+  applySidebarPrStaleness,
+  isSidebarPrListingUnknown,
+  resolveCardPullRequest,
+} from "./worktree-card-pr-display";
 import {
   mergeSidebarLinkedPrResults,
   mergeSidebarPrPageResults,
@@ -1679,6 +1683,7 @@ function EntryGroupRow({
                 showPr={showPr}
                 ports={portsByWorkspaceId?.get(worktree.workspaceId)}
                 issueLinks={issueLinksByWorktree?.get(worktree.id)}
+                prUnknown={isSidebarPrListingUnknown(pullsByProjectId, project.id)}
                 pr={applySidebarPrStaleness(
                   resolveCardPullRequest(worktree, pullsByProjectId?.get(project.id) ?? []),
                   stalePrProjectIds?.has(project.id) ?? false,
@@ -1986,6 +1991,7 @@ function ProjectRow({
                   showPr={showPr}
                   ports={portsByWorkspaceId?.get(worktree.workspaceId)}
                   issueLinks={issueLinksByWorktree?.get(worktree.id)}
+                  prUnknown={isSidebarPrListingUnknown(pullsByProjectId, project.id)}
                   pr={applySidebarPrStaleness(
                     resolveCardPullRequest(worktree, pullsByProjectId?.get(project.id) ?? []),
                     stalePrProjectIds?.has(project.id) ?? false,

@@ -206,6 +206,7 @@ export function WorktreeCard({
   primaryCheckout = false,
   hasChildWorktrees = false,
   pr = null,
+  prUnknown = false,
   onSelect,
   cardIndex = 0,
   onCardPointerDown,
@@ -244,6 +245,8 @@ export function WorktreeCard({
   hasChildWorktrees?: boolean;
   /** Known PR for the chip; null hides it (no PR store yet). */
   pr?: WorktreeCardPrDisplay | null;
+  /** The project's PR listing is not known yet (fetch failed or pending). */
+  prUnknown?: boolean;
   onSelect: (workspaceId: string) => void;
   /** Selects a session tab; null hides row activation (rows still render). */
   onSelectSession?: ((sessionId: string) => void) | null;
@@ -562,7 +565,7 @@ export function WorktreeCard({
                   the chip's own string, so nothing the card announced
                   before is lost. */}
               {showPr ? (
-                <WorktreeCardPrStateIcon pr={pr} showNone />
+                <WorktreeCardPrStateIcon pr={pr} showNone unknown={prUnknown} />
               ) : null}
             </span>
             {/* The card's activity sentence (owner's design): the uppercase
