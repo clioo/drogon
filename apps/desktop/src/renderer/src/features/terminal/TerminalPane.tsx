@@ -1144,6 +1144,13 @@ export function TerminalPane({
     let seeking = true;
     let seekPages = 0;
     let readInFlight = false;
+    // The read that currently owns `readInFlight`. A live page arms its
+    // successor before its own write settles (PERF-01b), so by the time
+    // its `finally` runs the successor may already hold the flag; only the
+    // owner may clear it. Clearing it from under a parked hold let any input
+    // — every wheel tick in a mouse-tracking TUI — park a second hold at the
+    // same cursor, and both answered the same bytes into xterm.
+    let readTurn = 0;
     // PERF-01 push negotiation: the daemon's status capabilities decide
     // whether this pane holds one `session.output` long-poll per visible
     // mount or keeps the 24/120 ms `session.read` poll. Unknown until the
@@ -1426,6 +1433,7 @@ export function TerminalPane({
     async function read() {
       if (disposed || readInFlight) return;
       readInFlight = true;
+      const turn = ++readTurn;
       // PERF-01: one held `session.output` long-poll per visible pane when
       // the daemon advertises push; the 24/120 ms `session.read` poll stays
       // the path everywhere else (old daemon, hidden pane, seek phase).
@@ -1637,7 +1645,7 @@ export function TerminalPane({
       } catch {
         scheduleReadRetry();
       } finally {
-        readInFlight = false;
+        if (turn === readTurn) readInFlight = false;
       }
     }
     void read();
