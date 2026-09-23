@@ -1796,8 +1796,8 @@ footer[data-testid="status-bar"] {
 }
 /* Nested session rows (R16-AN, ported from the fork's .compact-agent-row /
    .worktree-agent-row-hover rules in the reference main.css): one row per
-   session under the card summary line. The focused fill mixes foreground
-   into the sidebar accent so muted text stays legible in both themes. */
+   session under the card summary line. Owner's guideline: rows stay flat;
+   the focused row is marked by its brighter text, not a filled pill. */
 .shell-worktree-card-main {
   display: flex;
   flex: 1;
@@ -1822,12 +1822,6 @@ footer[data-testid="status-bar"] {
 }
 .worktree-agent-row-hover:hover:not(:disabled) {
   background: color-mix(in srgb, var(--foreground) 4%, transparent);
-}
-.worktree-agent-row-hover[data-focused-agent-pane="true"] {
-  background: color-mix(in srgb, var(--foreground) 12%, var(--worktree-sidebar-accent));
-}
-.worktree-agent-row-hover[data-focused-agent-pane="true"]:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--foreground) 14%, var(--worktree-sidebar-accent));
 }
 .worktree-agent-row-hover:disabled {
   cursor: default;
@@ -2010,14 +2004,6 @@ footer[data-testid="status-bar"] {
 .dark [data-compact-agent-list="true"] .worktree-agent-lineage-child-row {
   background: transparent;
   box-shadow: none;
-}
-
-[data-compact-agent-list="true"] .worktree-agent-row-hover[data-focused-agent-pane="true"] {
-  background: color-mix(in srgb, var(--foreground) 12%, var(--worktree-sidebar-accent));
-}
-
-.dark [data-compact-agent-list="true"] .worktree-agent-row-hover[data-focused-agent-pane="true"] {
-  background: color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
 /* Issue #606: the same lineage, one row wide. The sidebar boxes children
