@@ -8,6 +8,7 @@ import {
   agentNoUpdateLabel,
   buildWorktreeAgentRows,
   compareWorktreeAgentRows,
+  defaultTitleBySession,
   formatCompactDuration,
   formatRowHarnessLabel,
   formatShortTimeAgo,
@@ -105,6 +106,25 @@ describe("buildWorktreeAgentRows", () => {
     expect(rows.find((row) => row.session.id === "s-2")?.title).toBe(
       "Terminal 1",
     );
+  });
+
+  it("defaultTitleBySession matches row numbering, for the stale-copy heal", () => {
+    const defaults = defaultTitleBySession(
+      [
+        session({ id: "s-1", createdAt: "2026-09-08T11:00:00.000Z" }),
+        session({
+          id: "s-2",
+          createdAt: "2026-09-08T11:30:00.000Z",
+          harnessId: "claude",
+        }),
+        session({ id: "s-3", createdAt: "2026-09-08T11:45:00.000Z" }),
+      ],
+      { stripOrder: ["s-1", "s-2", "s-3"], pinnedIds: ["s-3"] },
+    );
+    // Pinned shell first, harness reads its label, numbering counts all.
+    expect(defaults.get("s-3")).toBe("Terminal 1");
+    expect(defaults.get("s-2")).toBe("Claude");
+    expect(defaults.get("s-1")).toBe("Terminal 2");
   });
 
   it("marks the unverifiable verdict with the recovery suffix, like its tab", () => {

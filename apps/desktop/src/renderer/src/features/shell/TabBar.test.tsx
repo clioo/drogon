@@ -358,6 +358,17 @@ describe("TabBar default titles", () => {
       screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label")),
     ).toEqual(["Terminal 1 live", "db live", "Terminal 3 live"]);
   });
+
+  it("heals a stale frozen prefill copy instead of rendering it verbatim", () => {
+    // A rename dialog saved unchanged stores the prefill ("Terminal 8"
+    // back when the shell sat eighth); shells renumber, so the copy goes
+    // stale. The strip drops default-shaped stored titles and the tab
+    // heals to its live number; a true rename still wins (see above).
+    renderStrip({ customTitles: { b: "Terminal 8" } });
+    expect(
+      screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label")),
+    ).toEqual(["Terminal 1 live", "Terminal 2 live", "Terminal 3 live"]);
+  });
 });
 
 describe("TabBar editor tabs", () => {

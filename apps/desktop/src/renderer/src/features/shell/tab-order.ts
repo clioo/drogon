@@ -398,3 +398,38 @@ export function resolveTabTitle(
 ): string {
   return titles[id] ?? defaultTitle;
 }
+
+/**
+ * Default-shaped titles: the "Terminal N" shell numbers plus the harness
+ * labels (mirrors HARNESS_LABELS in worktree-agent-rows.ts and
+ * defaultTerminalTabTitle; kept local so this module stays import-clean).
+ * A stored rename matching one of these can only ever mirror a default —
+ * nobody renames a tab to "Terminal 8" for meaning — so it is a frozen
+ * prefill copy even when the live number has since shifted.
+ */
+const FROZEN_DEFAULT_TITLE_PATTERN = /^(?:Terminal \d+|Claude|Pi|Codex|OpenCode)$/;
+
+/**
+ * Drop stored titles that carry no information: a rename equal to the
+ * session's live default or generated title, or matching a default shape
+ * ("Terminal N", a harness label), is a frozen prefill copy — saving the
+ * rename dialog unchanged. Left in place it renders verbatim forever,
+ * defeats the concise provider fold, and goes stale when shells renumber;
+ * dropped, the row and the tab heal to the live title. Anything the user
+ * actually typed survives. Pure; the store itself is untouched.
+ */
+export function stripRedundantTitles(
+  titles: Record<string, string> | null | undefined,
+  defaultsById: ReadonlyMap<string, string>,
+  generatedById: Record<string, string> | null | undefined = null,
+): Record<string, string> {
+  if (!titles) return {};
+  const kept: Record<string, string> = {};
+  for (const [id, stored] of Object.entries(titles)) {
+    if (stored === defaultsById.get(id)) continue;
+    if (generatedById && stored === generatedById[id]) continue;
+    if (FROZEN_DEFAULT_TITLE_PATTERN.test(stored)) continue;
+    kept[id] = stored;
+  }
+  return kept;
+}

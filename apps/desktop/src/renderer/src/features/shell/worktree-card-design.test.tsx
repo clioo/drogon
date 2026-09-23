@@ -552,6 +552,32 @@ describe("concise row identity", () => {
     ) as HTMLElement;
     expect(primary?.textContent).toBe("My custom name");
   });
+
+  test("a frozen prefill copy heals to the concise provider fold", () => {
+    // A rename dialog saved unchanged stores the default label ("Claude")
+    // as if the user had typed it; left verbatim it would defeat the fold
+    // forever ("Claude - <prompt>"). The card drops stored copies of the
+    // live default, so the row heals to "Claude Code".
+    const { container } = renderCard({
+      sessions: [
+        session({
+          id: "frozen-1",
+          harnessId: "claude",
+          agentState: "idle",
+          agentStateAt: "2026-09-08T11:59:00.000Z",
+          agentPromptPreview: PROMPT,
+        }),
+      ],
+      tabStrip: { ...EMPTY_TAB_STRIP_STATE, titles: { "frozen-1": "Claude" } },
+    });
+    const row = container.querySelector(
+      '[data-worktree-agent-row="frozen-1"]',
+    ) as HTMLElement;
+    const primary = row.querySelector(
+      "[data-worktree-agent-primary]",
+    ) as HTMLElement;
+    expect(primary?.textContent).toBe("Claude Code");
+  });
 });
 
 describe("right-slot affordances", () => {
