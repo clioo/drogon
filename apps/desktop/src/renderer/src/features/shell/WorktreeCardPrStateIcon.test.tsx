@@ -39,12 +39,16 @@ describe("WorktreeCardPrStateIcon", () => {
     expect(marker?.getAttribute("role")).toBe("img");
     expect(marker?.getAttribute("aria-label")).toBe("Linked PR #123: Merged");
     expect(marker?.getAttribute("title")).toBe("Fix the sidebar");
-    // The merged marker overlays a filled check on the merge glyph: two
-    // rendered SVGs, the overlay legible against the sidebar surface.
-    expect(marker?.querySelectorAll("svg")).toHaveLength(2);
-    const overlay = marker?.querySelector("svg.lucide-check");
-    expect(overlay?.getAttribute("class") ?? "").toContain("ring-emerald-500");
-    expect(marker?.innerHTML).toContain("bg-worktree-sidebar");
+    // The merged marker draws a filled green check BESIDE the merge glyph
+    // (owner's guideline), never overlaid on it: two sibling SVGs in a
+    // flex row, the check not absolutely positioned.
+    const svgs = marker?.querySelectorAll("svg") ?? [];
+    expect(svgs).toHaveLength(2);
+    expect(svgs[0]?.getAttribute("class") ?? "").toContain("lucide-git-merge");
+    const check = marker?.querySelector("svg.lucide-check");
+    expect(check?.getAttribute("class") ?? "").toContain("bg-emerald-500");
+    expect(check?.getAttribute("class") ?? "").not.toContain("absolute");
+    expect(marker?.className).not.toContain("relative");
   });
 
   test("ready draws the cyan marker only for a confirmed APPROVED review", () => {

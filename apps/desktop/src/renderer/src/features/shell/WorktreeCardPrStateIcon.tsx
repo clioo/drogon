@@ -60,19 +60,20 @@ export function WorktreeCardPrStateIcon({
   }
   return (
     <span
-      className={`relative inline-flex size-3.5 shrink-0 items-center justify-center ${STATE_TONE[state]}`}
+      className={`inline-flex h-3.5 shrink-0 items-center gap-0.5 ${STATE_TONE[state]}`}
       data-worktree-card-pr-state={state}
       role="img"
       aria-label={getPrChipAccessibleLabel(pr)}
       title={pr.title}
     >
-      <GitMerge className="size-3.5" aria-hidden="true" />
+      <GitMerge className="size-3.5 shrink-0" aria-hidden="true" />
       {state === "merged" ? (
-        // The reference's review badge overlays a filled check on the glyph;
-        // the ring keeps the check legible against the merge lines.
+        // Owner's guideline: a filled green check BESIDE the merge glyph.
+        // Overlaid on the glyph it covered the glyph's right node.
         <Check
-          className="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full bg-worktree-sidebar text-emerald-500 ring-1 ring-emerald-500"
-          strokeWidth={3.5}
+          data-worktree-card-pr-merged-check=""
+          className="size-3 shrink-0 rounded-full bg-emerald-500 p-px text-worktree-sidebar"
+          strokeWidth={4}
           aria-hidden="true"
         />
       ) : null}
