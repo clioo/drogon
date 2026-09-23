@@ -1198,11 +1198,9 @@ export async function probePackagedSurfaces({
     null,
     { timeout: 20000 },
   );
-  if ((await page.getByRole("option", { name: /changes-wt/ }).count()) > 0) {
-    await page.getByRole("option", { name: /changes-wt/ }).first().click();
-  } else {
-    await page.getByRole("button", { name: /changes-wt/ }).first().click();
-  }
+  await page
+    .getByRole("button", { name: "Select changes-wt", exact: true })
+    .click();
   await page.waitForFunction(
     () =>
       document
