@@ -346,6 +346,51 @@ describe("compiled sleeper fixture on this platform", () => {
   });
 });
 
+describe("projectLateForegroundSnapshot for the R3 return-to-shell clear", () => {
+  it("records the cleared observation beside the live Terminal row", () => {
+    assert.deepEqual(
+      projectLateForegroundSnapshot(
+        {
+          harnessId: null,
+          observedHarnessId: null,
+          observedHarnessAt: null,
+          hasForegroundChild: false,
+          agentState: "unknown",
+          agentStateAuthority: null,
+        },
+        { primaryText: "Terminal 7" },
+      ),
+      {
+        harnessId: null,
+        observedHarnessId: null,
+        observedHarnessAt: null,
+        hasForegroundChild: false,
+        agentState: "unknown",
+        agentStateAuthority: null,
+        domText: "Terminal 7",
+        domIdentityTitle: null,
+      },
+    );
+  });
+
+  it("records the busy foreground child beside the Pi row", () => {
+    const snapshot = projectLateForegroundSnapshot(
+      {
+        harnessId: null,
+        observedHarnessId: "pi",
+        observedHarnessAt: "2026-09-22T00:01:00Z",
+        hasForegroundChild: true,
+        agentState: "unknown",
+        agentStateAuthority: null,
+      },
+      { primaryText: "Pi" },
+    );
+    assert.equal(snapshot.observedHarnessId, "pi");
+    assert.equal(snapshot.hasForegroundChild, true);
+    assert.equal(snapshot.domText, "Pi");
+  });
+});
+
 describe("rootRowTextIsAgentNotTerminal", () => {
   it("accepts the agent label with a freshness secondary", () => {
     assert.equal(rootRowTextIsAgentNotTerminal("Claude - No update in 0mnow"), true);

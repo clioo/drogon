@@ -1317,6 +1317,90 @@ export async function runSidebarAgentTreeAcceptance() {
     await until(async () => (await sessionRow(lateShell.id))?.verdict === "exited", "the late shell exited");
     checkCancelled();
 
+    // R3 observation return-to-shell: the late-foreground transitions above
+    // prove a gain, never a clear — and both exec'd the sleeper, replacing
+    // the shell, so no live session ever returned to its prompt. Here a
+    // real plain shell on the same unselected card runs the compiled `pi`
+    // sleeper WITHOUT exec (a foreground CHILD of the shell, `pi 12`); the
+    // daemon observes pi, then the sleeper exits on its own while the
+    // session stays live. The row must clear to a null observation (a fresh
+    // null, never a retained Pi) and the same row must render Terminal
+    // again — no reload, no reselection, no session stop. Real shell, real
+    // native binary, quiet by design so the turn state stays whatever the
+    // daemon derives, recorded not steered. Labeled accurately: a
+    // boundary-level real-App test of the metadata-only snapshot path for
+    // clears (session.list rows to DOM), not mocked preload data.
+    const clearShell = await cliJson(
+      ["terminal", "create", "--workspace", lateWorkspaceId, "--", "/bin/sh"],
+      { env, cwd: fixture },
+    );
+    assert.equal(clearShell.harnessId ?? null, null, "the clear shell starts as a plain shell");
+    const clearBeforeRow = await until(async () => {
+      const row = await sessionRow(clearShell.id);
+      return row && (row.harnessId ?? null) === null && (row.observedHarnessId ?? null) === null ? row : false;
+    }, "the daemon lists the clear shell with no harness identity");
+    await cliJson(
+      ["terminal", "send", "--session", clearShell.id, "--incarnation", clearShell.incarnation, "--text",
+        `${quoteShellWord(path.join(binDir, "pidir", "pi"))} 12\n`],
+      { env, cwd: fixture },
+    );
+    const clearObservedRow = await until(async () => {
+      const row = await sessionRow(clearShell.id);
+      return row && isObservedPiSession(row) ? row : false;
+    }, "the daemon observes pi in the clear shell's foreground");
+    // R3 busy metadata: while the compiled sleeper foregrounds as a live
+    // child of the shell, the row carries the foreground-child flag.
+    assert.equal(
+      clearObservedRow.hasForegroundChild,
+      true,
+      "the observed foreground child marks the row busy while the sleeper runs",
+    );
+    const clearObservedDom = await until(async () => {
+      const rows = await readLateCardRows();
+      const row = rows?.find((candidate) => candidate.id === clearShell.id);
+      return row && row.primaryText === "Pi" ? row : false;
+    }, "the same sidebar row updates to Pi without a reload", 90000);
+    // The sleeper exits on its own after 12s; the shell prompt returns and
+    // the session stays live. The observation must clear (fresh null) and
+    // the row must read Terminal again — a retained Pi here would be the
+    // R3 revival bug made visible.
+    const clearAfterRow = await until(async () => {
+      const row = await sessionRow(clearShell.id);
+      return row && row.verdict === "live" && (row.harnessId ?? null) === null && (row.observedHarnessId ?? null) === null
+        ? row
+        : false;
+    }, "the daemon clears the observation while the session stays live", 90000);
+    const clearAfterDom = await until(async () => {
+      const rows = await readLateCardRows();
+      const row = rows?.find((candidate) => candidate.id === clearShell.id);
+      return row && /Terminal \d/.test(String(row.primaryText ?? "")) ? row : false;
+    }, "the same sidebar row returns to Terminal without a reload", 90000);
+    const clearAfterMeasured = await measureGuideRows(lateWorktreeId);
+    assert.equal(
+      clearAfterMeasured.rows.filter((row) => row.id === clearShell.id).length,
+      1,
+      "the return-to-shell transition updates exactly one row — the session is never duplicated",
+    );
+    report.observationReturnToShell = {
+      boundary: "real-App metadata-only snapshot path (session.list rows to DOM) for an observation clear on an unselected card, not mocked preload data",
+      projectId: lateProject.id,
+      worktreeId: lateWorktreeId,
+      workspaceId: lateWorkspaceId,
+      before: projectLateForegroundSnapshot(clearBeforeRow, null),
+      observed: projectLateForegroundSnapshot(clearObservedRow, clearObservedDom),
+      after: projectLateForegroundSnapshot(clearAfterRow, clearAfterDom),
+      cardRowIds: clearAfterMeasured.rows.map((row) => row.id),
+    };
+    report.checks.push("observation-return-to-shell-clears-the-same-row");
+    // The clear shell stays listed until the fixture daemon stops; stop it
+    // explicitly so no shell outlives the check.
+    await cliJson(
+      ["rpc", "session.stop", "--params", JSON.stringify({ sessionId: clearShell.id, incarnation: clearShell.incarnation })],
+      { env, cwd: fixture },
+    );
+    await until(async () => (await sessionRow(clearShell.id))?.verdict === "exited", "the clear shell exited");
+    checkCancelled();
+
     // F3 guide layout continued: a second folder project proves multi-card
     // rhythm — first its no-session card, then a Pi root with Codex and
     // Claude Code descendants plus a standalone Codex agent. Fixture-only
