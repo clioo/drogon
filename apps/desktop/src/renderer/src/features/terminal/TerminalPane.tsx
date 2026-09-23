@@ -381,6 +381,7 @@ export function TerminalPane({
     input: TerminalInputQueue;
     focus: () => void;
     pasteFromClipboard: (source: TerminalPasteSource) => void;
+    claimCommandEnter: (event: KeyboardEvent) => boolean;
     /** Re-fit plus WebGL attach/DPR repair (every fit is a heal chance). */
     syncRenderer: () => void;
   } | null>(null);
@@ -964,6 +965,13 @@ export function TerminalPane({
     // replayed by a later keypress/window path.
     const claimCommandEnter = createTerminalCommandEnterHandler(isMac, (data) => terminal.input(data, true));
     let optionKeyLocations: TerminalOptionKeyLocation = 0;
+    const claimWindowCommandEnter = (event: KeyboardEvent) => {
+      if (!canWrite) return;
+      claimCommandEnter(event);
+    };
+    window.addEventListener("keydown", claimWindowCommandEnter, true);
+    window.addEventListener("keypress", claimWindowCommandEnter, true);
+    window.addEventListener("keyup", claimWindowCommandEnter, true);
     terminal.attachCustomKeyEventHandler((event) => {
       if (canWrite && claimShiftEnter(event)) return false;
       if (canWrite && claimCommandEnter(event)) return false;
@@ -1024,6 +1032,8 @@ export function TerminalPane({
       focus: () => terminal.focus(),
       pasteFromClipboard: (source: TerminalPasteSource) =>
         paste.pasteFromClipboard(source),
+      claimCommandEnter: (event: KeyboardEvent) =>
+        !disposed && canWrite && claimCommandEnter(event),
       syncRenderer: fitAndSyncTerminal,
     };
     // Paste policy target (R12-E): plan/execute writes bracketed or chunked
@@ -1649,6 +1659,9 @@ export function TerminalPane({
           onPageVisibilityChange,
         );
       }
+      window.removeEventListener("keydown", claimWindowCommandEnter, true);
+      window.removeEventListener("keypress", claimWindowCommandEnter, true);
+      window.removeEventListener("keyup", claimWindowCommandEnter, true);
       dprMedia?.removeEventListener("change", onDprChange);
       cancelPendingWebglRefit();
       unwatchWebglCanvasBackingStore();
@@ -1876,8 +1889,27 @@ export function TerminalPane({
     <div
       ref={container}
       className="terminal-surface"
+      data-terminal-pane-id={session.id}
       style={{ position: "relative" }}
       aria-label="Session terminal"
+      onKeyDownCapture={(event) => {
+        if (live.current?.claimCommandEnter(event.nativeEvent)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onKeyPressCapture={(event) => {
+        if (live.current?.claimCommandEnter(event.nativeEvent)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onKeyUpCapture={(event) => {
+        if (live.current?.claimCommandEnter(event.nativeEvent)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
       onKeyDown={(event) => {
         onContainerKeyDown(event);
         // First interaction with a restored pane retires its banner, exactly

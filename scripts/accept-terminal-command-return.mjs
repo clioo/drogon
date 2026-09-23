@@ -3,7 +3,8 @@
 // production TerminalPane/xterm handlers over CDP in a background Electron
 // window. Artifacts land under .preflight/acceptance/terminal-command-return-*.
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -20,6 +21,10 @@ import {
   stopAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
+import {
+  startForegroundObservation,
+  verifyForegroundObservation,
+} from "./acceptance-foreground.mjs";
 import { terminalBufferText, waitForTerminalText } from "./acceptance-terminal-text.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -88,7 +93,50 @@ let daemon = null;
 let desktop = null;
 let browser = null;
 let page = null;
+let foreground = null;
 const owned = new Map();
+
+async function fileIdentity(file) {
+  const [bytes, info] = await Promise.all([readFile(file), stat(file)]);
+  return {
+    path: file,
+    bytes: info.size,
+    mtimeMs: info.mtimeMs,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+async function recordFreshBuild() {
+  const buildEnv = scrubInheritedDispatchBindings({ ...process.env });
+  const cargo = await runAcceptanceProcess(
+    "/opt/homebrew/bin/cargo",
+    ["build", "-p", "drogond", "-p", "drogon-cli", "--locked"],
+    { cwd: root, env: buildEnv, timeout: 600_000 },
+  );
+  const desktopBuild = await runAcceptanceProcess(
+    "/Users/carlos/.local/bin/pnpm",
+    ["--filter", "@drogon/desktop", "build"],
+    { cwd: root, env: buildEnv, timeout: 600_000 },
+  );
+  report.build.commands = [
+    { command: "cargo build -p drogond -p drogon-cli --locked", stderrTail: cargo.stderr.slice(-2000) },
+    { command: "pnpm --filter @drogon/desktop build", stdoutTail: desktopBuild.stdout.slice(-2000), stderrTail: desktopBuild.stderr.slice(-2000) },
+  ];
+  report.build.gitHead = (
+    await runAcceptanceProcess(
+      "/Library/Developer/CommandLineTools/usr/bin/git",
+      ["rev-parse", "HEAD"],
+      { cwd: root },
+    )
+  ).stdout.trim();
+  report.build.artifacts = {
+    daemon: await fileIdentity(daemonBin),
+    cli: await fileIdentity(cliBin),
+    main: await fileIdentity(path.join(appDir, "out", "main", "index.js")),
+    preload: await fileIdentity(path.join(appDir, "out", "preload", "index.js")),
+    rendererHtml: await fileIdentity(path.join(appDir, "out", "renderer", "index.html")),
+  };
+}
 
 function cleanEnv(extra = {}) {
   const env = scrubInheritedDispatchBindings({ ...process.env });
@@ -174,8 +222,8 @@ async function readInputEntries() {
 }
 
 try {
-  report.build.gitHead = (await runAcceptanceProcess("/Library/Developer/CommandLineTools/usr/bin/git", ["rev-parse", "HEAD"], { cwd: root })).stdout.trim();
-  report.build.desktopOut = path.join(appDir, "out");
+  await recordFreshBuild();
+  foreground = await startForegroundObservation(output);
   daemon = startAcceptanceProcess(daemonBin, ["--data-dir", dataDir], {
     stdio: "ignore",
     env: cleanEnv(),
@@ -200,49 +248,43 @@ try {
   await waitForTerminalText(page, "DROGON_CMD_RETURN_FIXTURE_READY", { timeout: 20_000 });
   await page.locator(".xterm-helper-textarea").first().focus();
   await screenshot("before-command-return.png");
+  await page.locator(".xterm-helper-textarea").first().focus();
 
-  const eventTrace = await page.evaluate((sessionId) => {
+  await page.evaluate((sessionId) => {
     const terminal = window.__drogonTerminals?.get(sessionId) ?? [...(window.__drogonTerminals?.values?.() ?? [])][0];
     if (!terminal) throw new Error("terminal registry missing session");
     const data = [];
-    const disposable = terminal.onData((chunk) => data.push(chunk));
-    const target = document.querySelector(".xterm-helper-textarea");
-    if (!target) throw new Error("terminal helper textarea missing");
     const bubbled = [];
-    const onBubble = (event) => bubbled.push(event.type);
+    const disposable = terminal.onData((chunk) => data.push(chunk));
+    const onBubble = (event) => bubbled.push({ type: event.type, key: event.key, code: event.code, metaKey: event.metaKey });
     window.addEventListener("keydown", onBubble);
     window.addEventListener("keypress", onBubble);
     window.addEventListener("keyup", onBubble);
-    const events = [];
-    try {
-      for (const type of ["keydown", "keypress", "keyup"]) {
-        const event = new KeyboardEvent(type, {
-          key: "Enter",
-          code: "Enter",
-          metaKey: true,
-          bubbles: true,
-          cancelable: true,
-        });
-        const accepted = target.dispatchEvent(event);
-        events.push({ type, accepted, defaultPrevented: event.defaultPrevented });
-      }
-    } finally {
+    window.__cmdReturnTrace = { data, bubbled, dispose: () => {
       window.removeEventListener("keydown", onBubble);
       window.removeEventListener("keypress", onBubble);
       window.removeEventListener("keyup", onBubble);
       disposable.dispose();
-    }
-    return { events, bubbled, data };
+    } };
   }, session.id);
+  await page.keyboard.down("Meta");
+  await page.keyboard.press("Enter");
+  await page.keyboard.up("Meta");
+  const eventTrace = await page.evaluate(() => {
+    const trace = window.__cmdReturnTrace;
+    if (!trace) throw new Error("Cmd+Return trace missing");
+    trace.dispose();
+    delete window.__cmdReturnTrace;
+    return { data: trace.data, bubbled: trace.bubbled };
+  });
   report.eventTrace = eventTrace;
-  assert.deepEqual(eventTrace.data, ["\r"], "one Cmd+Return gesture must emit exactly one CR from xterm");
-  assert.deepEqual(eventTrace.events.map((event) => [event.type, event.defaultPrevented]), [
-    ["keydown", true],
-    ["keypress", true],
-    ["keyup", true],
-  ]);
-  assert.deepEqual(eventTrace.bubbled, [], "claimed Cmd+Return events must not reach window shortcuts");
-  report.checks.push("cmd-return-keydown-keypress-keyup-claimed-once");
+  assert.deepEqual(eventTrace.data, ["\r"], "one real Cmd+Return gesture must emit exactly one CR from xterm");
+  assert.deepEqual(
+    eventTrace.bubbled.filter((event) => event.key === "Enter").map((event) => event.type),
+    [],
+    "claimed Cmd+Return Enter events must not reach window shortcuts",
+  );
+  report.checks.push("real-cdp-cmd-return-claimed-once");
 
   const deadline = Date.now() + 10_000;
   let entries = [];
@@ -280,16 +322,43 @@ try {
   } catch {}
   process.exitCode = 1;
 } finally {
-  try { await browser?.close(); } catch {}
   await captureDescendants([desktop?.pid, daemon?.pid].filter(Boolean), owned);
+  try { await browser?.close(); } catch {}
   if (desktop) report.processes.desktop = await stopAcceptanceProcess(desktop);
   if (daemon) report.processes.daemon = await stopAcceptanceProcess(daemon);
   report.processes.owned = await settleOwnedProcesses(owned);
+  if (foreground) {
+    try {
+      report.osForeground = await foreground.stop();
+      verifyForegroundObservation(
+        report.osForeground,
+        [...owned]
+          .filter(([, identity]) => identity.includes("Electron.app/Contents/"))
+          .map(([pid]) => pid),
+      );
+      report.checks.push("OS activation and window visibility preserved");
+    } catch (error) {
+      report.status = "FAILED";
+      report.error ??= {};
+      report.error.osForeground = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const processResults = [
+    report.processes.desktop,
+    report.processes.daemon,
+    ...(report.processes.owned ?? []),
+  ].filter(Boolean);
+  const allExited = processResults.every((item) => item.verdict === "exited");
+  if (allExited) {
+    await rm(fixture, { recursive: true, force: true });
+    report.fixtureCleanup = "removed after owned processes exited";
+  } else {
+    report.fixtureCleanup = "retained because process exit was not fully verified";
+  }
   await writeFile(path.join(output, "report.json"), JSON.stringify(report, null, 2));
   if (report.status !== "PASSED") {
     console.error(JSON.stringify(report, null, 2));
   } else {
-    console.log(JSON.stringify({ status: report.status, output, checks: report.checks, screenshots: report.screenshots, processes: report.processes }, null, 2));
+    console.log(JSON.stringify({ status: report.status, output, checks: report.checks, screenshots: report.screenshots, processes: report.processes, osForeground: report.osForeground, fixtureCleanup: report.fixtureCleanup }, null, 2));
   }
-  if (report.status === "PASSED") await rm(fixture, { recursive: true, force: true });
 }
