@@ -369,12 +369,9 @@ describe("selectWorkspaceCardById", () => {
 //
 // These tests execute the actual probe path -- the real helper functions
 // against stub page doubles that run the real page-side predicates -- never
-// source-string matches. The product truth they pin: a Pi session shows
-// Unknown ("No recent update") on both rendered surfaces until a hook turn
-// proves otherwise, because sessionAgentState renders working/idle only on
-// hook authority (agent-state.ts), Pi admits with initial_hook_turn_ended =
-// false (harness.rs), and the generated extension emits no startup
-// SessionStart, only AgentStart/End and friends (harness_hooks/pi.rs).
+// source-string matches. Before its first prompt, both surfaces agree on
+// Unknown or on hook-confirmed Idle from Pi builds that emit a startup
+// lifecycle event. Hook-confirmed Working/Waiting is never a valid baseline.
 // ---------------------------------------------------------------------------
 
 const BASELINE_SESSION = "pi-baseline-session";
@@ -464,8 +461,7 @@ describe("waitForPrePromptBaselineUnknown (actual probe path)", () => {
         agentState: "unknown",
         agentStateAuthority: null,
       });
-      // Both rendered surfaces were waited, in tab-then-card order.
-      assert.deepEqual(page.calls, [true, true]);
+      assert.deepEqual(page.calls, ["No recent update"]);
     } finally {
       restore();
     }
@@ -489,7 +485,23 @@ describe("waitForPrePromptBaselineUnknown (actual probe path)", () => {
     }
   });
 
-  it("rejects hook proof before any prompt was sent", async () => {
+  it("accepts a hook-confirmed Idle startup on both rendered surfaces", async () => {
+    const { page, restore } = stubBaselinePage({
+      tabLabel: "Idle",
+      cardLabel: "Idle",
+      sessions: [livePiRow({ agentState: "idle", agentStateAuthority: "hook" })],
+    });
+    try {
+      const native = await waitForPrePromptBaselineUnknown(page, BASELINE_SESSION, BASELINE_WORKSPACE);
+      assert.equal(native.agentState, "idle");
+      assert.equal(native.agentStateAuthority, "hook");
+      assert.deepEqual(page.calls, ["Idle"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("rejects hook-confirmed Working before any prompt was sent", async () => {
     const { page, restore } = stubBaselinePage({
       tabLabel: "No recent update",
       cardLabel: "No recent update",
@@ -498,14 +510,14 @@ describe("waitForPrePromptBaselineUnknown (actual probe path)", () => {
     try {
       await assert.rejects(
         () => waitForPrePromptBaselineUnknown(page, BASELINE_SESSION, BASELINE_WORKSPACE),
-        /hook turn proof/,
+        /must be Unknown or hook-confirmed Idle/,
       );
     } finally {
       restore();
     }
   });
 
-  it("rejects a rendered Idle badge: the obsolete PTY-silence assumption", async () => {
+  it("rejects mismatched pre-prompt states across the two rendered surfaces", async () => {
     const { page, restore } = stubBaselinePage({
       tabLabel: "Idle",
       cardLabel: "No recent update",

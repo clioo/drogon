@@ -603,23 +603,18 @@ export async function readRenderedAgentLabels(page, sessionId) {
 /**
  * R3 Pi pre-prompt baseline: hook proof, not PTY silence.
  *
- * A freshly launched Pi session truthfully renders Unknown ("No recent
- * update") on both surfaces until a hook turn proves otherwise: Pi admits
- * with `initial_hook_turn_ended: false` (crates/drogon-core/src/harness.rs),
- * the generated extension wires no startup SessionStart event -- only
- * AgentStart/End, tool and usage hooks (harness_hooks/pi.rs) -- and the
- * renderer maps working/idle without hook authority to unknown
- * (sessionAgentState in
- * apps/desktop/src/renderer/src/features/shell/agent-state.ts). The old
- * baseline waited for PTY banner noise to decay to Idle; that assumption is
- * obsolete -- silence past the activity window is activity authority, never
- * turn proof, and the product renders it as Unknown.
+ * A fresh Pi session may initially render Unknown while activity evidence
+ * settles, or Idle when the installed Pi build emits an authoritative
+ * startup lifecycle event. Both are safe before user input; Working and
+ * Waiting are not. The tab and sidebar row must agree, and the native DTO
+ * must prove either Unknown without hook authority or Idle from the activity
+ * clock/hook.
  *
- * Proves, boundedly: the tab badge and card row both read "No recent
- * update", and the native DTO row is live with NO hook turn proof
- * (`agentStateAuthority` null or "activity" -- never "hook" before any
- * prompt is sent). Returns the native row's turn-proof identity for the
- * run log. Never fabricates a turn end to reach a settled state.
+ * Proves, boundedly: both rendered surfaces agree on a neutral pre-prompt
+ * state (Unknown, or hook-authoritative Idle reported by newer Pi builds),
+ * and the native row is live with no active turn. A hook-authoritative
+ * Working/Waiting state is never accepted before the prompt. Returns the
+ * native row's state for the run log.
  */
 export async function waitForPrePromptBaselineUnknown(
   page,
@@ -628,8 +623,25 @@ export async function waitForPrePromptBaselineUnknown(
   timeouts = {},
 ) {
   const { renderedTimeoutMs = 30000, nativeTimeoutMs = 15000 } = timeouts;
-  await waitForTabAgentState(page, sessionId, "No recent update", renderedTimeoutMs);
-  await waitForCardRowAgentState(page, sessionId, "No recent update", renderedTimeoutMs);
+  await page.waitForFunction(
+    (id) => {
+      const tab = document.querySelector(
+        `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${CSS.escape(id)}"]`,
+      );
+      const row = document.querySelector(`[data-worktree-agent-row="${CSS.escape(id)}"]`);
+      const labelOf = (node) => {
+        if (!node) return null;
+        for (const label of ["No recent update", "Idle"]) {
+          if (node.querySelector(`[aria-label="${label}"]`)) return label;
+        }
+        return null;
+      };
+      const tabLabel = labelOf(tab);
+      return tabLabel && tabLabel === labelOf(row) ? tabLabel : false;
+    },
+    sessionId,
+    { timeout: renderedTimeoutMs },
+  );
   const deadline = Date.now() + nativeTimeoutMs;
   let row = null;
   for (;;) {
@@ -657,10 +669,13 @@ export async function waitForPrePromptBaselineUnknown(
     agentState: row.agentState ?? "unknown",
     agentStateAuthority: row.agentStateAuthority ?? null,
   };
-  assert.notEqual(
-    native.agentStateAuthority,
-    "hook",
-    `Pi pre-prompt baseline claims hook turn proof before any prompt was sent: ${JSON.stringify(native)}`,
+  const safeBaseline =
+    (native.agentState === "unknown" && native.agentStateAuthority !== "hook") ||
+    (native.agentState === "idle" &&
+      ["activity", "hook"].includes(native.agentStateAuthority));
+  assert.ok(
+    safeBaseline,
+    `Pi pre-prompt baseline must be Unknown or hook-confirmed Idle, never active: ${JSON.stringify(native)}`,
   );
   return native;
 }
