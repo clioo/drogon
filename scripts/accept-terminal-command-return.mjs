@@ -255,15 +255,21 @@ try {
     if (!terminal) throw new Error("terminal registry missing session");
     const data = [];
     const bubbled = [];
+    const edits = [];
     const disposable = terminal.onData((chunk) => data.push(chunk));
     const onBubble = (event) => bubbled.push({ type: event.type, key: event.key, code: event.code, metaKey: event.metaKey });
+    const onEdit = (event) => edits.push({ type: event.type, data: event.data ?? null, inputType: event.inputType ?? null });
     window.addEventListener("keydown", onBubble);
     window.addEventListener("keypress", onBubble);
     window.addEventListener("keyup", onBubble);
-    window.__cmdReturnTrace = { data, bubbled, dispose: () => {
+    window.addEventListener("beforeinput", onEdit, true);
+    window.addEventListener("input", onEdit, true);
+    window.__cmdReturnTrace = { data, bubbled, edits, dispose: () => {
       window.removeEventListener("keydown", onBubble);
       window.removeEventListener("keypress", onBubble);
       window.removeEventListener("keyup", onBubble);
+      window.removeEventListener("beforeinput", onEdit, true);
+      window.removeEventListener("input", onEdit, true);
       disposable.dispose();
     } };
   }, session.id);
@@ -275,7 +281,7 @@ try {
     if (!trace) throw new Error("Cmd+Return trace missing");
     trace.dispose();
     delete window.__cmdReturnTrace;
-    return { data: trace.data, bubbled: trace.bubbled };
+    return { data: trace.data, bubbled: trace.bubbled, edits: trace.edits };
   });
   report.eventTrace = eventTrace;
   assert.deepEqual(eventTrace.data, ["\r"], "one real Cmd+Return gesture must emit exactly one CR from xterm");
@@ -284,6 +290,7 @@ try {
     [],
     "claimed Cmd+Return Enter events must not reach window shortcuts",
   );
+  assert.deepEqual(eventTrace.edits, [], "Cmd+Return must not trigger browser textarea editing");
   report.checks.push("real-cdp-cmd-return-claimed-once");
 
   const deadline = Date.now() + 10_000;
