@@ -11,6 +11,11 @@ struct Args {
     /// Drogon data directory (default: DROGON_DATA_DIR, else platform default)
     #[arg(long)]
     data_dir: Option<PathBuf>,
+    /// Take over the live sessions of the service already running on this
+    /// data directory, which a `runtime.handoff` request has asked to hand
+    /// them over. Starts normally if none is offered.
+    #[arg(long)]
+    adopt_handoff: bool,
 }
 
 fn main() -> ExitCode {
@@ -18,7 +23,10 @@ fn main() -> ExitCode {
     let data_dir = args
         .data_dir
         .unwrap_or_else(|| default_data_dir(read_env, &home_dir()));
-    match drogond::serve(&data_dir) {
+    let options = drogond::ServeOptions {
+        adopt_handoff: args.adopt_handoff,
+    };
+    match drogond::serve_with(&data_dir, options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("drogond: {e}");

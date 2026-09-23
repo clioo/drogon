@@ -3,15 +3,18 @@
 // `make install`: one command that replaces the installed Drogon with a fresh
 // build of this checkout and brings both halves back up.
 //
-//   package -> verify -> quit the app -> stop its detached daemon ->
-//   swap /Applications/Drogon.app -> relaunch -> confirm the new daemon
+//   package -> verify -> quit the app -> swap /Applications/Drogon.app ->
+//   relaunch -> confirm the service now runs the new build
 //
 // The daemon is deliberately detached (it outlives the app bundle it came
-// from), so replacing the bundle alone leaves a new renderer talking to an old
-// service. This script stops it through the INSTALLED bundle's own scoped
-// `drogon-stop-daemon` before the swap, then lets the new app spawn the new
-// one. Nothing here is silent: every process it stops is matched by exact
-// executable path, revalidated immediately before any signal, and reported.
+// from) and owns every running terminal and agent, so the install leaves it
+// running: the relaunched app finds a service from another build and has it
+// hand its live sessions to the bundled one (`runtime.handoff`), which then
+// replaces it without stopping anything. `--stop-daemon` restores the old,
+// session-destructive order — stop the service through the INSTALLED
+// bundle's own scoped `drogon-stop-daemon` before the swap. Nothing here is
+// silent: every process it stops is matched by exact executable path,
+// revalidated immediately before any signal, and reported.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
@@ -43,6 +46,7 @@ export function parseInstallArgs(argv) {
     fromMain: false,
     applications: DEFAULT_APPLICATIONS,
     restart: true,
+    stopDaemon: false,
     keep: 1,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -65,6 +69,9 @@ export function parseInstallArgs(argv) {
         break;
       case "--no-restart":
         options.restart = false;
+        break;
+      case "--stop-daemon":
+        options.stopDaemon = true;
         break;
       case "--keep": {
         const keep = Number(value());
@@ -243,6 +250,54 @@ const liveProcessDeps = {
   },
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
+
+/**
+ * Waits until the service answering on the default data directory runs the
+ * daemon binary this install shipped, asked through the installed CLI. A
+ * process-path check cannot tell: a service started from the replaced bundle
+ * keeps the same argv. Covers the whole handoff (the old service first waits
+ * for its successor) with room to spare.
+ */
+export async function waitForBundledService(
+  target,
+  info,
+  budgetMs,
+  {
+    run = runAcceptanceProcess,
+    sleep = liveProcessDeps.sleep,
+    now = () => Date.now(),
+  } = {},
+) {
+  const cli = bundlePaths(target).cli;
+  const deadline = now() + budgetMs;
+  let last = null;
+  for (;;) {
+    try {
+      const { stdout } = await run(
+        cli,
+        ["--json", "rpc", "status", "--params", "{}"],
+        { timeout: 15000 },
+      );
+      const envelope = JSON.parse(stdout);
+      last = envelope.result ?? null;
+      if (envelope.ok && last?.daemonArtifactSha256 === info.artifacts.daemon)
+        return {
+          verdict: "updated",
+          pids: [last.processId],
+          serviceInstanceId: last.serviceInstanceId,
+        };
+    } catch {
+      // Not answering yet (between the handoff's two services).
+    }
+    if (now() >= deadline)
+      return {
+        verdict: "unverifiable",
+        pids: last?.processId ? [last.processId] : [],
+        answeringDigest: last?.daemonArtifactSha256 ?? null,
+      };
+    await sleep(1000);
+  }
+}
 
 async function waitForProcess(prefix, budgetMs) {
   const deadline = Date.now() + budgetMs;
@@ -427,9 +482,17 @@ export async function install(argv) {
     ? await quitInstalledApp([...new Set([target, installed])])
     : { requested: [], stopped: [], forced: [], survivors: [] };
   assert.deepEqual(app.survivors, [], "The installed Drogon did not quit");
-  const daemon = installed
-    ? await stopInstalledDaemon(installed)
-    : { via: "none", daemon: null, survivors: [], verdict: "exited" };
+  // The running service keeps every live session through the swap; the
+  // relaunched app hands them to the new build. Only --stop-daemon stops it.
+  const daemon =
+    installed && options.stopDaemon
+      ? await stopInstalledDaemon(installed)
+      : {
+          via: installed ? "kept-for-handoff" : "none",
+          daemon: null,
+          survivors: [],
+          verdict: installed ? "kept" : "exited",
+        };
 
   const previous = await swapBundle({
     applications,
@@ -454,10 +517,7 @@ export async function install(argv) {
         path.join(target, "Contents", "MacOS", "Drogon"),
         30000,
       ),
-      daemon: await waitForProcess(
-        `${bundlePaths(target).daemon} --data-dir`,
-        60000,
-      ),
+      daemon: await waitForBundledService(target, info, 120000),
     };
   }
   return {

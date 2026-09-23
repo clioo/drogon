@@ -55,6 +55,26 @@ impl RingBuffer {
         self.end_cursor
     }
 
+    /// The retained bytes and the absolute offset of the first one, for a
+    /// service handoff: the successor must answer the same cursors.
+    pub(crate) fn snapshot(&self) -> (u64, Vec<u8>) {
+        let (front, back) = self.data.as_slices();
+        let mut bytes = Vec::with_capacity(self.data.len());
+        bytes.extend_from_slice(front);
+        bytes.extend_from_slice(back);
+        (self.start_cursor, bytes)
+    }
+
+    /// Rebuilds a ring from [`Self::snapshot`]. More bytes than fit keep the
+    /// newest, exactly as `push` would have.
+    pub(crate) fn from_snapshot(start_cursor: u64, bytes: &[u8]) -> Self {
+        let mut ring = Self::new();
+        ring.start_cursor = start_cursor;
+        ring.end_cursor = start_cursor;
+        ring.push(bytes);
+        ring
+    }
+
     /// `None` iff `cursor` is strictly in the future (past every byte ever
     /// written so far) — the caller maps that to `invalid_argument`.
     pub(crate) fn read(&self, cursor: u64, limit: usize) -> Option<ReadOutcome> {
@@ -95,6 +115,26 @@ impl RingBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_snapshot_rebuilds_the_same_cursors_and_bytes() {
+        let mut ring = RingBuffer {
+            capacity: 4,
+            data: VecDeque::new(),
+            start_cursor: 0,
+            end_cursor: 0,
+        };
+        ring.push(b"abcdef");
+        let (start, bytes) = ring.snapshot();
+        assert_eq!((start, bytes.as_slice()), (2, b"cdef".as_slice()));
+        let rebuilt = RingBuffer::from_snapshot(start, &bytes);
+        assert_eq!(rebuilt.end_cursor(), 6);
+        let outcome = rebuilt.read(0, 10).unwrap();
+        assert!(outcome.truncated);
+        assert_eq!(outcome.start_cursor, 2);
+        assert_eq!(outcome.bytes, b"cdef");
+        assert!(rebuilt.read(7, 10).is_none());
+    }
 
     #[test]
     fn future_cursor_is_none() {

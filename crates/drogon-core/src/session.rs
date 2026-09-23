@@ -149,7 +149,14 @@ pub(crate) struct SessionHandle {
     /// A fast divider drag against a chatty TUI is how that happens.
     size: Mutex<VecDeque<GridChange>>,
     /// Child observation is independent of PTY EOF and serialized with exact stop.
-    exit_code: Mutex<Option<i64>>,
+    /// The outer `Option` is "exit observed"; the inner one is the code, which
+    /// is `None` only for a child this process adopted through a service
+    /// handoff and therefore cannot reap (see `session_handoff`).
+    exit_code: Mutex<Option<Option<i64>>>,
+    /// Pause point for a service handoff (`session_handoff`): the reader
+    /// thread parks here so no PTY byte is consumed after the ring is
+    /// snapshotted for the successor.
+    pub(crate) handoff: crate::session_handoff::ReaderGate,
     /// Set by the reader thread when the PTY read side reached EOF or an
     /// unrecoverable read error — i.e. the drain phase is over.
     reader_done: AtomicBool,
@@ -237,7 +244,7 @@ pub(crate) struct SessionHandle {
     /// never persisted). Keyed on the observed pgid with a short TTL so a
     /// `session.list` poll never turns into a process-probe storm.
     foreground: Mutex<crate::session_foreground::ForegroundMemo>,
-    db: Arc<Mutex<Connection>>,
+    pub(crate) db: Arc<Mutex<Connection>>,
 }
 
 impl SessionHandle {
@@ -259,6 +266,50 @@ impl SessionHandle {
         cols: u16,
         rows: u16,
         master: Box<dyn MasterPty + Send>,
+        writer: Box<dyn Write + Send>,
+        child: Box<dyn Child + Send + Sync>,
+        db: Arc<Mutex<Connection>>,
+    ) -> Arc<Self> {
+        Self::assemble(
+            session_id,
+            incarnation,
+            workspace_id,
+            cwd,
+            host_id,
+            command,
+            args,
+            harness_id,
+            parent_session_id,
+            caused_by_event_id,
+            created_at,
+            cols,
+            rows,
+            PtyMaster::Spawned(master),
+            writer,
+            child,
+            db,
+        )
+    }
+
+    /// Shared by [`Self::from_spawned`] and the handoff adoption path
+    /// (`session_handoff::adopt`), which supplies a master another service
+    /// instance opened.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn assemble(
+        session_id: String,
+        incarnation: String,
+        workspace_id: String,
+        cwd: String,
+        host_id: String,
+        command: String,
+        args: Vec<String>,
+        harness_id: Option<String>,
+        parent_session_id: Option<String>,
+        caused_by_event_id: Option<String>,
+        created_at: String,
+        cols: u16,
+        rows: u16,
+        master: PtyMaster,
         writer: Box<dyn Write + Send>,
         child: Box<dyn Child + Send + Sync>,
         db: Arc<Mutex<Connection>>,
@@ -287,6 +338,7 @@ impl SessionHandle {
                 rows,
             }])),
             exit_code: Mutex::new(None),
+            handoff: crate::session_handoff::ReaderGate::default(),
             reader_done: AtomicBool::new(false),
             last_activity: Mutex::new(None),
             needs_input_at: Mutex::new(None),
@@ -574,7 +626,58 @@ impl SessionHandle {
 /// Releasing this struct closes the master descriptor. The writer lives
 /// separately (see `SessionHandle::writer`).
 struct NativePty {
-    master: Box<dyn MasterPty + Send>,
+    master: PtyMaster,
+}
+
+/// The PTY master a session holds: one this process opened, or one a
+/// previous service instance handed over (`session_handoff`). Only the
+/// operations sessions actually use are exposed, so both kinds answer them
+/// the same way.
+pub(crate) enum PtyMaster {
+    Spawned(Box<dyn MasterPty + Send>),
+    #[cfg(unix)]
+    Adopted(crate::session_handoff::AdoptedMaster),
+}
+
+impl PtyMaster {
+    fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
+        match self {
+            PtyMaster::Spawned(master) => master
+                .resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(|e| e.to_string()),
+            #[cfg(unix)]
+            PtyMaster::Adopted(master) => master.resize(cols, rows).map_err(|e| e.to_string()),
+        }
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn raw_fd(&self) -> Option<std::os::unix::io::RawFd> {
+        match self {
+            PtyMaster::Spawned(master) => master.as_raw_fd(),
+            PtyMaster::Adopted(master) => Some(master.raw_fd()),
+        }
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn process_group_leader(&self) -> Option<i32> {
+        match self {
+            PtyMaster::Spawned(master) => master.process_group_leader(),
+            PtyMaster::Adopted(master) => master.process_group_leader(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn tty_name(&self) -> Option<std::path::PathBuf> {
+        match self {
+            PtyMaster::Spawned(master) => master.tty_name(),
+            PtyMaster::Adopted(master) => master.tty_name(),
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -849,11 +952,23 @@ fn finish_spawn(
 
 const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(30);
 
-fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Send>) {
+pub(crate) fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Send>) {
     let observed_child = handle.clone();
     std::thread::spawn(move || poll_until_exit(&observed_child));
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        // The master descriptor the reader waits on, so a handoff can park
+        // it between reads instead of inside one (a byte read after the ring
+        // snapshot would be lost to the successor). Readiness is observed
+        // on the master rather than on `reader`, a duplicate of it: both
+        // name the same open file description.
+        #[cfg(unix)]
+        let readiness_fd = handle
+            .native
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|n| n.master.raw_fd());
         // Line discipline delivers output in small chunks (single-digit bytes
         // per read on macOS), so a flood session can push 100k chunks/s.
         // Timestamp formatting and mutex churn per chunk burned real CPU;
@@ -863,6 +978,18 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
         // `unknown` — suppressing it would stick fresh sessions there.
         let mut last_activity_marked: Option<Instant> = None;
         loop {
+            #[cfg(unix)]
+            if let Some(fd) = readiness_fd {
+                if handle.handoff.park_if_requested() == crate::session_handoff::Park::Released {
+                    // The successor owns this PTY now: stop without
+                    // declaring the drain over, and close nothing but this
+                    // thread's duplicate descriptor.
+                    return;
+                }
+                if !crate::session_handoff::wait_readable(fd) {
+                    continue;
+                }
+            }
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
@@ -925,16 +1052,37 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
 /// `exited` before cleanup has completed. The child lock is released before
 /// filesystem work; callers only hold the exit lock across that work, never
 /// across a sleep.
-fn try_reap(handle: &SessionHandle) -> Option<i64> {
+fn try_reap(handle: &SessionHandle) -> Option<Option<i64>> {
+    // An adopted child belongs to the service that spawned it (or, once
+    // that one is gone, to init), so its status is not ours to reap: its
+    // disappearance is the evidence, and the code is whatever the previous
+    // owner recorded, if anything. That record is read before the exit
+    // lock is taken — `persist_exit` holds the database while it reads the
+    // exit lock, so the reverse order here could deadlock.
+    #[cfg(unix)]
+    let adopted = crate::session_handoff::observe_adopted_exit(handle);
     let mut exit = handle.exit_code.lock().unwrap();
     if let Some(code) = *exit {
         return Some(code);
     }
     let code = {
-        let mut child = handle.child.lock().unwrap();
-        match child.try_wait() {
-            Ok(Some(status)) => status.exit_code() as i64,
-            _ => return None,
+        #[cfg(unix)]
+        let observed = match adopted {
+            crate::session_handoff::AdoptedExit::Running => return None,
+            crate::session_handoff::AdoptedExit::Exited(code) => Some(code),
+            crate::session_handoff::AdoptedExit::NotAdopted => None,
+        };
+        #[cfg(not(unix))]
+        let observed: Option<Option<i64>> = None;
+        match observed {
+            Some(code) => code,
+            None => {
+                let mut child = handle.child.lock().unwrap();
+                match child.try_wait() {
+                    Ok(Some(status)) => Some(status.exit_code() as i64),
+                    _ => return None,
+                }
+            }
         }
     };
     for path in handle.take_hook_cleanup_paths() {
@@ -1001,7 +1149,7 @@ pub(crate) fn advance_headless_run_records(
     db: &std::sync::Arc<std::sync::Mutex<Connection>>,
     session_id: &str,
     incarnation: &str,
-    exit_code: i64,
+    exit_code: Option<i64>,
     observed_at: f64,
 ) -> Result<AdvanceSummary, crate::automations::storage::StorageError> {
     use crate::automations::records::{AutomationRun, AutomationRunStatus};
@@ -1030,7 +1178,7 @@ pub(crate) fn advance_headless_run_records(
                 continue;
             }
             run.status = AutomationRunStatus::Completed;
-            run.exit_code = Some(exit_code);
+            run.exit_code = exit_code;
             run.observed_at = Some(observed_at);
             let payload = serde_json::to_string(&run).map_err(StorageError::Json)?;
             tx.execute(
@@ -1128,7 +1276,7 @@ fn try_release_native(handle: &SessionHandle) {
     drop(handle.writer.lock().unwrap().take());
 }
 
-fn persist_exit(handle: &SessionHandle, exit_code: i64) -> Result<(), RpcError> {
+fn persist_exit(handle: &SessionHandle, exit_code: Option<i64>) -> Result<(), RpcError> {
     // An exit resolves any pending wait: the agent will never be answered,
     // so its stamp must not outlive the session in the durable row. A
     // restored `exited` row carrying a stale `needs_input_at` reports
@@ -1139,10 +1287,13 @@ fn persist_exit(handle: &SessionHandle, exit_code: i64) -> Result<(), RpcError> 
     // and `hook_event` refuses exited sessions), so the in-memory signal
     // is unobservable — and taking its lock here would stall the exit
     // poller behind PTY-output churn, delaying hook-artifact removal.
+    // An unknown code (an adopted child, `session_handoff`) never erases one
+    // the previous owner recorded when it reaped the same child; a live
+    // row's code is NULL, so every other exit writes exactly its own.
     let conn = handle.db.lock().unwrap();
     let changed = conn
         .execute(
-            "UPDATE sessions SET verdict = 'exited', exit_code = ?2, needs_input_at = NULL WHERE id = ?1",
+            "UPDATE sessions SET verdict = 'exited', exit_code = COALESCE(?2, exit_code), needs_input_at = NULL WHERE id = ?1",
             rusqlite::params![handle.session_id, exit_code],
         )
         .map_err(error::from_sqlite)?;
@@ -1238,6 +1389,160 @@ impl SessionHandle {
     /// is the ownership evidence (same model as `session.stop`).
     pub(crate) fn child_process_id(&self) -> Option<u32> {
         self.child.lock().unwrap().process_id()
+    }
+
+    /// The child handle, for the handoff module's adopted-exit check.
+    #[cfg(unix)]
+    pub(crate) fn child_for_reap(&self) -> std::sync::MutexGuard<'_, Box<dyn Child + Send + Sync>> {
+        self.child.lock().unwrap()
+    }
+
+    /// Whether the reader drained the PTY to EOF (or failed for good).
+    pub(crate) fn reader_finished(&self) -> bool {
+        self.reader_done.load(Ordering::Acquire)
+    }
+
+    /// The PTY master descriptor, while this handle still holds it.
+    #[cfg(unix)]
+    pub(crate) fn master_fd(&self) -> Option<std::os::unix::io::RawFd> {
+        self.native
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|n| n.master.raw_fd())
+    }
+}
+
+/// Service handoff (`session_handoff`): what a successor needs to continue
+/// this exact session, and how it takes it back up. Both run with the
+/// reader parked (or not yet started), so the ring cannot move underneath.
+#[cfg(unix)]
+impl SessionHandle {
+    /// `None` when there is nothing live to hand over: the exit was already
+    /// observed, the output drained to EOF, or the child is no longer the
+    /// process this handle spawned.
+    pub(crate) fn handoff_state(&self) -> Option<crate::session_handoff::HandoffSession> {
+        use crate::session_handoff::{HandoffGrid, HandoffSession, ProcessProbe};
+        if self.is_exited() || self.reader_done.load(Ordering::Acquire) {
+            return None;
+        }
+        let tty_name = {
+            let native = self.native.lock().unwrap();
+            native.as_ref()?.master.tty_name()
+        };
+        let pid = self.child_process_id()?;
+        let ProcessProbe::Alive {
+            start,
+            zombie: false,
+        } = crate::session_handoff::probe(pid)
+        else {
+            return None;
+        };
+        let (ring_start, ring_bytes) = self.ring.lock().unwrap().snapshot();
+        let grids = self
+            .size
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|grid| HandoffGrid {
+                cursor: grid.cursor,
+                cols: grid.cols,
+                rows: grid.rows,
+            })
+            .collect();
+        let age = |at: Instant| at.elapsed().as_millis() as u64;
+        let last_activity = self.last_activity.lock().unwrap().clone();
+        let hook_transition = self.hook_transition_at.lock().unwrap().clone();
+        let agent_session = self.agent_session.lock().unwrap().clone();
+        let (modes, pending_mode_bytes) = self.paste_mode_scanner.lock().unwrap().parts();
+        Some(HandoffSession {
+            session_id: self.session_id.clone(),
+            incarnation: self.incarnation.clone(),
+            workspace_id: self.workspace_id.clone(),
+            cwd: self.cwd.clone(),
+            host_id: self.host_id.clone(),
+            command: self.command.clone(),
+            args: self.args.clone(),
+            harness_id: self.harness_id.clone(),
+            parent_session_id: self.parent_session_id.clone(),
+            caused_by_event_id: self.caused_by_event_id.clone(),
+            created_at: self.created_at.clone(),
+            pid,
+            process_start: start,
+            tty_name,
+            ring_start,
+            ring: ring_bytes,
+            grids,
+            last_activity_age_ms: last_activity.as_ref().map(|(at, _)| age(*at)),
+            last_activity_at: last_activity.map(|(_, stamp)| stamp),
+            needs_input_at: self.needs_input_at.lock().unwrap().clone(),
+            hook_transition_age_ms: hook_transition.as_ref().map(|(at, _)| age(*at)),
+            hook_transition_at: hook_transition.map(|(_, stamp)| stamp),
+            agent_prompt_preview: self.agent_prompt_preview.lock().unwrap().clone(),
+            cache_idle_at: self.cache_idle_at.lock().unwrap().clone(),
+            agent_session_id: agent_session.as_ref().map(|s| s.id.clone()),
+            agent_session_transcript_path: agent_session.and_then(|s| s.transcript_path),
+            hook_cleanup_paths: self.hook_cleanup_paths.lock().unwrap().clone(),
+            suspended_hook_files: self.suspended_hook_files.lock().unwrap().clone(),
+            explicit_wait_clear: self.explicit_wait_clear.load(Ordering::Acquire),
+            turn_fact: self.turn_fact.load(Ordering::Acquire),
+            headless: self.headless.load(Ordering::Acquire),
+            paste_is_text: self.paste_is_text.load(Ordering::Acquire),
+            bracketed_paste: modes.bracketed_paste,
+            alternate_screen: modes.alternate_screen,
+            pending_mode_bytes,
+        })
+    }
+
+    /// Puts a handed-over session's in-memory state back, before its reader
+    /// starts. Clock readings travel as ages because an `Instant` from
+    /// another process means nothing here.
+    pub(crate) fn restore_handoff_state(&self, state: crate::session_handoff::HandoffSession) {
+        let since = |age_ms: Option<u64>| {
+            age_ms.and_then(|ms| Instant::now().checked_sub(Duration::from_millis(ms)))
+        };
+        *self.ring.lock().unwrap() = RingBuffer::from_snapshot(state.ring_start, &state.ring);
+        {
+            let mut size = self.size.lock().unwrap();
+            let grids: VecDeque<GridChange> = state
+                .grids
+                .iter()
+                .map(|grid| GridChange {
+                    cursor: grid.cursor,
+                    cols: grid.cols,
+                    rows: grid.rows,
+                })
+                .collect();
+            if !grids.is_empty() {
+                *size = grids;
+            }
+        }
+        *self.last_activity.lock().unwrap() =
+            since(state.last_activity_age_ms).zip(state.last_activity_at);
+        *self.needs_input_at.lock().unwrap() = state.needs_input_at;
+        *self.hook_transition_at.lock().unwrap() =
+            since(state.hook_transition_age_ms).zip(state.hook_transition_at);
+        *self.agent_prompt_preview.lock().unwrap() = state.agent_prompt_preview;
+        *self.cache_idle_at.lock().unwrap() = state.cache_idle_at;
+        *self.agent_session.lock().unwrap() = AgentSessionIdentity::parse(
+            state.agent_session_id.as_deref(),
+            state.agent_session_transcript_path.as_deref(),
+        );
+        *self.hook_cleanup_paths.lock().unwrap() = state.hook_cleanup_paths;
+        *self.suspended_hook_files.lock().unwrap() = state.suspended_hook_files;
+        self.explicit_wait_clear
+            .store(state.explicit_wait_clear, Ordering::Release);
+        self.turn_fact.store(state.turn_fact, Ordering::Release);
+        self.headless.store(state.headless, Ordering::Release);
+        self.paste_is_text
+            .store(state.paste_is_text, Ordering::Release);
+        *self.paste_mode_scanner.lock().unwrap() = BracketedPasteScanner::from_parts(
+            TerminalModes {
+                bracketed_paste: state.bracketed_paste,
+                alternate_screen: state.alternate_screen,
+            },
+            state.pending_mode_bytes,
+        );
     }
 }
 
@@ -1550,6 +1855,7 @@ pub(crate) fn write_parts(
 /// be told a session is live when it has already been observed to exit.
 pub(crate) fn resize(handle: &SessionHandle, cols: u16, rows: u16) -> Result<Value, RpcError> {
     if let Some(code) = try_reap(handle) {
+        let code = code.map_or_else(|| "unknown".to_string(), |code| code.to_string());
         return Err(error::unverifiable(format!(
             "session already exited (code {code}); cannot resize"
         )));
@@ -1564,12 +1870,7 @@ pub(crate) fn resize(handle: &SessionHandle, cols: u16, rows: u16) -> Result<Val
         };
         native
             .master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+            .resize(cols, rows)
             .map_err(|e| error::io_error(format!("pty resize failed: {e}")))?;
         // Inside the native lock, immediately after the ioctl: every byte the
         // ring already holds was composed for the OLD grid, and the child has
@@ -1727,7 +2028,7 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
         try_release_native(handle);
         return StopObservation {
             process_action: ProcessAction::None,
-            session: persist_exit(handle, code).map(|()| to_json(handle, "exited", Some(code))),
+            session: persist_exit(handle, code).map(|()| to_json(handle, "exited", code)),
         };
     }
     let process_action = {
@@ -1743,7 +2044,7 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
             try_release_native(handle);
             return StopObservation {
                 process_action,
-                session: persist_exit(handle, code).map(|()| to_json(handle, "exited", Some(code))),
+                session: persist_exit(handle, code).map(|()| to_json(handle, "exited", code)),
             };
         }
         if Instant::now() >= deadline {
@@ -1762,7 +2063,7 @@ pub(crate) fn stop_with_action(handle: &SessionHandle) -> StopObservation {
 /// (used by `read`/`list` paths that must not block on process state).
 fn current_verdict(handle: &SessionHandle) -> (String, Option<i64>) {
     match *handle.exit_code.lock().unwrap() {
-        Some(code) => ("exited".to_string(), Some(code)),
+        Some(code) => ("exited".to_string(), code),
         None => ("live".to_string(), None),
     }
 }
@@ -1925,7 +2226,7 @@ pub(crate) fn observed_harness(
         let Some(native) = native.as_ref() else {
             return (None, None);
         };
-        crate::session_foreground::foreground_pgid(native.master.as_ref())
+        crate::session_foreground::foreground_pgid(&native.master)
     };
     let now = Instant::now();
     if let Some(cached) = handle.foreground.lock().unwrap().cached(pgid, now) {
@@ -2272,7 +2573,8 @@ mod headless_completion_tests {
         // `ended_at` to the exit time.
         insert_message(&engine, "msg-1", Some("sess-1"), "live", json!(2.0));
 
-        let summary = advance_headless_run_records(&engine.db, "sess-1", "inc-1", 0, 42.0).unwrap();
+        let summary =
+            advance_headless_run_records(&engine.db, "sess-1", "inc-1", Some(0), 42.0).unwrap();
         assert_eq!(
             summary,
             AdvanceSummary {
@@ -2324,7 +2626,8 @@ mod headless_completion_tests {
         // Already exited: keeps its earliest `ended_at`.
         insert_message(&engine, "msg:done", Some("sess-1"), "exited", json!(2.0));
 
-        let summary = advance_headless_run_records(&engine.db, "sess-1", "inc-1", 3, 42.0).unwrap();
+        let summary =
+            advance_headless_run_records(&engine.db, "sess-1", "inc-1", Some(3), 42.0).unwrap();
         assert_eq!(summary, AdvanceSummary::default());
 
         assert_eq!(

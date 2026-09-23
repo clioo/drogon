@@ -324,6 +324,16 @@ impl BracketedPasteScanner {
     pub(crate) fn modes(&self) -> TerminalModes {
         self.modes
     }
+
+    /// The scanner's whole state, for a service handoff: the modes it has
+    /// seen and any partial sequence split across the next read.
+    pub(crate) fn parts(&self) -> (TerminalModes, Vec<u8>) {
+        (self.modes, self.pending.clone())
+    }
+
+    pub(crate) fn from_parts(modes: TerminalModes, pending: Vec<u8>) -> Self {
+        Self { pending, modes }
+    }
 }
 
 #[cfg(test)]

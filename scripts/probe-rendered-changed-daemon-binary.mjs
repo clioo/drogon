@@ -8,9 +8,11 @@
 //   1. clean session state → the app quiesces the changed daemon through
 //      its own `runtime.shutdown`, respawns the bundled build, and SHOWS
 //      the "Drogon updated …" notice;
-//   2. a live session in flight → the daemon refuses to quiesce, the app
-//      keeps it attached, shows the honest "update pending" state, and the
-//      USER-chosen restart from the banner resolves the update.
+//   2. a live session in flight and a handoff nobody takes → the daemon
+//      refuses to quiesce, offers its sessions to no one and resumes them,
+//      the app keeps it attached, shows the honest "update pending" state,
+//      and the USER-chosen restart from the banner resolves the update.
+//      (A handoff that IS taken: scripts/accept-session-handoff.mjs.)
 // Daemon identity is proved through the daemon's own authenticated
 // `status` (serviceInstanceId + daemonArtifactSha256 + processId); exits
 // are proved with the kernel exit observer — the probe signals nothing.
@@ -91,10 +93,11 @@ async function waitForHealthyDaemon(cli, dataDir, deadlineMs = 30_000) {
  * the caller decides any last-resort termination with its own ownership
  * checks; this module never signals.
  */
-async function spawnIncumbentDaemon(binaryPath, dataDir, cli) {
+async function spawnIncumbentDaemon(binaryPath, dataDir, cli, env) {
   const child = startAcceptanceProcess(binaryPath, ["--data-dir", dataDir], {
     detached: true,
     stdio: "ignore",
+    ...(env ? { env: { ...process.env, ...env } } : {}),
   });
   child.unref();
   const pid = child.pid;
@@ -250,7 +253,11 @@ export async function probeRenderedChangedDaemonBinary({
     await relaunch();
     await stopBundledDaemon(daemonBinary, cli, dataDir);
 
-    const skew2 = await spawnIncumbentDaemon(skewBinary, dataDir, cli);
+    // It offers its live session for no time at all, so the successor the
+    // app starts finds nothing to adopt and the incumbent resumes it.
+    const skew2 = await spawnIncumbentDaemon(skewBinary, dataDir, cli, {
+      DROGON_HANDOFF_WAIT_MS: "0",
+    });
     try {
       // Give the incumbent a LIVE session so quiescence is genuinely refused.
       const liveSession = await rpc(
@@ -292,6 +299,13 @@ export async function probeRenderedChangedDaemonBinary({
         "a refused quiesce must keep the old daemon attached",
       );
       assert.equal(stillOld.processId, skew2.pid);
+      assert.equal(
+        (await rpc("session.list", { workspaceId }, cli, dataDir)).sessions.find(
+          (item) => item.id === liveSessionId,
+        )?.verdict,
+        "live",
+        "an untaken handoff resumes the session in the old daemon",
+      );
       checks.push("cannot-quiesce-keeps-old-daemon-attached-with-skew-signal");
 
       // The user chooses the restart from the banner (stop-all → shutdown →

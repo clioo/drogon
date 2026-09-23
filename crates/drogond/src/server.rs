@@ -429,7 +429,12 @@ fn connection_loop<S: Transport>(
         };
         let (response, admitted_shutdown) = match parse_request(&frame) {
             Ok(request) => {
-                let is_shutdown = request.method == "runtime.shutdown";
+                // An admitted handoff stops the listener exactly like a
+                // shutdown; `serve` then offers the sessions.
+                let is_shutdown = matches!(
+                    request.method.as_str(),
+                    "runtime.shutdown" | "runtime.handoff"
+                );
                 let response = dispatch_request(request, engine, token);
                 let admitted = response.ok;
                 (response, is_shutdown && admitted)

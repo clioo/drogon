@@ -509,7 +509,20 @@ fn prune_pre_migration_backups(backups_dir: &Path) {
 }
 
 /// Main schema, capability migrations, recovery and host identity commit together.
+#[cfg(test)]
 pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
+    migrate_and_recover_adopting(conn, &[])
+}
+
+/// [`migrate_and_recover`] for a service taking sessions over from its
+/// predecessor (`session_handoff`): each `(session id, incarnation)` in
+/// `adopting` is a PTY this process already holds and whose process it has
+/// already proved alive, so recovery must not declare it lost — neither
+/// the session row nor the headless run that session is executing.
+pub fn migrate_and_recover_adopting(
+    conn: &Connection,
+    adopting: &[(String, String)],
+) -> Result<String, StartupError> {
     // Before anything migrates: if this build is about to move an older
     // data dir forward, snapshot it first (best-effort; see the fn doc).
     create_pre_migration_backup_if_needed(conn);
@@ -546,7 +559,7 @@ pub fn migrate_and_recover(conn: &Connection) -> Result<String, StartupError> {
     migrate_sessions_agent_session(&tx)?;
     migrate_sessions_workspace_created_at_index(&tx)?;
     migrate_workspaces_drop_path_unique(&tx)?;
-    recover_from_prior_instance(&tx)?;
+    recover_from_prior_instance(&tx, adopting)?;
     mentu_storage::recover_prior_instance_runs(&tx)?;
     recover_prior_instance_headless_runs(&tx)?;
     let host_id = read_or_create_host_id(&tx)?;
@@ -758,11 +771,33 @@ fn migrate_workspaces_drop_path_unique(tx: &Transaction<'_>) -> rusqlite::Result
 /// respawned or trusted. This never touches a session this process itself
 /// spawned during the current run — it only fires once, at open time,
 /// before any spawn happens.
-fn recover_from_prior_instance(conn: &Connection) -> rusqlite::Result<()> {
+fn recover_from_prior_instance(
+    conn: &Connection,
+    adopting: &[(String, String)],
+) -> rusqlite::Result<()> {
+    // An adopted session keeps `live` only if its row is still the live
+    // incarnation that was handed over; anything else recovers as usual.
+    let mut kept = Vec::new();
+    for (session_id, incarnation) in adopting {
+        let live: Option<String> = conn
+            .query_row(
+                "SELECT id FROM sessions WHERE id = ?1 AND incarnation = ?2 AND verdict = 'live'",
+                rusqlite::params![session_id, incarnation],
+                |row| row.get(0),
+            )
+            .optional()?;
+        kept.extend(live);
+    }
     conn.execute(
         "UPDATE sessions SET verdict = 'unverifiable' WHERE verdict IN ('pending', 'live')",
         [],
     )?;
+    for session_id in kept {
+        conn.execute(
+            "UPDATE sessions SET verdict = 'live' WHERE id = ?1",
+            [session_id],
+        )?;
+    }
     let unverifiable_error = serde_json::json!({
         "code": "unverifiable",
         "message": "Service restarted while this request was in flight; prior outcome is unknown.",
@@ -784,6 +819,9 @@ fn recover_from_prior_instance(conn: &Connection) -> rusqlite::Result<()> {
 struct SessionEvidence {
     incarnation: Option<String>,
     exited_code: Option<i64>,
+    /// Still `live` after recovery: only a session adopted through a
+    /// service handoff, whose own exit observer will settle its claims.
+    adopted: bool,
 }
 
 fn session_evidence(conn: &Connection, session_id: &str) -> Option<SessionEvidence> {
@@ -796,12 +834,24 @@ fn session_evidence(conn: &Connection, session_id: &str) -> Option<SessionEviden
             Ok(SessionEvidence {
                 incarnation: row.get(2)?,
                 exited_code: if verdict == "exited" { code } else { None },
+                adopted: verdict == "live",
             })
         },
     )
     .optional()
     .ok()
     .flatten()
+}
+
+/// A claim on a session this process adopted from its predecessor still
+/// has a live observer — the adopted handle's own exit path advances it —
+/// so startup recovery leaves it in flight. The claim must name the
+/// adopted incarnation (or none).
+fn adopted_claim(claim_incarnation: Option<&str>, evidence: Option<&SessionEvidence>) -> bool {
+    evidence.is_some_and(|evidence| {
+        evidence.adopted
+            && claim_incarnation.is_none_or(|claim| evidence.incarnation.as_deref() == Some(claim))
+    })
 }
 
 /// What a durable in-flight claim naming a session may honestly become.
@@ -886,6 +936,9 @@ completion; its outcome is unknown. Run again to re-dispatch.";
             .terminal_session_id
             .as_deref()
             .and_then(|sid| session_evidence(conn, sid));
+        if adopted_claim(run.session_incarnation.as_deref(), evidence.as_ref()) {
+            continue;
+        }
         let (observation, exited_code) =
             reconciliation_target(run.session_incarnation.as_deref(), evidence);
         match observation {
@@ -956,6 +1009,9 @@ completion; its outcome is unknown. Run again to re-dispatch.";
             .session_id
             .as_deref()
             .and_then(|sid| session_evidence(conn, sid));
+        if adopted_claim(message.incarnation.as_deref(), evidence.as_ref()) {
+            continue;
+        }
         let (observation, _code) = reconciliation_target(message.incarnation.as_deref(), evidence);
         if message.host_observation == Some(observation)
             || message.host_observation == Some(HostObservation::Exited)

@@ -44,9 +44,11 @@ function deps(overrides: Partial<DaemonUpdateRestartDeps> = {}): DaemonUpdateRes
 describe("restartChangedDaemon", () => {
   test("a busy daemon (live sessions) is never killed: refusal becomes pending and no respawn happens", async () => {
     const spawned: string[] = [];
+    const called: string[] = [];
     const outcome = await restartChangedDaemon(
       deps({
         call: async (method) => {
+          called.push(method);
           if (method === "status") return ok({ ...fences, protocol: 1 });
           if (method === "runtime.shutdown")
             return fail(
@@ -66,6 +68,8 @@ describe("restartChangedDaemon", () => {
         "The running service could not quiesce (runtime_busy): one or more sessions are pending, live or unverifiable",
     });
     expect(spawned).toEqual([]);
+    // A service that does not advertise handoff is never asked for one.
+    expect(called).not.toContain("runtime.handoff");
   });
 
   test("a daemon predating runtime.shutdown stays attached as pending", async () => {
@@ -243,6 +247,193 @@ describe("restartChangedDaemon", () => {
     expect(outcome.kind).toBe("pending");
     if (outcome.kind === "pending")
       expect(outcome.reason).toMatch(/does not match this install/);
+  });
+});
+
+describe("restartChangedDaemon: live session handoff", () => {
+  const BUSY = fail(
+    "runtime_busy",
+    "one or more sessions are pending, live or unverifiable",
+  );
+  const HANDOFF_CAPABLE = {
+    ...fences,
+    protocol: 1,
+    capabilities: ["session.pty.v1", "runtime.session-handoff.v1"],
+  };
+
+  function bundle(): { binaryPath: string; digest: string } {
+    const dir = mkdtempSync(path.join(tmpdir(), "handoff-"));
+    const binaryPath = path.join(dir, "drogond");
+    writeFileSync(binaryPath, "bundled drogond bytes");
+    return {
+      binaryPath,
+      digest: createHash("sha256").update("bundled drogond bytes").digest("hex"),
+    };
+  }
+
+  test("a busy daemon that can hand off moves its sessions to the bundled build without stopping them", async () => {
+    const { binaryPath, digest } = bundle();
+    const called: string[] = [];
+    const spawned: string[] = [];
+    let successorUp = false;
+    const outcome = await restartChangedDaemon(
+      deps({
+        target: { binaryPath, args: ["--data-dir", "/data"] },
+        call: async (method, params) => {
+          called.push(method);
+          if (method === "status") {
+            if (successorUp)
+              return ok({
+                ...fences,
+                serviceInstanceId: "new-svc",
+                daemonArtifactSha256: digest,
+              });
+            return spawned.length > 0
+              ? fail("unverifiable", "handing off")
+              : ok(HANDOFF_CAPABLE);
+          }
+          if (method === "runtime.shutdown") return BUSY;
+          if (method === "runtime.handoff") {
+            expect(params).toEqual(fences);
+            return ok({ ...fences, accepted: true, sessions: 2 });
+          }
+          return fail("method_not_found", method);
+        },
+        spawn: async (bin, args) => {
+          spawned.push(`${bin} ${args.join(" ")}`);
+        },
+        sleep: async () => {
+          if (spawned.length > 0) successorUp = true;
+        },
+      }),
+    );
+    expect(outcome).toEqual({ kind: "restarted", handedOffSessions: 2 });
+    expect(spawned).toEqual([`${binaryPath} --data-dir /data --adopt-handoff`]);
+    // Nothing destructive was ever asked for.
+    expect(called).not.toContain("session.stop");
+    expect(called.filter((m) => m === "runtime.shutdown")).toHaveLength(1);
+  });
+
+  test("a refused handoff leaves the service attached and pending, with both reasons", async () => {
+    const spawned: string[] = [];
+    const outcome = await restartChangedDaemon(
+      deps({
+        call: async (method) => {
+          if (method === "status") return ok(HANDOFF_CAPABLE);
+          if (method === "runtime.shutdown") return BUSY;
+          if (method === "runtime.handoff")
+            return fail(
+              "runtime_busy",
+              "a Mentu recipe run is in flight; it cannot move to another service",
+            );
+          return fail("method_not_found", method);
+        },
+        spawn: async (bin) => {
+          spawned.push(bin);
+        },
+      }),
+    );
+    expect(outcome.kind).toBe("pending");
+    if (outcome.kind === "pending")
+      expect(outcome.reason).toMatch(/could not hand its sessions over.*Mentu/);
+    expect(spawned).toEqual([]);
+  });
+
+  test("a successor that never takes over is reported as the old service resuming, never as success", async () => {
+    let spawned = 0;
+    let polls = 0;
+    const outcome = await restartChangedDaemon(
+      deps({
+        call: async (method) => {
+          if (method === "status") {
+            if (spawned === 0) return ok(HANDOFF_CAPABLE);
+            polls += 1;
+            // Silent while it waits for a successor, then the SAME
+            // instance answers again: it resumed its sessions.
+            return polls < 3 ? fail("unverifiable", "down") : ok(HANDOFF_CAPABLE);
+          }
+          if (method === "runtime.shutdown") return BUSY;
+          if (method === "runtime.handoff")
+            return ok({ ...fences, accepted: true, sessions: 1 });
+          return fail("method_not_found", method);
+        },
+        spawn: async () => {
+          spawned += 1;
+        },
+      }),
+    );
+    expect(outcome).toEqual({
+      kind: "pending",
+      reason:
+        "The new service did not take the sessions over, so the running service resumed them.",
+    });
+  });
+
+  test("a different instance with the wrong binary after a handoff is never claimed as this install", async () => {
+    const { binaryPath } = bundle();
+    let spawned = false;
+    const outcome = await restartChangedDaemon(
+      deps({
+        target: { binaryPath, args: ["--data-dir", "/data"] },
+        call: async (method) => {
+          if (method === "status")
+            return spawned
+              ? ok({ ...fences, serviceInstanceId: "other", daemonArtifactSha256: "c".repeat(64) })
+              : ok(HANDOFF_CAPABLE);
+          if (method === "runtime.shutdown") return BUSY;
+          if (method === "runtime.handoff")
+            return ok({ ...fences, accepted: true, sessions: 1 });
+          return fail("method_not_found", method);
+        },
+        spawn: async () => {
+          spawned = true;
+        },
+      }),
+    );
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind === "failed")
+      expect(outcome.reason).toMatch(/does not match this install/);
+  });
+
+  test("nothing answering after the handoff deadline is an honest failure", async () => {
+    let now = 0;
+    const realNow = Date.now;
+    Date.now = () => now;
+    try {
+      const outcome = await restartChangedDaemon(
+        deps({
+          handoffDeadlineMs: 100,
+          call: async (method) => {
+            if (method === "status")
+              return now === 0 ? ok(HANDOFF_CAPABLE) : fail("unverifiable", "down");
+            if (method === "runtime.shutdown") return BUSY;
+            if (method === "runtime.handoff") {
+              now = 1;
+              return ok({ ...fences, accepted: true, sessions: 1 });
+            }
+            return fail("method_not_found", method);
+          },
+          sleep: async (ms) => {
+            now += Math.max(ms, 50);
+          },
+        }),
+      );
+      expect(outcome.kind).toBe("failed");
+    } finally {
+      Date.now = realNow;
+    }
+  });
+});
+
+describe("runtime.handoff reply contract", () => {
+  test("the daemon's admitted-handoff reply validates, anything else does not", () => {
+    const schema = resultSchemas["runtime.handoff"];
+    // Exactly what `do_runtime_handoff` (crates/drogon-core) serializes.
+    expect(
+      schema.parse({ hostId: "h1", serviceInstanceId: "svc1", accepted: true, sessions: 2 }),
+    ).toEqual({ hostId: "h1", serviceInstanceId: "svc1", accepted: true, sessions: 2 });
+    expect(() => schema.parse({ hostId: "h1", serviceInstanceId: "svc1", accepted: false, sessions: 2 })).toThrow();
+    expect(() => schema.parse({ hostId: "h1", serviceInstanceId: "svc1", accepted: true })).toThrow();
   });
 });
 

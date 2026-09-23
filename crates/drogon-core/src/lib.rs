@@ -68,6 +68,7 @@ mod ring;
 mod session;
 mod session_env;
 mod session_foreground;
+pub mod session_handoff;
 mod terminal_modes;
 mod worker_brief;
 mod workspace;
@@ -261,6 +262,9 @@ pub struct Engine {
     /// accepted receipt. The server uses its separate post-reply gate to
     /// stop listening; this flag only fences core mutations.
     quiescent: AtomicBool,
+    /// Sessions parked for an accepted `runtime.handoff`, until the
+    /// successor confirms or the handoff is abandoned (`session_handoff`).
+    handoff: session_handoff::HandoffState,
     /// Unix ms of the automation scheduler's last completed tick (0 before
     /// the first). `status` reports it so a stalled scheduler — every watch
     /// silently unchecked — is visible instead of inferred.
@@ -280,6 +284,15 @@ pub struct Engine {
 /// `cfg(test)`.
 #[cfg(test)]
 type PreFreezeHook = Box<dyn Fn(&Engine) + Send>;
+
+/// [`CAPABILITIES`] plus the ones this platform decides at build time.
+fn capabilities() -> Vec<&'static str> {
+    let mut capabilities = CAPABILITIES.to_vec();
+    if session_handoff::supported() {
+        capabilities.push(session_handoff::HANDOFF_CAPABILITY);
+    }
+    capabilities
+}
 
 /// Sha256 of this daemon process's own executable, computed once (install
 /// -resilience P5). `version` is frozen at `CARGO_PKG_VERSION`, so two
@@ -302,6 +315,17 @@ fn daemon_artifact_sha256() -> Option<String> {
 
 impl Engine {
     pub fn open(data_dir: &Path) -> Result<Engine, RpcError> {
+        Self::open_adopting(data_dir, &[])
+    }
+
+    /// [`Self::open`] for a service taking sessions over through a handoff:
+    /// `adopting` names the `(session id, incarnation)` pairs whose PTYs it
+    /// already holds, which startup recovery must keep live
+    /// (`session_handoff::IncomingHandoff::verified_live`).
+    pub fn open_adopting(
+        data_dir: &Path,
+        adopting: &[(String, String)],
+    ) -> Result<Engine, RpcError> {
         fs::create_dir_all(data_dir)
             .map_err(|e| error::io_error(format!("cannot create data dir: {e}")))?;
         // This crate's own precondition, independent of any caller (such as
@@ -326,7 +350,7 @@ impl Engine {
             .map_err(|e| error::io_error(format!("Unsafe database files: {e}")))?;
         let conn = db::open(data_dir).map_err(error::from_sqlite)?;
         // Migration refusal must roll back recovery and host identity too.
-        let gate = db::migrate_and_recover(&conn);
+        let gate = db::migrate_and_recover_adopting(&conn, adopting);
         // Refusal can leave files behind; permission failures take precedence.
         #[cfg(unix)]
         db::harden_permissions(data_dir).map_err(|e| {
@@ -357,6 +381,7 @@ impl Engine {
             meeting_commitments: meetings::CommitmentStore::new(data_dir),
             lifecycle_gate: RwLock::new(()),
             quiescent: AtomicBool::new(false),
+            handoff: session_handoff::HandoffState::default(),
             scheduler_last_tick_ms: std::sync::atomic::AtomicU64::new(0),
             #[cfg(test)]
             pre_freeze_hook: Mutex::new(None),
@@ -491,6 +516,10 @@ impl Engine {
         match request.method.as_str() {
             "status" => Ok(self.status()),
             "runtime.shutdown" => self.do_runtime_shutdown(request),
+            "runtime.handoff" => {
+                service_quiescence::validate_fences(self, &request.params)?;
+                self.do_runtime_handoff()
+            }
             "harness.list" => self.harness_list(),
             "harness.models" => self.harness_models(&request.params),
             "agent.settings" => self.agent_settings(),
@@ -743,7 +772,7 @@ impl Engine {
             "hostId": self.host_id,
             "serviceInstanceId": self.service_instance_id,
             "protocol": PROTOCOL_VERSION,
-            "capabilities": CAPABILITIES,
+            "capabilities": capabilities(),
             "version": env!("CARGO_PKG_VERSION"),
             // Install-resilience P4/P5 (additive, both nullable-safe for
             // older readers): the monotonic wire-behavior floor this build
