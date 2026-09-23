@@ -16,6 +16,7 @@
    The daemon-side bound belongs to the protocol (a separate change); this is
    the shell's own honest degradation. Pure state machine, unit-tested. */
 import type { Session } from "../../../../shared/session-contract";
+import { observationKeyOf } from "./sidebar-session-observation";
 
 /** Workspaces one degraded tick may read: enough to cover a normal sidebar
  *  in a few ticks without turning a 3 s poll into a fan-out. */
@@ -33,11 +34,29 @@ export type SidebarSessionSourceView = {
    * keeps the cards populated. Callers may surface it; nothing here hides it.
    */
   degraded: boolean;
+  /**
+   * R3: exact host+id+incarnation keys the latest poll phase ACTUALLY read
+   * successfully. A host-wide success marks the whole truth; a degraded
+   * poll marks only the workspaces its scoped reads delivered. Retained
+   * rows (kept so cards never blank) are present in `sessions` but absent
+   * here: they are last-known rendering, never new facts, so the selected
+   * copy's observation metadata must not adopt them.
+   */
+  freshKeys: ReadonlySet<string>;
+  /**
+   * Workspace ids whose scoped truth was actually read in the latest poll
+   * phase. Unlike `freshKeys`, this still records an empty successful read,
+   * which matters when ordering a pending selected-workspace load.
+   */
+  freshWorkspaceIds: ReadonlySet<string>;
 };
 
 export type SidebarSessionCollector = {
   /** A host-wide read succeeded: it is the whole truth again. */
-  noteHostWide(sessions: readonly Session[]): void;
+  noteHostWide(
+    sessions: readonly Session[],
+    workspaceIds?: readonly string[],
+  ): void;
   /** A host-wide read failed: fall back to the cached scoped lists. */
   noteHostWideFailure(): void;
   /** The next workspace ids to read, in rotation order. */
@@ -51,6 +70,14 @@ export type SidebarSessionCollector = {
   view(): SidebarSessionSourceView;
   /** True while the last host-wide read failed. */
   isDegraded(): boolean;
+  /**
+   * R3: an independent copy of the committed state. A poll reads into the
+   * fork; the shell swaps it in only for a fresh, non-cancelled commit, so
+   * a cancelled epoch's late rows (or a stale poll's older truth) can never
+   * corrupt the shared accumulator. Rows are shared by reference and never
+   * mutated in place; lists, rotation and the fresh set are all copied.
+   */
+  fork(): SidebarSessionCollector;
 };
 
 /**
@@ -70,7 +97,7 @@ export async function pollSidebarSessions(deps: {
 }): Promise<SidebarSessionSourceView> {
   const hostWide = await deps.fetchHostWide();
   if (hostWide.ok && Array.isArray(hostWide.sessions)) {
-    deps.collector.noteHostWide(hostWide.sessions);
+    deps.collector.noteHostWide(hostWide.sessions, deps.workspaceIds);
     return deps.collector.view();
   }
   deps.collector.noteHostWideFailure();
@@ -94,13 +121,32 @@ export async function pollSidebarSessions(deps: {
   return deps.collector.view();
 }
 
-export function createSidebarSessionCollector(): SidebarSessionCollector {
-  let healthy = true;
-  let hostWide: Session[] = [];
-  const byWorkspaceId = new Map<string, Session[]>();
+type SidebarSessionCollectorState = {
+  healthy: boolean;
+  hostWide: Session[];
+  byWorkspaceId: [string, Session[]][];
+  cursor: number;
+  fresh: string[];
+  freshWorkspaces: string[];
+};
+
+function createCollectorFrom(initial?: SidebarSessionCollectorState): SidebarSessionCollector {
+  let healthy = initial?.healthy ?? true;
+  let hostWide = initial ? [...initial.hostWide] : [];
+  const byWorkspaceId = new Map<string, Session[]>(
+    (initial?.byWorkspaceId ?? []).map(
+      ([id, sessions]) => [id, [...sessions]] as [string, Session[]],
+    ),
+  );
   // Insertion order is the rotation: the oldest-read workspace is the next
   // one to refresh, so a degraded sidebar still converges on fresh rows.
-  let cursor = 0;
+  let cursor = initial?.cursor ?? 0;
+  // R3: keys actually delivered by the latest poll phase (see `freshKeys`
+  // above). Reset when a new degraded phase begins; each successful scoped
+  // delivery adds its own workspace's keys, so a batch accumulates exactly
+  // what it read and nothing it retained.
+  let fresh = new Set<string>(initial?.fresh ?? []);
+  let freshWorkspaces = new Set<string>(initial?.freshWorkspaces ?? []);
 
   const merged = (): Session[] => {
     const byId = new Map<string, Session>();
@@ -111,16 +157,23 @@ export function createSidebarSessionCollector(): SidebarSessionCollector {
   };
 
   return {
-    noteHostWide(sessions) {
+    noteHostWide(sessions, workspaceIds) {
       healthy = true;
       hostWide = [...sessions];
       byWorkspaceId.clear();
       cursor = 0;
+      fresh = new Set(sessions.map(observationKeyOf));
+      freshWorkspaces = new Set(
+        workspaceIds ?? sessions.map((session) => session.workspaceId),
+      );
     },
     noteHostWideFailure() {
       healthy = false;
       // Keep `hostWide` as the last known full list: a transient failure must
-      // not blank the sidebar (the shell's own poll contract).
+      // not blank the sidebar (the shell's own poll contract). The fresh set
+      // restarts: only the scoped reads of THIS poll phase prove anything.
+      fresh = new Set();
+      freshWorkspaces = new Set();
     },
     planScopedReads(workspaceIds, batchSize = SIDEBAR_SCOPED_READ_BATCH) {
       const wanted = [...new Set(workspaceIds)].slice(
@@ -143,18 +196,50 @@ export function createSidebarSessionCollector(): SidebarSessionCollector {
     noteScoped(workspaceId, sessions) {
       byWorkspaceId.delete(workspaceId);
       byWorkspaceId.set(workspaceId, [...sessions]);
+      for (const session of sessions) fresh.add(observationKeyOf(session));
+      freshWorkspaces.add(workspaceId);
     },
     view() {
-      if (healthy) return { sessions: hostWide, degraded: false };
+      // A copy per view: callers hold the array AND the set across async
+      // adopt commits, and later polls must never mutate committed data or
+      // proof (rows themselves are shared by reference, never mutated).
+      if (healthy)
+        return {
+          sessions: [...hostWide],
+          degraded: false,
+          freshKeys: new Set(fresh),
+          freshWorkspaceIds: new Set(freshWorkspaces),
+        };
       const scoped = merged();
       // Nothing scoped has landed yet: the last full list still beats blank.
       return {
-        sessions: scoped.length > 0 ? [...scoped, ...hostWide.filter((s) => !scoped.some((row) => row.id === s.id))] : hostWide,
+        sessions:
+          scoped.length > 0
+            ? [...scoped, ...hostWide.filter((s) => !scoped.some((row) => row.id === s.id))]
+            : [...hostWide],
         degraded: true,
+        freshKeys: new Set(fresh),
+        freshWorkspaceIds: new Set(freshWorkspaces),
       };
     },
     isDegraded() {
       return !healthy;
     },
+    fork() {
+      return createCollectorFrom({
+        healthy,
+        hostWide: [...hostWide],
+        byWorkspaceId: [...byWorkspaceId].map(
+          ([id, sessions]) => [id, [...sessions]] as [string, Session[]],
+        ),
+        cursor,
+        fresh: [...fresh],
+        freshWorkspaces: [...freshWorkspaces],
+      });
+    },
   };
+}
+
+export function createSidebarSessionCollector(): SidebarSessionCollector {
+  return createCollectorFrom();
 }

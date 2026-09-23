@@ -1,8 +1,9 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
   agentIconKind,
   agentStateLabel,
   agentStateOf,
+  sessionAgentState,
   sessionDotState,
 } from "./agent-state";
 import type { Session } from "../../../../shared/session-contract";
@@ -53,6 +54,119 @@ test("idle and unknown never render as working", () => {
     "idle",
   );
   expect(agentIconKind(agentStateOf(base))).toBe("unknown");
+});
+
+describe("shell-aware agent activity (owner's report, F1)", () => {
+  const shell = (overrides: Partial<Session> = {}): Session => ({
+    ...base,
+    harnessId: null,
+    observedHarnessId: null,
+    ...overrides,
+  });
+  const launched = (overrides: Partial<Session> = {}): Session =>
+    shell({ harnessId: "pi", ...overrides });
+  const observed = (overrides: Partial<Session> = {}): Session =>
+    shell({ observedHarnessId: "pi", ...overrides });
+
+  test("unproven shell working reads unknown, never working nor idle", () => {
+    // Old-daemon wire: echo/redraw bytes inside the activity window derive
+    // `working` for a harness-less shell. Coordinator guardrail:
+    // recognition is not turn evidence, and a manufactured Idle is no more
+    // honest than the Working claim — the turn is simply unknown.
+    expect(sessionAgentState(shell({ agentState: "working" }))).toBe(
+      "unknown",
+    );
+    expect(
+      agentIconKind(sessionAgentState(shell({ agentState: "working" }))),
+    ).toBe("unknown");
+  });
+
+  test("an observed harness repaints the same unknown turn", () => {
+    // An idle composer hosted in a shell repaints with no hooks firing;
+    // identity (row title, glyph) is kept, but the turn stays unknown.
+    expect(sessionAgentState(observed({ agentState: "working" }))).toBe(
+      "unknown",
+    );
+  });
+
+  test("a launched working without hook proof reads unknown, never a spinner", () => {
+    // The R1 correction: an old daemon derives launch `working` from PTY
+    // output alone (an idle repaint inside the activity window), which the
+    // wire cannot distinguish from a true hook turn — so missing proof
+    // never makes an agent Working, launch or not.
+    expect(sessionAgentState(launched({ agentState: "working" }))).toBe(
+      "unknown",
+    );
+    expect(
+      agentIconKind(sessionAgentState(launched({ agentState: "working" }))),
+    ).toBe("unknown");
+  });
+
+  test("a hook-proven launch keeps its working", () => {
+    // Current daemons only emit `agentStateAuthority: "hook"` for a
+    // hook-reported turn, so the wire state is authoritative there.
+    expect(
+      sessionAgentState(
+        launched({ agentState: "working", agentStateAuthority: "hook" }),
+      ),
+    ).toBe("working");
+  });
+
+  test("idle without hook proof reads unknown, never a false quiet", () => {
+    // A quiet activity clock is not proof an agent is idle: old-daemon
+    // `idle` (no field) and current activity-derived `idle` alike read
+    // unknown rather than oscillating a false Idle.
+    expect(sessionAgentState(shell({ agentState: "idle" }))).toBe("unknown");
+    expect(
+      sessionAgentState(
+        shell({ agentState: "idle", agentStateAuthority: "activity" }),
+      ),
+    ).toBe("unknown");
+    expect(
+      sessionAgentState(
+        launched({ agentState: "idle", agentStateAuthority: "activity" }),
+      ),
+    ).toBe("unknown");
+  });
+
+  test("a hook-concluded idle keeps its idle despite later echo", () => {
+    // A turn-end hook concluded the turn on the harness's own authority,
+    // so the row reads idle even though PTY bytes followed.
+    expect(
+      sessionAgentState(
+        launched({ agentState: "idle", agentStateAuthority: "hook" }),
+      ),
+    ).toBe("idle");
+  });
+
+  test("every other shell state passes through untouched", () => {
+    expect(sessionAgentState(shell({ agentState: "needs_input" }))).toBe(
+      "needs_input",
+    );
+    expect(
+      sessionAgentState(
+        launched({ agentState: "needs_input", agentStateAuthority: "hook" }),
+      ),
+    ).toBe("needs_input");
+    expect(sessionAgentState(shell({ agentState: "exited" }))).toBe("exited");
+    expect(sessionAgentState(shell())).toBe("unknown");
+    expect(sessionAgentState(shell({ agentState: "unknown" }))).toBe(
+      "unknown",
+    );
+  });
+
+  test("the unverifiable rule still applies before the shell rule", () => {
+    expect(
+      sessionAgentState(
+        shell({ verdict: "unverifiable", agentState: "working" }),
+      ),
+    ).toBe("unknown");
+    expect(
+      sessionAgentState(
+        launched({ verdict: "unverifiable", agentState: "working" }),
+      ),
+    ).toBe("unknown");
+  });
 });
 
 test("an unverifiable session never claims a running agent", () => {

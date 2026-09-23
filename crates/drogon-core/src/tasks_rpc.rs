@@ -364,6 +364,13 @@ const PR_JSON_FIELDS: &str = "number,title,url,state,author,assignees,reviewDeci
 /// open/closed/all spellings, so the shared state filter reaches `gh`
 /// unchanged; `gh` has no total count, hence the same fetch-one-extra
 /// `hasNextPage` probe as issues.
+/// Fields the sidebar card's state marker reads (`state` for the lifecycle,
+/// `mergeable`/`isDraft`/`reviewDecision`/`statusCheckRollup` for the
+/// ready-claim): both PR call shapes must request every one of them, since
+/// `gh` returns only requested fields and `convert_pull` cannot tell a
+/// concluded review from an open one without `state`.
+const PR_JSON_FIELDS: &str = "number,title,state,url,author,assignees,reviewDecision,statusCheckRollup,mergeable,isDraft,headRefName,baseRefName,updatedAt,labels";
+
 fn pr_list_argv(repo: &str, state: TaskIssueState, limit: u64) -> Vec<String> {
     vec![
         "pr".to_string(),
@@ -654,6 +661,11 @@ fn convert_pull(raw: GhPullRequest) -> Result<TaskPullRequest, RpcError> {
             "gh returned a pull request without a number or title".to_string(),
         ));
     }
+    // A missing `state` key means an old daemon asked `gh` without the
+    // field (pre-`PR_JSON_FIELDS`): real `gh` then omits it and every
+    // concluded review falsely reads OPEN. Defaulting preserves the old
+    // wire shape, but only a current daemon reports merged/closed honestly
+    // — the renderer cannot recover the lifecycle from a stateless row.
     let state = match raw.state.as_deref().unwrap_or("OPEN") {
         "OPEN" if raw.is_draft => TaskPullRequestState::Draft,
         "OPEN" => TaskPullRequestState::Open,

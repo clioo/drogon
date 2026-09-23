@@ -1,8 +1,9 @@
 /* MIT Copyright (c) 2026 Lovecast Inc.
    The card's right-hand review marker (owner's design, 2026-09-21): one
    merge glyph whose colour names the review's state — emerald with a check
-   for a merged review, cyan for an open one, muted for a draft, rose for a
-   branch that conflicts. Class-compatible with the reference's MetaIconBadge
+   for a merged review, cyan for a confirmed-ready one, neutral for a live
+   but unconfirmed review, muted for a draft, rose for a branch that
+   conflicts. Class-compatible with the reference's MetaIconBadge
    shell (`WorktreeCardMetadataControls.tsx`): `size-3.5`, muted by default,
    label in an sr-only span; here the label is the same accessible string the
    meta row's chip used (`getPrChipAccessibleLabel`), and the title is the
@@ -18,7 +19,8 @@ import {
 /** Tone per state, over the sidebar's own surfaces in both themes. */
 const STATE_TONE: Record<string, string> = {
   merged: "text-emerald-500",
-  ready: "text-sky-500 dark:text-sky-400",
+  ready: "text-cyan-500 dark:text-cyan-400",
+  open: "text-muted-foreground",
   draft: "text-muted-foreground/70",
   conflicts: "text-rose-500",
   closed: "text-muted-foreground/70",

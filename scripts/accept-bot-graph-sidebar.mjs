@@ -24,7 +24,14 @@ const world = await mkdtemp(path.join(tmpdir(), "drogon-sidebar-"));
 const dataDir = path.join(world, "data");
 const profileDir = path.join(world, "profile");
 const siteDir = path.join(world, "site");
-const report = { status: "FAILED", fixture: "Rendered snapshot fixture; not graph execution", world, checks: [], cleanup: [], screenshots: [] };
+const report = { status: "FAILED", fixture: "Rendered snapshot fixture; not graph execution", world, checks: [], cleanup: [], screenshots: [], screenshotTimings: [] };
+const COLD_SCREENSHOT_TIMEOUT_MS = 120_000;
+async function timedScreenshot(page, shotPath) {
+  const startedAt = Date.now();
+  await page.screenshot({ path: shotPath, animations: "disabled", timeout: 120_000 });
+  report.screenshotTimings.push({ path: shotPath, durationMs: Date.now() - startedAt, timeoutMs: COLD_SCREENSHOT_TIMEOUT_MS });
+  report.screenshots.push(shotPath);
+}
 const owned = new Map();
 let server, daemon, daemonHandle, desktop, browser, foreground, page;
 let cancelled = false;
@@ -115,7 +122,7 @@ try {
   assert.deepEqual((await page.locator("[data-worktree-agent-row]").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-worktree-agent-row")))).sort(), ["bot-dispatcher", "main-session", "worker-deck", "worker-page"]);
   report.checks.push("native graph main automatically visible beside its workers while the exited Bot remains separate");
   const expanded = path.join(receipt, "main-and-workers.png");
-  await page.screenshot({ path: expanded }); report.screenshots.push(expanded);
+  await timedScreenshot(page, expanded);
   await page.locator('[data-worktree-agent-row="worker-deck"]').click();
   assert.equal(await page.evaluate(() => window.delegationSidebarFixture.calls.selectedSession), "worker-deck");
   await graph().click();
@@ -130,7 +137,7 @@ try {
   await graph().click();
   assert.equal(await page.getByText("Main agent · unverifiable", { exact: true }).isVisible(), true);
   const unavailable = path.join(receipt, "unverifiable.png");
-  await page.screenshot({ path: unavailable }); report.screenshots.push(unavailable);
+  await timedScreenshot(page, unavailable);
   await graph().click();
   await page.evaluate(() => window.delegationSidebarFixture.disconnect(false));
   await page.getByRole("button", { name: "Work Graph · Running" }).waitFor();

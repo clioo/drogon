@@ -29,8 +29,9 @@
 //!   session count, hard-capped) and a slow poller always converges on the
 //!   truth instead of replaying history.
 //! - `record_snapshot` is transition-guarded: it stores (and sequences) an
-//!   event only when the session's `(agentState, agentStateAt)` differs from
-//!   what was last stored, so steady-state re-observations stay silent.
+//!   event only when the session's `(agentState, agentStateAt,
+//!   agentStateAuthority)` differs from what was last stored, so
+//!   steady-state re-observations stay silent.
 //! - Daemon → main ordering uses the monotonic `seq` (the poll cursor, and
 //!   the resync signal together with `bootId` from the poll response).
 //!   Main → renderer ordering uses `agentStateAt` compare in the renderer's
@@ -53,6 +54,7 @@ pub(crate) struct SessionStateEvent {
     pub(crate) workspace_id: String,
     pub(crate) agent_state: String,
     pub(crate) agent_state_at: Option<String>,
+    pub(crate) agent_state_authority: Option<String>,
     pub(crate) agent_prompt_preview: Option<String>,
     pub(crate) cache_idle_at: Option<String>,
 }
@@ -65,6 +67,7 @@ impl SessionStateEvent {
             "workspaceId": self.workspace_id,
             "agentState": self.agent_state,
             "agentStateAt": self.agent_state_at,
+            "agentStateAuthority": self.agent_state_authority,
             "agentPromptPreview": self.agent_prompt_preview,
             "cacheIdleAt": self.cache_idle_at,
         })
@@ -87,16 +90,23 @@ const MAX_TRACKED_SESSIONS: usize = 2048;
 
 impl SessionEventLog {
     /// Records a `session::snapshot`-shaped value. Returns the sequenced
-    /// event when the session's `(agentState, agentStateAt)` moved, `None`
-    /// for steady-state re-observations and for values that carry no session
-    /// identity. Same-input idempotent: recording one snapshot twice stores
-    /// (and sequences) exactly one event.
+    /// event when the session's `(agentState, agentStateAt,
+    /// agentStateAuthority)` moved, `None` for steady-state re-observations
+    /// and for values that carry no session identity. An authority-only move
+    /// (proof gained or lost with the state unchanged) still sequences: the
+    /// renderer's poll identity compares the field too, so swallowing it
+    /// here would desync push from poll. Same-input idempotent: recording
+    /// one snapshot twice stores (and sequences) exactly one event.
     pub(crate) fn record(&mut self, snapshot: &Value) -> Option<SessionStateEvent> {
         let session_id = snapshot.get("id")?.as_str()?;
         let workspace_id = snapshot.get("workspaceId")?.as_str()?;
         let agent_state = snapshot.get("agentState")?.as_str()?;
         let agent_state_at = snapshot
             .get("agentStateAt")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let agent_state_authority = snapshot
+            .get("agentStateAuthority")
             .and_then(Value::as_str)
             .map(str::to_string);
         let agent_prompt_preview = snapshot
@@ -110,6 +120,7 @@ impl SessionEventLog {
         if let Some(known) = self.latest.get(session_id)
             && known.agent_state == agent_state
             && known.agent_state_at == agent_state_at
+            && known.agent_state_authority == agent_state_authority
             && known.agent_prompt_preview == agent_prompt_preview
             && known.cache_idle_at == cache_idle_at
         {
@@ -132,6 +143,7 @@ impl SessionEventLog {
             workspace_id: workspace_id.to_string(),
             agent_state: agent_state.to_string(),
             agent_state_at,
+            agent_state_authority,
             agent_prompt_preview,
             cache_idle_at,
         };
@@ -231,6 +243,27 @@ mod tests {
         assert_eq!(events[0].agent_state, "idle");
         assert!(log.since(2).is_empty());
         assert_eq!(log.current_seq(), 2);
+    }
+
+    #[test]
+    fn authority_only_moves_push_like_any_transition() {
+        // Proof gained or lost with the state unchanged flips the rendered
+        // dot, so the log must sequence it — never swallow it as a
+        // same-state duplicate the poll would then disagree with.
+        let mut log = SessionEventLog::default();
+        let mut row = snapshot("s1", "working", Some("t1"));
+        log.record(&row).unwrap();
+        row["agentStateAuthority"] = json!("hook");
+        let proven = log.record(&row).unwrap();
+        assert_eq!(proven.agent_state_authority.as_deref(), Some("hook"));
+        assert_eq!(proven.wire()["agentStateAuthority"], "hook");
+        assert!(log.record(&row).is_none());
+        // An old daemon's snapshot without the field moves off the proof.
+        row.as_object_mut().unwrap().remove("agentStateAuthority");
+        let unproven = log.record(&row).unwrap();
+        assert_eq!(unproven.agent_state_authority, None);
+        assert!(unproven.wire()["agentStateAuthority"].is_null());
+        assert!(log.record(&row).is_none());
     }
 
     #[test]
@@ -514,6 +547,7 @@ mod tests {
                 "workspaceId": "w1",
                 "agentState": "needs_input",
                 "agentStateAt": "t9",
+                "agentStateAuthority": null,
                 "agentPromptPreview": null,
                 "cacheIdleAt": null,
             })

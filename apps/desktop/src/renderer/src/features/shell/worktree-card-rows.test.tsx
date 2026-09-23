@@ -88,6 +88,7 @@ describe("WorktreeCard nested session rows", () => {
           id: "s-1",
           agentState: "working",
           harnessId: "claude",
+          agentStateAuthority: "hook",
           createdAt: "2026-09-08T11:00:00.000Z",
         }),
         session({
@@ -103,9 +104,12 @@ describe("WorktreeCard nested session rows", () => {
     try {
       // Harness session row: the harness label is the primary title now
       // (issue #622: the row reads what the session runs, not Terminal N),
-      // and the owner's design appends the row's own state.
+      // and the owner's design appends the row's own state. The sidebar
+      // reads the owner-authorized "Claude Code" branding, so the
+      // accessible name carries it too (label-in-name: it must contain the
+      // visible text).
       expect(
-        screen.getByRole("button", { name: "Claude - Working" }),
+        screen.getByRole("button", { name: "Claude Code - Working" }),
       ).toBeTruthy();
       // Fallback row for the session that never reported: tab title plus
       // the fork's freshness copy, never a bare missing row.
@@ -131,8 +135,11 @@ describe("WorktreeCard nested session rows", () => {
   test("focused highlight follows the active tab and summary matches rows", () => {
     const { container, unmount } = renderCard(
       [
-        session({ id: "s-1", agentState: "working" }),
-        session({ id: "s-2", agentState: "idle" }),
+        // Launched agents on a current daemon: hook turn states carry the
+        // hook proof (R1) — harness-less `working` wire is the old-daemon
+        // false positive, never an agent turn.
+        session({ id: "s-1", agentState: "working", harnessId: "pi", agentStateAuthority: "hook" }),
+        session({ id: "s-2", agentState: "idle", harnessId: "pi", agentStateAuthority: "hook" }),
       ],
       "s-2",
     );
@@ -172,16 +179,37 @@ describe("WorktreeCard nested session rows", () => {
           command: "/bin/zsh",
           createdAt: "2026-09-08T11:30:00.000Z",
         }),
+        // F1 sidebar truth (regression, explained): only a `harness.start`
+        // turn is proven work. The observed and shell sessions above keep
+        // their identity but state their agent silence (an idle repaint
+        // without hooks proves no turn), so the lane's working spinner
+        // rides on this launched session.
+        session({
+          id: "s-3",
+          agentState: "working",
+          harnessId: "pi",
+          agentStateAuthority: "hook",
+          command: "pi",
+          createdAt: "2026-09-08T11:45:00.000Z",
+        }),
       ],
       "",
     );
     try {
       // No `Claude - zsh`, never `Claude - Claude`: the harness label is
       // the whole row text for the observed session, followed by the state
-      // the owner's design puts on every row (here: working).
-      expect(screen.getByRole("button", { name: "Claude - Working" })).toBeTruthy();
+      // the owner's design puts on every row (here: the agent silence —
+      // recognition is not turn evidence). Sidebar branding reads
+      // "Claude Code" (owner-authorized), carried in the accessible name
+      // per label-in-name.
       expect(
-        screen.getByRole("button", { name: "Terminal 2 - zsh - Working" }),
+        screen.getByRole("button", { name: /Claude Code - No update in/ }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: /Terminal 2 - .*No update in/ }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Pi - Working" }),
       ).toBeTruthy();
       const observedRow = container.querySelector(
         '[data-worktree-agent-row="s-1"]',

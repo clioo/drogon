@@ -1,11 +1,10 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/renderer/src/components/sidebar/worktree-card-agent-summary.ts
-   (adapter: the reference summarizes dashboard agent rows with dot
-   states; this repo's card sees Sessions with `agentState`, so the same
-   group-order/count projection runs over `agentState` values instead.
+   worktree-card-agent-summary.ts (adapter: the reference summarizes agent
+   rows with dot states; this repo groups Sessions by `sessionAgentState`,
+   the same normalized derivation rows, tabs and the card sentence read.
    Pure functions, unit-tested.) */
 import type { AgentState, Session } from "../../../../shared/session-contract";
-import { sessionDotState } from "./agent-state";
+import { sessionAgentState } from "./agent-state";
 import { resolveRowHarnessId } from "./worktree-agent-rows";
 
 // Why: the source's SUMMARY_STATE_ORDER (waiting, blocked, working,
@@ -67,7 +66,7 @@ export function formatWorktreeCardSummaryLine(
 export function cardDotState(sessions: Session[]): AgentState {
   if (sessions.length === 0) return "unknown";
   const present = new Set<AgentState>();
-  for (const session of sessions) present.add(sessionDotState(session));
+  for (const session of sessions) present.add(sessionAgentState(session));
   return SUMMARY_STATE_ORDER.find((state) => present.has(state)) ?? "unknown";
 }
 
@@ -88,7 +87,7 @@ export function cardIdentitySession(sessions: Session[]): Session | null {
   if (identified.length === 0) return null;
   const dot = cardDotState(sessions);
   return (
-    identified.find((session) => sessionDotState(session) === dot) ??
+    identified.find((session) => sessionAgentState(session) === dot) ??
     identified[0] ??
     null
   );
@@ -98,7 +97,7 @@ export function summarizeCardAgentStates(sessions: Session[]): string {
   if (sessions.length === 0) return "";
   const counts = new Map<AgentState, number>();
   for (const session of sessions) {
-    const state = sessionDotState(session);
+    const state = sessionAgentState(session);
     counts.set(state, (counts.get(state) ?? 0) + 1);
   }
   const parts = SUMMARY_STATE_ORDER.flatMap((state) => {
@@ -128,7 +127,7 @@ export function buildCardSummaryGroups(
 ): SummarySessionGroup[] {
   const groups = new Map<AgentState, Session[]>();
   for (const session of sessions) {
-    const state = sessionDotState(session);
+    const state = sessionAgentState(session);
     const group = groups.get(state);
     if (group) {
       group.push(session);
@@ -150,7 +149,7 @@ export function summarizeSessionIdentities(
 ): string {
   return sessions
     .map((session) => {
-      const stateLabel = formatSummaryStateLabel(sessionDotState(session));
+      const stateLabel = formatSummaryStateLabel(sessionAgentState(session));
       return `${labelFor(session)} ${stateLabel}`;
     })
     .join("; ");

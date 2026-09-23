@@ -42,6 +42,10 @@ export function sidebarSessionView(
   }
   for (const session of selectedWorkspaceSessions) {
     if (splitSecondaryIds.has(session.id)) continue;
+    // The selected list already carries the observation facts admitted by
+    // App's ordered, bounded ledger. A raw host-wide poll key is only read
+    // proof, not render authority: after a newer selected clear, an older
+    // poll must not overlay stale Pi/foreground metadata here.
     merged.set(session.id, session);
   }
   return [...merged.values()];

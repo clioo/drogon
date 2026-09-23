@@ -66,6 +66,39 @@ describe("shouldForwardSessionEvent", () => {
       }),
     ).toBe(true);
   });
+
+  it("forwards authority-only moves, never drops proof as a repeat", () => {
+    // Gaining or losing turn proof with the state unchanged flips the
+    // rendered dot, so the push stream must forward it like any move.
+    const known = new Map<
+      string,
+      {
+        state: string;
+        at: string | null;
+        agentStateAuthority?: "hook" | "activity" | null;
+      }
+    >();
+    known.set("s-1", { state: "working", at: "2026-09-08T07:00:00Z" });
+    expect(
+      shouldForwardSessionEvent(known, {
+        ...working(2),
+        agentStateAuthority: "hook",
+      }),
+    ).toBe(true);
+    known.set("s-1", {
+      state: "working",
+      at: "2026-09-08T07:00:00Z",
+      agentStateAuthority: "hook",
+    });
+    expect(
+      shouldForwardSessionEvent(known, {
+        ...working(3),
+        agentStateAuthority: "hook",
+      }),
+    ).toBe(false);
+    // An old daemon's event without the field moves off hook proof.
+    expect(shouldForwardSessionEvent(known, working(4))).toBe(true);
+  });
 });
 
 describe("startSessionStatePush", () => {
@@ -116,6 +149,40 @@ describe("startSessionStatePush", () => {
           workspaceId: "w-1",
           agentState: "working",
           agentStateAt: "2026-09-08T07:00:00Z",
+        },
+      },
+    ]);
+  });
+
+  it("carries turn proof to the renderer when the daemon reports it", async () => {
+    resetSessionStatePushForTests();
+    const { sent, window } = fakeWindow();
+    const calls = { count: 0 };
+    const call: SessionDaemonCall = async () => {
+      calls.count += 1;
+      return pollOk(
+        "boot-1",
+        [{ ...working(1), agentStateAuthority: "hook" }],
+        1,
+      );
+    };
+    const stop = startSessionStatePush({
+      getWindow: () => window as never,
+      call,
+      maxRounds: 2,
+      log: () => {},
+    });
+    await waitFor(calls, 2);
+    stop();
+    expect(sent).toEqual([
+      {
+        channel: notificationsIpcChannels.stateChanged,
+        event: {
+          sessionId: "s-1",
+          workspaceId: "w-1",
+          agentState: "working",
+          agentStateAt: "2026-09-08T07:00:00Z",
+          agentStateAuthority: "hook",
         },
       },
     ]);

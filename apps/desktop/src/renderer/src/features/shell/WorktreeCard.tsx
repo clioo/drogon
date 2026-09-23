@@ -91,6 +91,10 @@ type AgentBranchContext = {
   disabled: boolean;
   onSelect: (sessionId: string) => void;
   depth?: number;
+  /** Explicit user renames by session id (tab strip titles). */
+  customTitles?: Record<string, string> | null;
+  /** Auto-generated prompt titles by session id. */
+  generatedTitles: Record<string, string>;
 };
 
 /**
@@ -131,6 +135,8 @@ function renderAgentBranch(
       row={row}
       disabled={context.disabled}
       onSelect={context.onSelect}
+      customTitle={context.customTitles?.[row.session.id] ?? null}
+      generatedTitle={context.generatedTitles[row.session.id] ?? null}
       childCount={hasChildAgents ? childRows.length : undefined}
       childrenExpanded={expanded}
       onToggleChildren={
@@ -490,9 +496,11 @@ export function WorktreeCard({
             />
           ) : null}
         </div>
-        {/* Main column: the card is a flex row (select content beside the
-            kebab), so the select button and the nested rows share one
-            column wrapper instead of squeezing each other to zero width. */}
+        {/* Header column: the card's first flex line (fold, status lane,
+            this select content, affordances, kebab). The agent rows below
+            are direct card children on their own full-width line, so the
+            tree uses the whole card width the way the owner's guide draws
+            it instead of squeezing into the header column. */}
         <div className="shell-worktree-card-main">
           <button
             type="button"
@@ -573,78 +581,88 @@ export function WorktreeCard({
             workspaceId={worktree.workspaceId}
             bridge={graphBridge}
           />
-          {/* Nested session rows (the fork's WorktreeCardAgents inline list):
-            one row per session, outside the select button so rows stay real
-            buttons. Issue #359: rows with a recorded parent session render
-            as a fork lineage branch — a disclosure chevron on the parent
-            row and an indented children group beneath it, joined by the
-            tree's own connector lines. Owner's design (2026-09-21): the
-            tree is what the card is for, so it renders inline; the "N
-            agents" pill only takes over a genuinely long fan-out
-            (COMPACT_AGENT_PILL_MIN_ROWS). */}
-          {showAgentTree ? (
-            <div
-              className={cn(
-                "shell-worktree-card-rows flex flex-col gap-0.5",
-                // The fork's WorktreeCardAgents mt: the rows tighten up
-                // under the title when the card has no meta row.
-                !hasMetaRow && "-mt-1",
-              )}
-              data-compact-agent-list="true"
-              role={childrenByParentSessionId.size > 0 ? "tree" : "group"}
-              // The fork labels this group "Agents"; this repo's acceptance
-              // oracle pins "<card> sessions", so the oracle-facing label
-              // stays.
-              aria-label={`${name} sessions`}
-            >
-              {showCompactPill ? (
-                <div
-                  className={cn(
-                    "compact-agent-summary-panel",
-                    compactRootListExpanded && "compact-agent-summary-panel-expanded",
-                  )}
-                >
-                  <CompactAgentSummaryButton
-                    sessions={rowSessions}
-                    labelFor={(session) =>
-                      formatRowHarnessLabel(resolveRowHarnessId(session))
-                    }
-                    subjectLabel={`${childrenByParentSessionId.size > 0 ? rootRows.length : rows.length} agents`}
-                    expanded={compactRootListExpanded}
-                    onToggle={toggleCompactRootList}
-                  />
-                  <CompactAgentExpansion expanded={compactRootListExpanded}>
-                    {rootRows.map((row) =>
-                      renderAgentBranch({
-                        row,
-                        ancestorSessionIds: new Set(),
-                        childrenByParentSessionId,
-                        collapsedLineageParents,
-                        onToggleParent: handleToggleLineageParent,
-                        anyRootHasChildren,
-                        disabled,
-                        onSelect: handleSelectSession,
-                      }),
-                    )}
-                  </CompactAgentExpansion>
-                </div>
-              ) : (
-                rootRows.map((row) =>
-                  renderAgentBranch({
-                    row,
-                    ancestorSessionIds: new Set(),
-                    childrenByParentSessionId,
-                    collapsedLineageParents,
-                    onToggleParent: handleToggleLineageParent,
-                    anyRootHasChildren,
-                    disabled,
-                    onSelect: handleSelectSession,
-                  }),
-                )
-              )}
-            </div>
-          ) : null}
         </div>
+        {/* Nested session rows (the fork's WorktreeCardAgents inline list):
+          direct card children on their own full-width flex line (order 6 in
+          main.css), so the tree uses the whole card width the way the
+          owner's guide draws it instead of squeezing into the header column
+          beside the fold, lane, affordances and kebab. One row per session,
+          outside the select button so rows stay real buttons. Issue #359:
+          rows with a recorded parent session render as a fork lineage
+          branch — a disclosure chevron on the parent row and an indented
+          children group beneath it, joined by the tree's own connector
+          lines. Owner's design (2026-09-21): the tree is what the card is
+          for, so it renders inline; the "N agents" pill only takes over a
+          genuinely long fan-out (COMPACT_AGENT_PILL_MIN_ROWS). */}
+        {showAgentTree ? (
+          <div
+            className={cn(
+              "shell-worktree-card-rows flex flex-col gap-0.5",
+              // The fork's WorktreeCardAgents mt: the rows tighten up
+              // under the title when the card has no meta row.
+              !hasMetaRow && "-mt-1",
+            )}
+            data-compact-agent-list="true"
+            role={childrenByParentSessionId.size > 0 ? "tree" : "group"}
+            // The fork labels this group "Agents"; this repo's acceptance
+            // oracle pins "<card> sessions", so the oracle-facing label
+            // stays.
+            aria-label={`${name} sessions`}
+          >
+            {showCompactPill ? (
+              <div
+                className={cn(
+                  "compact-agent-summary-panel",
+                  compactRootListExpanded && "compact-agent-summary-panel-expanded",
+                )}
+              >
+                <CompactAgentSummaryButton
+                  sessions={rowSessions}
+                  // The pill summary keeps F1's shared harness labels
+                  // (pinned by the lineage suite): sidebar "Claude Code"
+                  // branding applies to the visible row primary only.
+                  labelFor={(session) =>
+                    formatRowHarnessLabel(resolveRowHarnessId(session))
+                  }
+                  subjectLabel={`${childrenByParentSessionId.size > 0 ? rootRows.length : rows.length} agents`}
+                  expanded={compactRootListExpanded}
+                  onToggle={toggleCompactRootList}
+                />
+                <CompactAgentExpansion expanded={compactRootListExpanded}>
+                  {rootRows.map((row) =>
+                    renderAgentBranch({
+                      row,
+                      ancestorSessionIds: new Set(),
+                      childrenByParentSessionId,
+                      collapsedLineageParents,
+                      onToggleParent: handleToggleLineageParent,
+                      anyRootHasChildren,
+                      disabled,
+                      onSelect: handleSelectSession,
+                      customTitles: tabStrip?.titles ?? null,
+                      generatedTitles,
+                    }),
+                  )}
+                </CompactAgentExpansion>
+              </div>
+            ) : (
+              rootRows.map((row) =>
+                renderAgentBranch({
+                  row,
+                  ancestorSessionIds: new Set(),
+                  childrenByParentSessionId,
+                  collapsedLineageParents,
+                  onToggleParent: handleToggleLineageParent,
+                  anyRootHasChildren,
+                  disabled,
+                  onSelect: handleSelectSession,
+                  customTitles: tabStrip?.titles ?? null,
+                  generatedTitles,
+                }),
+              )
+            )}
+          </div>
+        ) : null}
         {/* Right-side affordances (the fork's MetaIconBadge shell): the
             terminal marker for a workspace that owns sessions and the
             branch marker, ahead of the kebab. */}

@@ -49,8 +49,8 @@ describe("CompactAgentSummaryButton", () => {
       <TooltipProvider>
         <CompactAgentSummaryButton
           sessions={[
-            session({ agentState: "working" }),
-            session({ id: "b", agentState: "working" }),
+            session({ agentState: "working", agentStateAuthority: "hook" }),
+            session({ id: "b", agentState: "working", agentStateAuthority: "hook" }),
           ]}
           labelFor={labelFor}
           subjectLabel="2 agents"
@@ -70,8 +70,8 @@ describe("CompactAgentSummaryButton", () => {
       <TooltipProvider>
         <CompactAgentSummaryButton
           sessions={[
-            session({ agentState: "working" }),
-            session({ id: "b", agentState: "working" }),
+            session({ agentState: "working", agentStateAuthority: "hook" }),
+            session({ id: "b", agentState: "working", agentStateAuthority: "hook" }),
           ]}
           labelFor={labelFor}
           subjectLabel="2 agents"
@@ -92,10 +92,10 @@ describe("CompactAgentSummaryButton", () => {
       <TooltipProvider>
         <CompactAgentSummaryButton
           sessions={[
-            session({ agentState: "working" }),
+            session({ agentState: "working", agentStateAuthority: "hook" }),
             session({ id: "b", agentState: "needs_input" }),
             session({ id: "c", harnessId: "pi", agentState: "exited" }),
-            session({ id: "d", agentState: "idle" }),
+            session({ id: "d", agentState: "idle", agentStateAuthority: "hook" }),
           ]}
           labelFor={labelFor}
           subjectLabel="4 agents"

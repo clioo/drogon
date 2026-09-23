@@ -17,6 +17,12 @@ export type PushedSessionState = {
   workspaceId: string;
   agentState: AgentState;
   agentStateAt: string | null;
+  /**
+   * Turn proof behind `agentState`. Absent (an old daemon's push without
+   * the field) clears any stored proof: a push without metadata must never
+   * inherit a prior push's authority as its own.
+   */
+  agentStateAuthority?: "hook" | "activity" | null;
   agentPromptPreview?: string | null;
   cacheIdleAt?: string | null;
 };
@@ -50,6 +56,8 @@ export function applySessionStatePush(
   const current = items[index]!;
   const state = current.agentState ?? "unknown";
   const at = current.agentStateAt ?? null;
+  const authority = current.agentStateAuthority ?? null;
+  const eventAuthority = event.agentStateAuthority ?? null;
   const metadata = {
     ...(event.agentPromptPreview !== undefined ? { agentPromptPreview: event.agentPromptPreview } : {}),
     ...(event.cacheIdleAt !== undefined ? { cacheIdleAt: event.cacheIdleAt } : {}),
@@ -57,7 +65,16 @@ export function applySessionStatePush(
   const metadataChanged = Object.entries(metadata).some(
     ([key, value]) => current[key as keyof Session] !== value,
   );
-  if (state === event.agentState && at === event.agentStateAt && !metadataChanged)
+  // An authority-only move still applies: gaining or losing turn proof
+  // with the state unchanged flips the rendered dot, so it is never
+  // discarded as a same-state duplicate. An event without the field
+  // (old daemon) clears stored proof rather than inheriting it.
+  if (
+    state === event.agentState &&
+    at === event.agentStateAt &&
+    authority === eventAuthority &&
+    !metadataChanged
+  )
     return { applied: false, unknown: false, sessions: items };
   if (
     at !== null &&
@@ -72,6 +89,7 @@ export function applySessionStatePush(
     ...metadata,
     agentState: event.agentState,
     agentStateAt: event.agentStateAt,
+    agentStateAuthority: eventAuthority,
   };
   return { applied: true, unknown: false, sessions: next };
 }

@@ -278,7 +278,17 @@ import { sidebarSessionView } from "./features/shell/sidebar-sessions";
 import {
   createSidebarSessionCollector,
   pollSidebarSessions,
+  type SidebarSessionSourceView,
 } from "./features/shell/sidebar-session-source";
+import {
+  createObservationLedger,
+  isStalePollSettlement,
+  observationKeyOf,
+  readObservationSnapshot,
+  sameObservation,
+  type ObservationLedger,
+  type ObservationSnapshot,
+} from "./features/shell/sidebar-session-observation";
 import {
   planBrowserRehydrate,
   windowBrowserBridge,
@@ -438,10 +448,12 @@ export function appendOrReplaceSession(
  */
 /**
  * PERF-03: field-level session equality for poll identity stabilization.
- * Every field of the session contract is compared (including `args`
- * element-wise), so keeping the previous array can never hide a real
- * change — it only stops a byte-identical poll reply from minting a new
- * array identity and re-rendering the whole shell.
+ * Every rendered field of the session contract is compared (including
+ * `args` element-wise), so keeping the previous array can never hide a
+ * real change — it only stops a byte-identical poll reply from minting a
+ * new array identity and re-rendering the whole shell. `gridCursor` is
+ * intentionally excluded: it is read-path-only (TerminalPane), never
+ * rendered by the shell list.
  */
 export function sameSession(left: Session, right: Session): boolean {
   if (left === right) return true;
@@ -461,6 +473,8 @@ export function sameSession(left: Session, right: Session): boolean {
     left.createdAt === right.createdAt &&
     left.agentState === right.agentState &&
     left.agentStateAt === right.agentStateAt &&
+    (left.agentStateAuthority ?? null) ===
+      (right.agentStateAuthority ?? null) &&
     left.agentPromptPreview === right.agentPromptPreview &&
     left.cacheIdleAt === right.cacheIdleAt &&
     left.harnessId === right.harnessId &&
@@ -468,7 +482,15 @@ export function sameSession(left: Session, right: Session): boolean {
     left.causedByEventId === right.causedByEventId &&
     left.agentSessionId === right.agentSessionId &&
     left.agentSessionTranscriptPath === right.agentSessionTranscriptPath &&
-    left.agentResume === right.agentResume
+    left.agentResume === right.agentResume &&
+    // A metadata-only delta (a plain shell observed foregrounding a
+    // harness, a busy-close foreground flag flipping) changes what the
+    // sidebar renders, so it must replace the list. Absent reads as the
+    // idle claim (null observation, no foreground child), matching an
+    // older daemon's rows; false and true never agree.
+    (left.observedHarnessId ?? null) === (right.observedHarnessId ?? null) &&
+    (left.observedHarnessAt ?? null) === (right.observedHarnessAt ?? null) &&
+    (left.hasForegroundChild ?? false) === (right.hasForegroundChild ?? false)
   );
 }
 
@@ -560,26 +582,625 @@ export function sameBotsLoadResult(
   }
 }
 
+/**
+ * R3 provenance for `adoptOutOfBandSessions`: which rows the poll that
+ * produced `hostWide` actually read, and that poll's request order. Absent
+ * entirely, every exact-match row counts as fresh (the R2 contract the
+ * older tests pin). Present, only rows the poll really delivered may move
+ * the selected copy — retained collector rows still render unselected
+ * last-known cards but are NOT new facts — and only past the ledger's
+ * per-session proof, so an older poll settling after a newer one cannot
+ * roll the selection back. A null clear and a foreground flip carry no
+ * usable timestamp of their own; the poll order IS their ordering proof.
+ */
+export type ObservationProvenance = {
+  freshKeys?: ReadonlySet<string>;
+  freshWorkspaceIds?: ReadonlySet<string>;
+  seq?: number;
+  ledger?: ObservationLedger;
+  workspaceProof?: ReadonlyMap<string, number>;
+};
+
+export type AdoptOutOfBandPlan = {
+  /** The next selected list (`current` itself when there is no news). */
+  sessions: Session[];
+  /**
+   * Exact observation keys this plan applied. The caller commits them with
+   * `commitObservationProof` exactly once, when it commits `sessions` — the
+   * plan itself never touches the ledger, so replaying it with identical
+   * inputs (a React setState updater may run twice) always agrees.
+   */
+  appliedKeys: string[];
+  appliedObservations: { key: string; snapshot: ObservationSnapshot }[];
+};
+
+/**
+ * Records that `seq` wrote each applied value. Forward-only and idempotent:
+ * a stale or repeated commit never moves proof back, so committing the same
+ * plan twice (StrictMode effect replay) is a no-op the second time.
+ */
+export function commitObservationProof(
+  ledger: ObservationLedger | undefined,
+  applied: readonly string[] | readonly { key: string; snapshot: ObservationSnapshot }[],
+  seq: number | undefined,
+): void {
+  if (ledger === undefined || seq === undefined) return;
+  for (const item of applied) {
+    if (typeof item === "string") ledger.markApplied(item, seq);
+    else ledger.markApplied(item.key, seq, item.snapshot);
+  }
+}
+
+export function pruneObservationProofForSessions(
+  ledger: ObservationLedger,
+  sessions: readonly Session[],
+): void {
+  ledger.prune(new Set(sessions.map((item) => observationKeyOf(item))));
+}
+
+/**
+ * Pure planner for `adoptOutOfBandSessions`: checks the ledger but never
+ * writes it. Collects the applied keys for one `commitObservationProof`
+ * call by the committer.
+ */
+export function planAdoptOutOfBandSessions(
+  current: Session[],
+  hostWide: readonly Session[],
+  workspaceId: string,
+  isHidden: (session: Session) => boolean,
+  provenance?: ObservationProvenance,
+): AdoptOutOfBandPlan {
+  const known = new Set(current.map((item) => `${item.hostId}:${item.id}`));
+  const freshKeys = provenance?.freshKeys;
+  const seq = provenance?.seq;
+  const ledger = provenance?.ledger;
+  const appliedKeys: string[] = [];
+  const appliedObservations: { key: string; snapshot: ObservationSnapshot }[] = [];
+  // R3: a retained row is last-known rendering, never news — an id the
+  // selected list never saw cannot join it from a row no successful read
+  // delivered.
+  const adopted = hostWide.filter(
+    (item) =>
+      item.workspaceId === workspaceId &&
+      !known.has(`${item.hostId}:${item.id}`) &&
+      !isHidden(item) &&
+      (freshKeys === undefined || freshKeys.has(observationKeyOf(item))),
+  );
+  // R2 selected-copy reconciliation: an already-listed row keeps the
+  // selected list's push state, names and sizing — but its observed
+  // harness/foreground metadata must track the host-wide poll, which
+  // re-reads the daemon every tick while the selected copy otherwise
+  // only refreshes on selection/tab events. On an exact
+  // host+id+incarnation match the fresh row IS the same session, so its
+  // three observation fields win — including an explicit clear (fresh
+  // null), which stale selected data must never revive. A
+  // same-id/different-incarnation or different-host row is left alone,
+  // and ONLY these three fields are ever touched: the poll snapshot is
+  // continuous but can lag a selection refetch, so it must never
+  // overwrite push state, sizing, or anything else.
+  // R3: "the fresh row" must be an ACTUAL successful observation. Under
+  // provenance a retained row for the target (kept across failures while
+  // another workspace progressed) or an older poll settling late must not
+  // erase a newer Pi, revive a cleared observation, or downgrade a fresh
+  // foreground true.
+  const freshByKey = new Map<string, Session>();
+  for (const item of hostWide)
+    freshByKey.set(`${item.hostId}:${item.id}`, item);
+  let result = current;
+  if (adopted.length > 0) {
+    result = [
+      ...current,
+      ...[...adopted].sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt),
+      ),
+    ];
+    // An adopted row arrives with the poll's own fresh observation: its
+    // proof is committed once, by the committer, so a later stale poll
+    // cannot move what it just wrote.
+    if (seq !== undefined && ledger !== undefined)
+      for (const item of adopted) {
+        const key = observationKeyOf(item);
+        appliedKeys.push(key);
+        appliedObservations.push({ key, snapshot: readObservationSnapshot(item) });
+      }
+  }
+  for (let index = 0; index < current.length; index += 1) {
+    const item = result[index]!;
+    const fresh = freshByKey.get(`${item.hostId}:${item.id}`);
+    if (!fresh || fresh.incarnation !== item.incarnation) continue;
+    const key = observationKeyOf(fresh);
+    if (
+      freshKeys !== undefined &&
+      (seq === undefined || ledger === undefined
+        ? !freshKeys.has(key)
+        : !freshKeys.has(key) || !ledger.shouldApply(key, seq))
+    )
+      continue;
+    // R3: every sufficiently ordered successful read is new proof, even a
+    // byte-identical one — null clears and foreground flips carry no
+    // timestamp of their own, so the request order IS the evidence. Commit
+    // before the value comparison so an equal read still advances the ledger;
+    // the array keeps its identity below when nothing moved.
+    const snapshot = readObservationSnapshot(fresh);
+    if (seq !== undefined && ledger !== undefined) {
+      appliedKeys.push(key);
+      appliedObservations.push({ key, snapshot });
+    }
+    if (sameObservation(readObservationSnapshot(item), snapshot)) continue;
+    if (result === current) result = current.slice();
+    result[index] = {
+      ...item,
+      observedHarnessId: snapshot.observedHarnessId,
+      observedHarnessAt: snapshot.observedHarnessAt,
+      hasForegroundChild: snapshot.hasForegroundChild,
+    };
+  }
+  return { sessions: result, appliedKeys, appliedObservations };
+}
+
+/**
+ * Pure single-pass adopt: the plan's sessions. The ledger is never written
+ * here — callers that pass a ledger commit via `planAdoptOutOfBandSessions`
+ * plus one `commitObservationProof` call, so updater replay stays pure.
+ */
 export function adoptOutOfBandSessions(
   current: Session[],
   hostWide: readonly Session[],
   workspaceId: string,
   isHidden: (session: Session) => boolean,
+  provenance?: ObservationProvenance,
 ): Session[] {
-  const known = new Set(current.map((item) => `${item.hostId}:${item.id}`));
-  const adopted = hostWide.filter(
-    (item) =>
-      item.workspaceId === workspaceId &&
-      !known.has(`${item.hostId}:${item.id}`) &&
-      !isHidden(item),
+  return planAdoptOutOfBandSessions(
+    current,
+    hostWide,
+    workspaceId,
+    isHidden,
+    provenance,
+  ).sessions;
+}
+
+/**
+ * A queued adopt: immutable successful-read facts admitted OUTSIDE React at
+ * queue time (proof is committed once, there), for pure projection onto the
+ * ACTUAL current sessions inside the functional updater. Admission never
+ * consults a React mirror and never compares displayed values: every fresh,
+ * sufficiently ordered fact is admitted — including a byte-identical
+ * re-read, whose request order is the only evidence for null clears and
+ * foreground flips — and the admitted batch is frozen. The updater reads
+ * only the frozen facts plus the actual current rows (no ledger reads, no
+ * external writes), so replay with identical inputs — StrictMode
+ * double-invoke, or a replay after a later proof commit — always agrees.
+ * Ordering across queues comes from React's updater order plus the ledger's
+ * per-key proof captured here, never from a read inside the updater.
+ */
+export type QueuedAdoptProjection = {
+  /** Full rows to append when their host+id is still unknown (plan order). */
+  adopted: Session[];
+  /** Per-identity observation overwrites, keyed by exact host+id+incarnation. */
+  observations: { key: string; snapshot: ObservationSnapshot }[];
+  /** Exact observation keys the caller commits with `commitObservationProof`. */
+  appliedKeys: string[];
+  /** Exact admitted observation values, stored with their ordering proof. */
+  appliedObservations: { key: string; snapshot: ObservationSnapshot }[];
+};
+
+export function planQueuedAdopt(
+  hostWide: readonly Session[],
+  workspaceId: string,
+  isHidden: (session: Session) => boolean,
+  provenance: ObservationProvenance,
+): QueuedAdoptProjection {
+  const freshKeys = provenance.freshKeys;
+  const freshWorkspaceIds = provenance.freshWorkspaceIds;
+  const seq = provenance.seq;
+  const ledger = provenance.ledger;
+  const workspaceProof = provenance.workspaceProof;
+  const workspaceOrdered = (workspaceId: string): boolean => {
+    if (freshWorkspaceIds !== undefined && !freshWorkspaceIds.has(workspaceId))
+      return false;
+    if (seq !== undefined && workspaceProof !== undefined)
+      return !isStaleWorkspaceRead(workspaceProof, workspaceId, seq);
+    return true;
+  };
+  const ordered = (item: Session): boolean => {
+    const key = observationKeyOf(item);
+    if (freshKeys !== undefined && !freshKeys.has(key)) return false;
+    if (!workspaceOrdered(item.workspaceId)) return false;
+    if (seq !== undefined && ledger !== undefined)
+      return ledger.shouldApply(key, seq);
+    return true;
+  };
+  // Adopted rows: target workspace, not dismissed, actually read, ordered.
+  // Observation facts: every ordered target read, dismissed or not (the
+  // existing adopt refreshes listed rows even when the fresh row is
+  // dismissal-filtered for adoption). Both lists are frozen here; the
+  // projection decides append vs overwrite against the actual rows.
+  const admitted = hostWide.filter(
+    (item) => item.workspaceId === workspaceId && ordered(item),
   );
-  if (adopted.length === 0) return current;
-  return [
-    ...current,
-    ...[...adopted].sort((left, right) =>
-      left.createdAt.localeCompare(right.createdAt),
-    ),
-  ];
+  const adopted = admitted
+    .filter((item) => !isHidden(item))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const seen = new Set<string>();
+  const observations: QueuedAdoptProjection["observations"] = [];
+  const appliedKeys: string[] = [];
+  for (const item of admitted) {
+    const key = observationKeyOf(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    observations.push({ key, snapshot: readObservationSnapshot(item) });
+    if (seq !== undefined && ledger !== undefined) appliedKeys.push(key);
+  }
+  // Adopted rows carry full state for the append path; observations carry
+  // the frozen trio for the same keys (a freshly appended row reconciles
+  // its own observation as a no-op).
+  return { adopted, observations, appliedKeys, appliedObservations: observations };
+}
+
+/**
+ * Pure projection of a queued adopt onto the actual current sessions: queued
+ * local updates (push state, renames, sizing) survive because every other
+ * field is carried over untouched, and only the captured observation trio
+ * moves — on an exact host+id+incarnation match. Returns the input array
+ * itself when there is nothing to apply, so a no-op plan commits nothing.
+ */
+export function applyQueuedAdopt(
+  current: Session[],
+  projection: QueuedAdoptProjection,
+): Session[] {
+  let result = current;
+  if (projection.adopted.length > 0) {
+    const known = new Set(
+      current.map((item) => `${item.hostId}:${item.id}`),
+    );
+    const missing = projection.adopted.filter(
+      (item) => !known.has(`${item.hostId}:${item.id}`),
+    );
+    if (missing.length > 0) result = [...current, ...missing];
+  }
+  for (const { key, snapshot } of projection.observations) {
+    const index = result.findIndex((item) => observationKeyOf(item) === key);
+    if (index === -1) continue;
+    if (sameObservation(readObservationSnapshot(result[index]!), snapshot))
+      continue;
+    if (result === current) result = current.slice();
+    result[index] = {
+      ...result[index]!,
+      observedHarnessId: snapshot.observedHarnessId,
+      observedHarnessAt: snapshot.observedHarnessAt,
+      hasForegroundChild: snapshot.hasForegroundChild,
+    };
+  }
+  return result;
+}
+
+/**
+ * A settled selected fetch: the fetch's own rows (dismissal-filtered, fetch
+ * order — the membership authority for this scoped read) plus the per-key
+ * ledger verdict captured at settle time. Observation from the fetch wins a
+ * row only when no newer proof already wrote it; everything else merges
+ * per identity inside the functional updater, never as a whole-snapshot
+ * drop — so queued local updates and newer observation metadata survive.
+ */
+export type SelectedFetchPlan = {
+  rows: Session[];
+  fetchWinsObservation: ReadonlyMap<string, boolean>;
+  admittedObservationValues: ReadonlyMap<string, ObservationSnapshot>;
+  appliedKeys: string[];
+  appliedObservations: { key: string; snapshot: ObservationSnapshot }[];
+};
+
+export function planSelectedFetch(
+  visible: readonly Session[],
+  requestSeq: number,
+  ledger: ObservationLedger | undefined,
+): SelectedFetchPlan {
+  const rows = [...visible];
+  const fetchWinsObservation = new Map<string, boolean>();
+  const admittedObservationValues = new Map<string, ObservationSnapshot>();
+  const appliedKeys: string[] = [];
+  const appliedObservations: { key: string; snapshot: ObservationSnapshot }[] = [];
+  for (const row of rows) {
+    const key = observationKeyOf(row);
+    const wins = ledger === undefined || ledger.shouldApply(key, requestSeq);
+    fetchWinsObservation.set(key, wins);
+    if (wins) {
+      appliedKeys.push(key);
+      appliedObservations.push({ key, snapshot: readObservationSnapshot(row) });
+    } else {
+      const admitted = ledger?.admitted(key)?.snapshot;
+      if (admitted) admittedObservationValues.set(key, admitted);
+    }
+  }
+  return {
+    rows,
+    fetchWinsObservation,
+    admittedObservationValues,
+    appliedKeys,
+    appliedObservations,
+  };
+}
+
+/**
+ * Pure per-identity reconciliation of a settled selected fetch onto the
+ * actual current sessions. Rows the fetch no longer lists are closed (the
+ * scoped read is authoritative for membership); a listed row keeps its
+ * incarnation truth wholesale on restart, and on an exact
+ * host+id+incarnation match merges: observation from the fetch only where
+ * it still holds the proof, push state newest-wins via the shared push
+ * merge, every other daemon field from the fetch. Returns the input array
+ * itself when field-equal, so an unchanged fetch commits nothing.
+ */
+export function chooseActiveAfterSelectedFetch(
+  currentActive: string,
+  visible: readonly Session[],
+): string {
+  return visible.some((item) => item.id === currentActive)
+    ? currentActive
+    : (visible.at(-1)?.id ?? "");
+}
+
+export function applySelectedFetch(
+  current: Session[],
+  plan: SelectedFetchPlan,
+): Session[] {
+  const actualByKey = new Map(
+    current.map((item) => [observationKeyOf(item), item]),
+  );
+  // Membership follows the fetch: an actual row the fetch no longer lists is
+  // closed, so it is dropped by simply never entering `next`.
+  const next: Session[] = [];
+  for (const row of plan.rows) {
+    const key = observationKeyOf(row);
+    const actual = actualByKey.get(key);
+    const admitted = plan.admittedObservationValues.get(key);
+    const fetchWins = plan.fetchWinsObservation.get(key) === true;
+    if (!actual) {
+      next.push(
+        fetchWins
+          ? row
+          : { ...row, ...(admitted ?? readObservationSnapshot({})) },
+      );
+      continue;
+    }
+    let merged = row;
+    if (!fetchWins)
+      merged = { ...merged, ...(admitted ?? readObservationSnapshot(actual)) };
+    const probe = applySessionStatePush([actual], {
+      sessionId: row.id,
+      workspaceId: row.workspaceId,
+      agentState: row.agentState ?? "unknown",
+      agentStateAt: row.agentStateAt ?? null,
+      agentStateAuthority: row.agentStateAuthority ?? null,
+      ...(row.agentPromptPreview !== undefined
+        ? { agentPromptPreview: row.agentPromptPreview }
+        : {}),
+      ...(row.cacheIdleAt !== undefined ? { cacheIdleAt: row.cacheIdleAt } : {}),
+    });
+    const decided = probe.sessions[0]!;
+    merged = {
+      ...merged,
+      agentState: decided.agentState,
+      agentStateAt: decided.agentStateAt,
+      agentStateAuthority: decided.agentStateAuthority,
+      agentPromptPreview: decided.agentPromptPreview,
+      cacheIdleAt: decided.cacheIdleAt,
+    };
+    next.push(merged);
+  }
+  if (next.length !== current.length) return next;
+  return sameSessions(current, next) ? current : next;
+}
+
+export type SidebarPollSettlement = {
+  /**
+   * The array to render/commit: the view's fresh array when any field
+   * moved, the previous array (same identity, no re-render) otherwise.
+   */
+  sessions: Session[];
+  /** This poll's request order — the ordering proof for the adopt path. */
+  seq: number;
+  /** Exact keys this poll actually read — the proof's scope. */
+  freshKeys: ReadonlySet<string>;
+  /** Workspace ids whose membership this poll actually read and may adopt. */
+  freshWorkspaceIds: ReadonlySet<string>;
+  /** True when `sessions` is a new reference the caller must commit. */
+  dataChanged: boolean;
+};
+
+/**
+ * Settles one non-stale successful poll read. Every successful read is new
+ * ordering evidence — even a byte-identical one, whose null clears and
+ * foreground flips carry no timestamp of their own — so the proof (seq +
+ * freshKeys) always advances to this poll. The data array keeps its
+ * identity while idle so the 3 s tick still commits nothing new.
+ */
+export const WORKSPACE_READ_PROOF_MAX_ENTRIES = 512;
+
+const WORKSPACE_READ_STATE = Symbol("drogonWorkspaceReadState");
+
+type WorkspaceReadState = {
+  rows: Map<string, Session[]>;
+};
+
+type WorkspaceReadProofWithState = Map<string, number> & {
+  [WORKSPACE_READ_STATE]?: WorkspaceReadState;
+};
+
+function workspaceReadState(
+  proof: Map<string, number>,
+): WorkspaceReadState {
+  const stateful = proof as WorkspaceReadProofWithState;
+  if (!stateful[WORKSPACE_READ_STATE]) {
+    Object.defineProperty(stateful, WORKSPACE_READ_STATE, {
+      value: { rows: new Map<string, Session[]>() },
+      enumerable: false,
+    });
+  }
+  return stateful[WORKSPACE_READ_STATE]!;
+}
+
+function workspaceRows(
+  proof: ReadonlyMap<string, number>,
+  workspaceId: string,
+): Session[] | null {
+  const state = (proof as WorkspaceReadProofWithState)[WORKSPACE_READ_STATE];
+  const rows = state?.rows.get(workspaceId);
+  return rows ? [...rows] : null;
+}
+
+export function markWorkspaceReadProof(
+  proof: Map<string, number>,
+  workspaceIds: Iterable<string>,
+  seq: number,
+  maxEntries: number = WORKSPACE_READ_PROOF_MAX_ENTRIES,
+): void {
+  const bound = Math.max(1, Math.floor(maxEntries));
+  const state = workspaceReadState(proof);
+  for (const workspaceId of workspaceIds) {
+    const last = proof.get(workspaceId);
+    if (last !== undefined && seq <= last) continue;
+    if (proof.has(workspaceId)) proof.delete(workspaceId);
+    while (proof.size >= bound) {
+      const oldest = proof.keys().next();
+      if (oldest.done) break;
+      proof.delete(oldest.value);
+      state.rows.delete(oldest.value);
+    }
+    proof.set(workspaceId, seq);
+  }
+}
+
+function markWorkspaceRows(
+  proof: Map<string, number>,
+  workspaceId: string,
+  rows: readonly Session[],
+  seq: number,
+): void {
+  const previous = proof.get(workspaceId);
+  markWorkspaceReadProof(proof, [workspaceId], seq);
+  if (previous !== undefined && seq <= previous) return;
+  workspaceReadState(proof).rows.set(workspaceId, [...rows]);
+}
+
+export function isStaleWorkspaceRead(
+  proof: ReadonlyMap<string, number>,
+  workspaceId: string,
+  requestSeq: number,
+): boolean {
+  const last = proof.get(workspaceId);
+  return last !== undefined && requestSeq < last;
+}
+
+export function settleSelectedWorkspaceFetch(args: {
+  visible: readonly Session[];
+  workspaceId: string;
+  requestSeq: number;
+  ledger: ObservationLedger;
+  workspaceProof: Map<string, number>;
+}): { stale: boolean; plan: SelectedFetchPlan | null } {
+  if (
+    isStaleWorkspaceRead(args.workspaceProof, args.workspaceId, args.requestSeq)
+  ) {
+    const effectiveRows = workspaceRows(args.workspaceProof, args.workspaceId);
+    return {
+      stale: false,
+      plan: planSelectedFetch(effectiveRows ?? [], args.requestSeq, args.ledger),
+    };
+  }
+  const plan = planSelectedFetch(args.visible, args.requestSeq, args.ledger);
+  commitObservationProof(args.ledger, plan.appliedObservations, args.requestSeq);
+  markWorkspaceRows(args.workspaceProof, args.workspaceId, plan.rows, args.requestSeq);
+  return { stale: false, plan };
+}
+
+export function settleSidebarPoll(
+  previousSessions: Session[],
+  view: SidebarSessionSourceView,
+  requestSeq: number,
+  workspaceProof?: Map<string, number>,
+): SidebarPollSettlement {
+  if (!workspaceProof) {
+    const dataChanged = !sameSessions(previousSessions, view.sessions);
+    return {
+      sessions: dataChanged ? view.sessions : previousSessions,
+      seq: requestSeq,
+      freshKeys: view.freshKeys,
+      freshWorkspaceIds: view.freshWorkspaceIds,
+      dataChanged,
+    };
+  }
+
+  const incomingByWorkspace = new Map<string, Session[]>();
+  for (const session of view.sessions) {
+    const rows = incomingByWorkspace.get(session.workspaceId) ?? [];
+    rows.push(session);
+    incomingByWorkspace.set(session.workspaceId, rows);
+  }
+
+  const staleWorkspaces = new Set<string>();
+  if (workspaceProof) {
+    for (const workspaceId of view.freshWorkspaceIds) {
+      const rows = incomingByWorkspace.get(workspaceId) ?? [];
+      if (isStaleWorkspaceRead(workspaceProof, workspaceId, requestSeq)) {
+        staleWorkspaces.add(workspaceId);
+      } else {
+        markWorkspaceRows(workspaceProof, workspaceId, rows, requestSeq);
+      }
+    }
+    for (const workspaceId of incomingByWorkspace.keys()) {
+      if (view.freshWorkspaceIds.has(workspaceId)) continue;
+      if (
+        workspaceRows(workspaceProof, workspaceId) !== null ||
+        isStaleWorkspaceRead(workspaceProof, workspaceId, requestSeq)
+      )
+        staleWorkspaces.add(workspaceId);
+    }
+  }
+
+  const sessions: Session[] = [];
+  const replaced = new Set<string>();
+  for (const session of view.sessions) {
+    if (!staleWorkspaces.has(session.workspaceId)) {
+      sessions.push(session);
+      continue;
+    }
+    if (replaced.has(session.workspaceId)) continue;
+    replaced.add(session.workspaceId);
+    sessions.push(...(workspaceRows(workspaceProof, session.workspaceId) ?? []));
+  }
+  for (const workspaceId of staleWorkspaces) {
+    if (replaced.has(workspaceId)) continue;
+    sessions.push(...(workspaceRows(workspaceProof, workspaceId) ?? []));
+  }
+
+  const remainingFreshKeys =
+    staleWorkspaces.size === 0
+      ? view.freshKeys
+      : new Set(
+          [...view.freshKeys].filter((key) =>
+            sessions.some(
+              (session) =>
+                !staleWorkspaces.has(session.workspaceId) &&
+                observationKeyOf(session) === key,
+            ),
+          ),
+        );
+  const dataChanged = !sameSessions(previousSessions, sessions);
+  return {
+    sessions: dataChanged ? sessions : previousSessions,
+    seq: requestSeq,
+    freshKeys: remainingFreshKeys,
+    freshWorkspaceIds:
+      staleWorkspaces.size === 0
+        ? view.freshWorkspaceIds
+        : new Set(
+            [...view.freshWorkspaceIds].filter(
+              (workspaceId) => !staleWorkspaces.has(workspaceId),
+            ),
+          ),
+    dataChanged,
+  };
 }
 
 /**
@@ -1274,9 +1895,18 @@ export function App() {
       item.agentState ?? "unknown",
       second.agentState ?? "unknown",
     );
-    return aggregated === (item.agentState ?? "unknown")
-      ? item
-      : { ...item, agentState: aggregated };
+    if (aggregated === (item.agentState ?? "unknown")) return item;
+    // The badge shows the hotter pane's state, so it must also carry that
+    // pane's turn proof — never the root's stale proof, and never a proof
+    // the hotter pane did not report (an old-daemon push without metadata
+    // clears rather than inherits).
+    const winner =
+      aggregated === (second.agentState ?? "unknown") ? second : item;
+    return {
+      ...item,
+      agentState: aggregated,
+      agentStateAuthority: winner.agentStateAuthority ?? null,
+    };
   });
   // A restored selection can point at a second pane (it was the last
   // session): the tab it belongs to is its split root.
@@ -1648,6 +2278,10 @@ export function App() {
   // full host-wide session list (`window.drogon.sessions()` with no
   // `workspaceId`) on its own cadence, independent of `selected`.
   const [allBotSessions, setAllBotSessions] = useState<Session[]>([]);
+  // R3: synchronous mirror of the last COMMITTED host-wide list, so the
+  // poll can pair the adopt proof with the exact array it describes
+  // (a `useState` updater runs at render time, too late to pair).
+  const allBotSessionsRef = useRef<Session[]>([]);
   // PERF-03: the focused Bot session's live pid + Started clock live in
   // BotSessionInspectorLive's own subtree now (see above), not here — App
   // keeps only the identity (`botSessions` map) it records synchronously.
@@ -2386,20 +3020,73 @@ export function App() {
     tasksProjectBridge,
     projectReloadTick,
   ]);
+  // R3 observation freshness: poll request order is the only proof that can
+  // order a null clear or a foreground flip (neither carries a usable
+  // timestamp). The clock numbers every host-wide poll start; the ledger
+  // remembers per exact session which number last wrote the selected copy;
+  // the provenance ref holds the fresh set of the last COMMITTED view for
+  // the adopt effect below. Refs, not state, like the collector: none of
+  // this may restart the effects below, and a workspace switch never
+  // resets them.
+  const sidebarPollClock = useRef(0);
+  const sidebarSettledSeq = useRef(0);
+  const workspaceReadProof = useRef<Map<string, number>>(new Map());
+  const observationLedger = useRef<ObservationLedger>(createObservationLedger());
+  const sidebarObservationProvenance = useRef<{
+    seq: number;
+    freshKeys: ReadonlySet<string>;
+    freshWorkspaceIds: ReadonlySet<string>;
+  }>({ seq: 0, freshKeys: new Set(), freshWorkspaceIds: new Set() });
+  // R3 selected-copy reconciliation, shared by the adopt effect below and
+  // the poll settlement further down. Immutable successful-read facts are
+  // admitted outside React (`planQueuedAdopt` over the poll rows, never a
+  // React mirror) and their proof is committed once, here — the functional
+  // updater below (`applyQueuedAdopt`) reads only the frozen facts plus the
+  // actual current rows, so replay with identical inputs (StrictMode
+  // double-invoke, or a replay after a later proof commit) always agrees.
+  // Projecting onto the ACTUAL current sessions means queued local updates
+  // (push state, renames, sizing) survive. `active` is deliberately left
+  // alone: adopting a session must never steal the tab the owner is
+  // looking at.
+  const queueSelectedAdopt = useCallback(() => {
+    const workspaceId = selectedRef.current;
+    if (!workspaceId) return;
+    const dismissed = loadDismissedSessions();
+    const isHidden = (item: Session) =>
+      isSessionDismissed(dismissed, item.hostId, item);
+    const provenance = sidebarObservationProvenance.current;
+    const ledger = observationLedger.current;
+    const projection = planQueuedAdopt(
+      allBotSessionsRef.current,
+      workspaceId,
+      isHidden,
+      {
+        freshKeys: provenance.freshKeys,
+        freshWorkspaceIds: provenance.freshWorkspaceIds,
+        seq: provenance.seq,
+        ledger,
+        workspaceProof: workspaceReadProof.current,
+      },
+    );
+    if (
+      projection.adopted.length === 0 &&
+      projection.observations.length === 0
+    )
+      return;
+    commitObservationProof(ledger, projection.appliedObservations, provenance.seq);
+    setSessions((items) => applyQueuedAdopt(items, projection));
+  }, []);
   useEffect(() => {
     // A session this shell did not start — `drogon-cli terminal create`, a
     // Bot's own session, another window — reaches the selected workspace's
     // list here, from the host-wide poll that already runs for the sidebar.
-    // `active` is deliberately left alone: adopting a session must never
-    // steal the tab the owner is looking at.
-    if (!selected) return;
-    const dismissed = loadDismissedSessions();
-    setSessions((items) =>
-      adoptOutOfBandSessions(items, allBotSessions, selected, (item) =>
-        isSessionDismissed(dismissed, item.hostId, item),
-      ),
-    );
-  }, [allBotSessions, selected]);
+    // The provenance ref was stored synchronously with the commit that
+    // produced the current `allBotSessions` value, so the pairing holds.
+    queueSelectedAdopt();
+  }, [allBotSessions, selected, queueSelectedAdopt]);
+  useEffect(() => {
+    pruneObservationProofForSessions(observationLedger.current, sessions);
+  }, [sessions]);
   useEffect(() => {
     // Persists every confirmed selection once it settles against a known
     // workspace, so the next reload's restore has an up-to-date target.
@@ -2421,6 +3108,12 @@ export function App() {
     }
     let cancelled = false;
     setLoadingSessions(true);
+    // R3: the request number is this fetch's ordering proof, taken when the
+    // request STARTS. Stamping at completion with the then-current clock
+    // would let a late older response claim a newer order than a poll that
+    // settled while it was in flight — and overwrite that poll's fresher
+    // observation facts.
+    const requestSeq = (sidebarPollClock.current += 1);
     void window.drogon
       .sessions(selected)
       .then((response) => {
@@ -2438,12 +3131,26 @@ export function App() {
         const visible = response.result.sessions.filter(
           (item) => !isSessionDismissed(dismissed, item.hostId, item),
         );
-        setSessions(visible);
-        setActive((value) =>
-          visible.some((item) => item.id === value)
-            ? value
-            : (visible.at(-1)?.id ?? ""),
-        );
+        // R3: this scoped read is a successful observation of the selected
+        // workspace's rows — record its proof at its request order, so a
+        // retained row (or an older poll settling late) cannot roll the
+        // snapshot it delivers back. A newer poll still proves past it.
+        // Reconciled per identity through the functional updater form, never
+        // as a whole-snapshot drop: queued local updates survive, and
+        // observation the ledger already proved newer is kept, not rolled
+        // back. The per-key verdict is captured here, once, so the updater
+        // itself stays pure (replay always agrees).
+        const settlement = settleSelectedWorkspaceFetch({
+          visible,
+          workspaceId: selected,
+          requestSeq,
+          ledger: observationLedger.current,
+          workspaceProof: workspaceReadProof.current,
+        });
+        if (settlement.plan)
+          setSessions((items) => applySelectedFetch(items, settlement.plan!));
+        if (!settlement.stale)
+          setActive((value) => chooseActiveAfterSelectedFetch(value, visible));
       })
       .catch(() => {
         if (!cancelled)
@@ -2485,7 +3192,10 @@ export function App() {
     if (statusHostId === null) {
       // Identity-stable clear: an already-empty list keeps its array so
       // disconnected re-runs never re-render the shell.
-      setAllBotSessions((previous) => (previous.length === 0 ? previous : []));
+      if (allBotSessionsRef.current.length !== 0) {
+        allBotSessionsRef.current = [];
+        setAllBotSessions([]);
+      }
       return;
     }
     let cancelled = false;
@@ -2497,31 +3207,82 @@ export function App() {
     // host-wide first and, when that read fails, reads the workspaces the
     // sidebar actually shows in rotating batches, so the cards keep their
     // agents either way. Unchanged replies still commit nothing.
+    // R3 singleflight, epoch-local: one poll at a time keeps request order
+    // == read order within this connection epoch; a skipped tick retries 3s
+    // later, so nothing is lost. Local (not a shared ref) so a hung poll's
+    // finally — or this effect's cleanup — can never clear the NEXT epoch's
+    // flag and wedge (or double-release) its first tick.
+    let inFlight = false;
     const poll = async () => {
-      lastPollMs = Date.now();
-      const view = await pollSidebarSessions({
-        collector: sidebarSessionsSource.current,
-        workspaceIds: sidebarWorkspaceIds.current,
-        fetchHostWide: async () => {
-          const result = await window.drogon.sessions();
-          return result.ok
-            ? { ok: true, sessions: result.result.sessions }
-            : { ok: false };
-        },
-        fetchScoped: async (workspaceId) => {
-          const result = await window.drogon.sessions(workspaceId);
-          return result.ok
-            ? { ok: true, sessions: result.result.sessions }
-            : { ok: false };
-        },
-      });
-      if (cancelled) return;
-      // PERF-03: keep the previous array when the content is unchanged, so
-      // the 3s tick commits nothing while idle. Merge semantics untouched:
-      // any field-level difference still replaces the list.
-      setAllBotSessions((previous) =>
-        sameSessions(previous, view.sessions) ? previous : view.sessions,
-      );
+      if (inFlight) return;
+      inFlight = true;
+      // R3: the request number is this poll's ordering proof (a null clear
+      // and a foreground flip carry no timestamp of their own).
+      const requestSeq = (sidebarPollClock.current += 1);
+      // R3 epoch isolation: this poll reads into a fork of the last
+      // committed collector. A cancelled epoch's late rows, or a stale
+      // poll's older truth, die with the fork unless this exact settlement
+      // proves fresh below — the shared accumulator only ever moves forward.
+      const fork = sidebarSessionsSource.current.fork();
+      try {
+        lastPollMs = Date.now();
+        const view = await pollSidebarSessions({
+          collector: fork,
+          workspaceIds: sidebarWorkspaceIds.current,
+          fetchHostWide: async () => {
+            const result = await window.drogon.sessions();
+            return result.ok
+              ? { ok: true, sessions: result.result.sessions }
+              : { ok: false };
+          },
+          fetchScoped: async (workspaceId) => {
+            const result = await window.drogon.sessions(workspaceId);
+            return result.ok
+              ? { ok: true, sessions: result.result.sessions }
+              : { ok: false };
+          },
+        });
+        if (cancelled) return;
+        // R3: an older request settling after a newer one (reconnect race,
+        // a hung batch) must not replace the rendering, the adopt proof, or
+        // the shared collector.
+        if (isStalePollSettlement(requestSeq, sidebarSettledSeq.current)) return;
+        sidebarSettledSeq.current = requestSeq;
+        // Fresh: the fork becomes the committed truth (its rotation,
+        // scoped cache and fresh set included).
+        sidebarSessionsSource.current = fork;
+        // R3: every successful read is new ordering evidence, even a
+        // byte-identical one — so the proof always advances to this poll.
+        // PERF-03: the data array keeps its identity while idle (no new
+        // facts to render); any field-level difference still replaces it.
+        // The proof is stored synchronously with the data it describes, so
+        // the pairing holds.
+        const settled = settleSidebarPoll(
+          allBotSessionsRef.current,
+          view,
+          requestSeq,
+          workspaceReadProof.current,
+        );
+        sidebarObservationProvenance.current = {
+          seq: settled.seq,
+          freshKeys: settled.freshKeys,
+          freshWorkspaceIds: settled.freshWorkspaceIds,
+        };
+        if (settled.dataChanged) {
+          allBotSessionsRef.current = settled.sessions;
+          setAllBotSessions(settled.sessions);
+        }
+        // The adopt effect above will not re-run for an unchanged commit
+        // (its inputs are identical), so queue the same pure projection here
+        // against the fresh proof: a stale selected fetch may have replaced
+        // the selected copy since the last commit, and only this poll's
+        // order can heal it. A no-op plan queues nothing.
+        queueSelectedAdopt();
+      } catch (error) {
+        if (!cancelled) console.warn("Sidebar session poll failed", error);
+      } finally {
+        inFlight = false;
+      }
     };
     const tick = () => {
       // PERF-03b: no consumer gate here — the tab-strip adopt effect below
@@ -2537,10 +3298,15 @@ export function App() {
     const timer = window.setInterval(tick, 3000);
     return () => {
       cancelled = true;
+      // Epoch-local singleflight needs no reset here: a hung in-flight poll
+      // settles against its discarded fork and is dropped by `cancelled`
+      // (and by request order above). Nothing shared is touched.
       window.clearInterval(timer);
     };
     // PERF-04: connectivity primitives + reconnect epoch, never `status`.
-  }, [statusHostId, statusServiceInstanceId, statusEpoch]);
+    // queueSelectedAdopt is ref-driven and identity-stable, so it never
+    // restarts the poll.
+  }, [statusHostId, statusServiceInstanceId, statusEpoch, queueSelectedAdopt]);
   useEffect(() => {
     // J1 needs_input: main polls session.list for transitions (this repo
     // has no daemon push channel) and forwards them here. Clicking the
@@ -2575,6 +3341,7 @@ export function App() {
         workspaceId: event.workspaceId,
         agentState: event.agentState as AgentState,
         agentStateAt: event.agentStateAt ?? null,
+        agentStateAuthority: event.agentStateAuthority ?? null,
         agentPromptPreview: event.agentPromptPreview,
         cacheIdleAt: event.cacheIdleAt,
       };

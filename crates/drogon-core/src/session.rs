@@ -585,9 +585,11 @@ impl SessionHandle {
 
     /// Hook-authoritative turn fact backing [`agent_state::HookTurn`]:
     /// resumption hooks open the turn, wait hooks park it, turn-end hooks
-    /// conclude it. In-memory only — after a daemon restart the session
-    /// falls back to the activity clock (`HookTurn::Inactive`) rather than
-    /// claiming a turn nobody re-observed.
+    /// conclude it. Mirrored into the durable `sessions.turn_fact` /
+    /// `turn_fact_at` columns (`persist_turn_fact`), so a daemon restart
+    /// keeps reporting a hook-reported turn from the hook's own authority
+    /// (`row_to_session_json` re-reports it) instead of hiding it — loss of
+    /// contact never proves the turn concluded.
     pub(crate) fn hook_turn_fact(&self) -> crate::agent_state::HookTurn {
         match self.turn_fact.load(Ordering::Acquire) {
             TURN_ACTIVE => crate::agent_state::HookTurn::Active,
@@ -2078,7 +2080,10 @@ pub(crate) fn snapshot(handle: &SessionHandle) -> Value {
 /// exited via its own `verdict`, so this never re-reaps `exit_code` itself.
 /// An uncleared hook signal reports `needs_input` with its own stamp; the
 /// reader thread clears it on the next output chunk.
-fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, Option<String>) {
+fn agent_state_fields(
+    handle: &SessionHandle,
+    verdict: &str,
+) -> (&'static str, Option<String>, Option<&'static str>) {
     let last_activity_instant = &*handle.last_activity.lock().unwrap();
     let (activity, wall_clock_at) = match last_activity_instant {
         None => (Activity::NeverObserved, None),
@@ -2116,18 +2121,53 @@ fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, O
     } else {
         handle.hook_turn_fact()
     };
-    let state = agent_state::derive(
+    let derived = agent_state::derive(
         verdict == "exited",
         activity,
         needs_input_at.is_some(),
         hook_turn,
     );
+    // F1 sidebar truth: activity-clock `Working` is PTY output (echo,
+    // redraw, an idle composer repainting without hooks) — unproven as a
+    // turn for shells, observed harnesses, and `harness.start` launches
+    // alike, so it downgrades to `Unknown` (session kept, no turn claimed).
+    // Hook-backed turns never reach the gate as unproven (`Active`
+    // bypasses it). Identity observation still runs below in `to_json` —
+    // a hosted harness stays recognized there, only its turn reads unknown.
+    let state = agent_state::gate_shell_activity(derived, hook_turn);
+    // Read before `at` moves the stamp below: a wait stamp only ever lands
+    // via a harness hook signal (`note_hook_event`), so its presence is the
+    // hook proof behind `needs_input` regardless of the turn fact.
+    let hook_wait = needs_input_at.is_some();
     let at = match state {
         AgentState::Working | AgentState::Idle => state_at,
         AgentState::NeedsInput => needs_input_at,
         AgentState::Exited | AgentState::Unknown => None,
     };
-    (state.as_wire(), at)
+    // Turn-authority proof for the wire (`agentStateAuthority`): only the
+    // hook lifecycle proves a turn — an open hook turn behind `working`, a
+    // turn-end hook behind `idle`, a hook wait signal behind `needs_input`.
+    // `working` past the gate always rides an open hook turn (the gate
+    // downgrades every other `working` to `unknown`), so it never claims
+    // `activity` proof; a quiet clock behind `idle` is reported as
+    // `activity`, never as proof of idleness. `unknown`/`exited` claim
+    // nothing. Missing on older daemons reads as no proof downstream.
+    let authority = if verdict == "exited" {
+        None
+    } else if hook_wait {
+        Some(agent_state::AUTHORITY_HOOK)
+    } else {
+        match hook_turn {
+            agent_state::HookTurn::Active | agent_state::HookTurn::Ended => {
+                Some(agent_state::AUTHORITY_HOOK)
+            }
+            agent_state::HookTurn::Untracked | agent_state::HookTurn::Inactive => match state {
+                AgentState::Idle => Some(agent_state::AUTHORITY_ACTIVITY),
+                _ => None,
+            },
+        }
+    };
+    (state.as_wire(), at, authority)
 }
 
 /// Whether the session leader currently has a live child process of its own
@@ -2253,7 +2293,7 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         .back()
         .expect("grid history is never empty");
     let (cols, rows, grid_cursor) = (current.cols, current.rows, current.cursor);
-    let (agent_state, agent_state_at) = agent_state_fields(handle, verdict);
+    let (agent_state, agent_state_at, agent_state_authority) = agent_state_fields(handle, verdict);
     let (observed_harness_id, observed_harness_at) = observed_harness(handle, verdict);
     json!({
         "id": handle.session_id,
@@ -2277,6 +2317,11 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         "createdAt": handle.created_at,
         "agentState": agent_state,
         "agentStateAt": agent_state_at,
+        // Additive (activity authority): the turn proof behind `agentState`
+        // (`hook` = the harness's own hook lifecycle, `activity` = the PTY
+        // clock going quiet, null = no proof claimed). Older clients ignore
+        // it; newer renderers never show `working`/`idle` without `hook`.
+        "agentStateAuthority": agent_state_authority,
         // Additive (issue #333): true while a live foreground child runs
         // beyond the session leader; absent on older payloads reads as idle.
         "hasForegroundChild": has_foreground_child(handle, verdict),
@@ -2993,5 +3038,67 @@ mod wait_signal_activity_tests {
         assert_eq!(handle.hook_turn_fact(), agent_state::HookTurn::Inactive);
         // No output was ever observed: unknown, not a guessed idle.
         assert_eq!(snapshot(&handle)["agentState"], "unknown");
+    }
+
+    /// R1 activity authority: the wire proof behind `agentState` derives
+    /// only from the actual hook lifecycle — a real resumption, wait or
+    /// turn-end hook — never from harnessId or PTY activity. Quiet clocks
+    /// report `activity` (idle) or nothing at all (unknown), never hook
+    /// proof; a disabled lifecycle drops its proof with the fact.
+    #[test]
+    fn agent_state_authority_comes_only_from_the_hook_lifecycle() {
+        let (_dir, _engine, handle) = started_handle();
+        handle.set_explicit_wait_clear();
+        // Birth: no turn, no proof.
+        let birth = snapshot(&handle);
+        assert_eq!(birth["agentState"], "unknown");
+        assert!(birth["agentStateAuthority"].is_null());
+        // A real resumption hook opens a silent turn: working, hook-proven,
+        // with zero PTY output required.
+        handle.clear_hook_event();
+        let turn = snapshot(&handle);
+        assert_eq!(turn["agentState"], "working");
+        assert_eq!(turn["agentStateAuthority"], "hook");
+        // A real wait hook parks it: needs_input stays hook-proven.
+        handle.note_hook_event();
+        let waited = snapshot(&handle);
+        assert_eq!(waited["agentState"], "needs_input");
+        assert_eq!(waited["agentStateAuthority"], "hook");
+        // The generic activity clear spends the wait for untracked
+        // sessions; here the session is hook-authoritative so the test
+        // spends it the hook way instead — a turn end concludes the turn
+        // as hook-proven idle, and later PTY bytes cannot spend the proof.
+        handle.end_hook_event();
+        crate::session::write_parts(&handle, b"x", false).unwrap();
+        let ended = snapshot(&handle);
+        assert_eq!(ended["agentState"], "idle");
+        assert_eq!(ended["agentStateAuthority"], "hook");
+        // Disabling the status hooks drops the lifecycle AND its proof:
+        // the row re-observes from the activity clock, claiming nothing.
+        handle.reset_hook_lifecycle();
+        let disabled = snapshot(&handle);
+        assert_eq!(disabled["agentState"], "unknown");
+        assert!(disabled["agentStateAuthority"].is_null());
+        // Exit claims no turn proof either: the verdict is the truth.
+        let (state, at, authority) = agent_state_fields(&handle, "exited");
+        assert_eq!(state, "exited");
+        assert_eq!(at, None);
+        assert_eq!(authority, None);
+    }
+
+    /// R1: an untracked wait signal is still hook-originated (only hooks
+    /// set it), so `needs_input` carries hook proof; spending it returns
+    /// the row to unproven silence.
+    #[test]
+    fn untracked_wait_signal_carries_hook_proof_until_spent() {
+        let (_dir, _engine, handle) = started_handle();
+        handle.note_hook_event();
+        let waited = snapshot(&handle);
+        assert_eq!(waited["agentState"], "needs_input");
+        assert_eq!(waited["agentStateAuthority"], "hook");
+        assert!(clear_wait_signal_on_activity(&handle));
+        let quiet = snapshot(&handle);
+        assert_eq!(quiet["agentState"], "unknown");
+        assert!(quiet["agentStateAuthority"].is_null());
     }
 }

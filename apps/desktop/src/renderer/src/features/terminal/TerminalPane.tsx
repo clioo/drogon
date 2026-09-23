@@ -22,6 +22,7 @@ import type { ILinkProvider, ILink } from "@xterm/xterm";
 import { TerminalInputQueue } from "./terminal-input-queue";
 import { preventTerminalBacktabNavigation } from "./terminal-backtab-navigation";
 import { createTerminalShiftEnterHandler } from "./terminal-shift-enter";
+import { createTerminalCommandEnterHandler } from "./terminal-command-enter";
 import { createTerminalGeometrySync } from "./terminal-geometry-sync";
 import { planGridCutWrites } from "./terminal-grid-cut";
 import { TerminalKittyKeyboardModeTracker } from "../../../../shared/terminal-kitty-keyboard-mode-tracker";
@@ -380,6 +381,7 @@ export function TerminalPane({
     input: TerminalInputQueue;
     focus: () => void;
     pasteFromClipboard: (source: TerminalPasteSource) => void;
+    claimCommandEnter: (event: KeyboardEvent) => boolean;
     /** Re-fit plus WebGL attach/DPR repair (every fit is a heal chance). */
     syncRenderer: () => void;
   } | null>(null);
@@ -958,9 +960,21 @@ export function TerminalPane({
     // Pi always needs CSI-u (its native Shift+Enter, valid with or without
     // kitty negotiation); shells keep negotiated encoding (source parity).
     const claimShiftEnter = createTerminalShiftEnterHandler(() => kittyModes.flags, (data) => terminal.input(data, true), { forceCsiU: session.harnessId === "pi" });
+    // xterm emits one plain CR for macOS Command+Enter but does not claim the
+    // DOM transaction; claim it here so a single submit gesture cannot be
+    // replayed by a later keypress/window path.
+    const claimCommandEnter = createTerminalCommandEnterHandler(isMac, (data) => terminal.input(data, true));
     let optionKeyLocations: TerminalOptionKeyLocation = 0;
+    const claimWindowCommandEnter = (event: KeyboardEvent) => {
+      if (!canWrite) return;
+      claimCommandEnter(event);
+    };
+    window.addEventListener("keydown", claimWindowCommandEnter, true);
+    window.addEventListener("keypress", claimWindowCommandEnter, true);
+    window.addEventListener("keyup", claimWindowCommandEnter, true);
     terminal.attachCustomKeyEventHandler((event) => {
       if (canWrite && claimShiftEnter(event)) return false;
+      if (canWrite && claimCommandEnter(event)) return false;
       if (canWrite) preventTerminalBacktabNavigation(event);
       optionKeyLocations = updateTerminalOptionKeyLocation(
         optionKeyLocations,
@@ -1018,6 +1032,8 @@ export function TerminalPane({
       focus: () => terminal.focus(),
       pasteFromClipboard: (source: TerminalPasteSource) =>
         paste.pasteFromClipboard(source),
+      claimCommandEnter: (event: KeyboardEvent) =>
+        !disposed && canWrite && claimCommandEnter(event),
       syncRenderer: fitAndSyncTerminal,
     };
     // Paste policy target (R12-E): plan/execute writes bracketed or chunked
@@ -1643,6 +1659,9 @@ export function TerminalPane({
           onPageVisibilityChange,
         );
       }
+      window.removeEventListener("keydown", claimWindowCommandEnter, true);
+      window.removeEventListener("keypress", claimWindowCommandEnter, true);
+      window.removeEventListener("keyup", claimWindowCommandEnter, true);
       dprMedia?.removeEventListener("change", onDprChange);
       cancelPendingWebglRefit();
       unwatchWebglCanvasBackingStore();
@@ -1870,8 +1889,27 @@ export function TerminalPane({
     <div
       ref={container}
       className="terminal-surface"
+      data-terminal-pane-id={session.id}
       style={{ position: "relative" }}
       aria-label="Session terminal"
+      onKeyDownCapture={(event) => {
+        if (live.current?.claimCommandEnter(event.nativeEvent)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onKeyPressCapture={(event) => {
+        if (live.current?.claimCommandEnter(event.nativeEvent)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onKeyUpCapture={(event) => {
+        if (live.current?.claimCommandEnter(event.nativeEvent)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
       onKeyDown={(event) => {
         onContainerKeyDown(event);
         // First interaction with a restored pane retires its banner, exactly

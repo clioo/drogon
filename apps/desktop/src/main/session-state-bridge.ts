@@ -111,7 +111,10 @@ export function callSessionDaemon(
  * (`agentStateAt` compare); this map only keeps the stream itself quiet.
  */
 type ForwardedSession = { state: string; at: string | null } &
-  Pick<PushedSessionEvent, "agentPromptPreview" | "cacheIdleAt">;
+  Pick<
+    PushedSessionEvent,
+    "agentStateAuthority" | "agentPromptPreview" | "cacheIdleAt"
+  >;
 
 export function shouldForwardSessionEvent(
   forwarded: ReadonlyMap<string, ForwardedSession>,
@@ -120,6 +123,7 @@ export function shouldForwardSessionEvent(
   const prev = forwarded.get(event.sessionId);
   if (!prev) return true;
   return prev.state !== event.agentState || prev.at !== event.agentStateAt ||
+    (prev.agentStateAuthority ?? null) !== (event.agentStateAuthority ?? null) ||
     prev.agentPromptPreview !== event.agentPromptPreview || prev.cacheIdleAt !== event.cacheIdleAt;
 }
 
@@ -213,6 +217,7 @@ export function startSessionStatePush(deps: SessionStatePushDeps): () => void {
           forwarded.set(event.sessionId, {
             state: event.agentState,
             at: event.agentStateAt,
+            agentStateAuthority: event.agentStateAuthority,
             agentPromptPreview: event.agentPromptPreview,
             cacheIdleAt: event.cacheIdleAt,
           });
@@ -225,6 +230,7 @@ export function startSessionStatePush(deps: SessionStatePushDeps): () => void {
               workspaceId: event.workspaceId,
               agentState: event.agentState,
               agentStateAt: event.agentStateAt,
+              ...(event.agentStateAuthority !== undefined ? { agentStateAuthority: event.agentStateAuthority } : {}),
               ...(event.agentPromptPreview !== undefined ? { agentPromptPreview: event.agentPromptPreview } : {}),
               ...(event.cacheIdleAt !== undefined ? { cacheIdleAt: event.cacheIdleAt } : {}),
             });

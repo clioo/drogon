@@ -13,7 +13,10 @@
    freshness report ("No update in 34m") while the session is not reporting,
    so the row never states a condition the daemon did not report. The MAIN
    badge marks a root row that actually owns subagents (the nesting's parent
-   end), never a lone session.
+   end), never a lone session. The name is the concise provider identity when
+   the visible title is only an auto-generated prompt preview (explicit user
+   renames still render verbatim, prompt and shell details stay in the
+   tooltip and the accessible label).
    Adapter: Orca rows read hook-reported agent entries (model chip, tool
    preview, last assistant message, cache timer, subagent disclosure); this
    repo's contract carries none of those, so the row shows the tab title
@@ -31,11 +34,12 @@ import { memo, useCallback } from "react";
 import { ChevronRight, Terminal } from "lucide-react";
 import { AgentStateIcon } from "./AgentStateIcon";
 import { AgentCacheTimer } from "./AgentCacheTimer";
-import { HarnessMenuIcon } from "./TabCreateMenuIcons";
+import { SidebarProviderGlyph } from "./WorktreeAgentGlyph";
 import { agentStateLabel } from "./agent-state";
 import {
   formatRowHarnessLabel,
   resolveRowHarnessId,
+  resolveRowMessagePreview,
   type WorktreeAgentRow as WorktreeAgentRowData,
 } from "./worktree-agent-rows";
 
@@ -52,6 +56,57 @@ function stopActivationKeyPropagation(event: React.KeyboardEvent): void {
   if (event.key === "Enter" || event.key === " ") event.stopPropagation();
 }
 
+/**
+ * Sidebar-local provider branding (owner's reference): the sidebar reads
+ * "Claude Code". F1's shared `formatRowHarnessLabel` stays the product-wide
+ * "Claude" and is never touched here — this mapping lives in the sidebar
+ * row component only. Pure, unit-tested via the design suite.
+ */
+const SIDEBAR_PROVIDER_LABELS: Record<string, string> = {
+  claude: "Claude Code",
+};
+
+export function formatSidebarProviderLabel(
+  harnessId: Parameters<typeof formatRowHarnessLabel>[0],
+): string {
+  if (harnessId !== null && SIDEBAR_PROVIDER_LABELS[harnessId] !== undefined) {
+    return SIDEBAR_PROVIDER_LABELS[harnessId]!;
+  }
+  return formatRowHarnessLabel(harnessId);
+}
+
+/**
+ * The visible primary name for a row. An explicit user rename always renders
+ * verbatim; a prompt-derived title folds back to the concise sidebar
+ * provider identity; an actual default harness title ("Claude", "Pi",
+ * "Terminal N") renders the sidebar provider branding in place. The full
+ * title stays in the tooltip/accessible label, so no detail is lost.
+ * Pure, unit-tested via the design suite.
+ */
+export function resolveRowDisplayPrimary(
+  row: WorktreeAgentRowData,
+  titles: { customTitle?: string | null; generatedTitle?: string | null },
+): string {
+  if (titles.customTitle) return row.title;
+  const concise = resolveRowConciseIdentity(row, titles);
+  if (concise) {
+    const harnessId = resolveRowHarnessId(row.session);
+    return harnessId ? formatSidebarProviderLabel(harnessId) : concise.primary;
+  }
+  // Actual default titles (no generated-title record, e.g. observed harness
+  // sessions whose prompt preview never produced a stored title): when the
+  // title is exactly F1's harness label it is the provider identity, so it
+  // reads the sidebar branding instead of the product-wide label.
+  const resolvedHarnessId = resolveRowHarnessId(row.session);
+  if (
+    resolvedHarnessId &&
+    row.title === formatRowHarnessLabel(resolvedHarnessId)
+  ) {
+    return formatSidebarProviderLabel(resolvedHarnessId);
+  }
+  return row.title;
+}
+
 export type WorktreeAgentRowProps = {
   row: WorktreeAgentRowData;
   disabled: boolean;
@@ -65,7 +120,59 @@ export type WorktreeAgentRowProps = {
   isChildRow?: boolean;
   /** Owner's design: the badge a root row that owns subagents carries. */
   isMainRow?: boolean;
+  /**
+   * Owner's guide: where the visible title came from. An explicit user
+   * rename always renders verbatim; an auto-generated prompt title folds
+   * back to the concise harness identity (the prompt stays in the
+   * tooltip/aria label and the preview secondary). Both absent means the
+   * title is already concise (harness label or `Terminal N`).
+   */
+  customTitle?: string | null;
+  generatedTitle?: string | null;
 };
+
+/** Visible width budget for a folded-back prompt preview secondary. */
+export const CONCISE_PREVIEW_SECONDARY_MAX_LENGTH = 120;
+
+function truncateConcisePreview(preview: string): string {
+  const text = preview.trim().replace(/\s+/g, " ");
+  if (text.length <= CONCISE_PREVIEW_SECONDARY_MAX_LENGTH) return text;
+  const slice = text.slice(0, CONCISE_PREVIEW_SECONDARY_MAX_LENGTH).trimEnd();
+  const lastSpace = slice.lastIndexOf(" ");
+  if (lastSpace >= Math.floor(CONCISE_PREVIEW_SECONDARY_MAX_LENGTH * 0.55)) {
+    return slice.slice(0, lastSpace);
+  }
+  return slice;
+}
+
+/**
+ * Owner's guide identity for a row whose visible title is an
+ * auto-generated prompt preview: the concise provider name up front, the
+ * prompt as the secondary, the full generated title kept for the
+ * tooltip/aria label by the caller. Returns null when the row already
+ * reads concise (explicit rename, harness label, plain shell) — those
+ * render exactly as before. Pure, unit-tested via the design suite.
+ */
+export function resolveRowConciseIdentity(
+  row: WorktreeAgentRowData,
+  titles: { customTitle?: string | null; generatedTitle?: string | null },
+): { primary: string; secondary: string } | null {
+  // An explicit rename is the user's own words: never folded away.
+  if (titles.customTitle) return null;
+  const generated = titles.generatedTitle;
+  if (!generated) return null;
+  // The title may carry the recovery decoration for unverifiable verdicts
+  // (`label · id:incarnation`); the generated text is still its head.
+  if (row.title !== generated && !row.title.startsWith(`${generated} · `)) {
+    return null;
+  }
+  // Plain shells already read `Terminal N` with the command as secondary.
+  const harnessId = resolveRowHarnessId(row.session);
+  if (!harnessId) return null;
+  const primary = formatRowHarnessLabel(harnessId);
+  const preview = resolveRowMessagePreview(row.session, primary);
+  return { primary, secondary: truncateConcisePreview(preview) };
+}
 
 /**
  * PERF-03: the card rebuilds every row object on each App render (and the
@@ -88,6 +195,8 @@ export function areWorktreeAgentRowPropsEqual(
     previous.reserveDisclosureGutter === next.reserveDisclosureGutter &&
     previous.isChildRow === next.isChildRow &&
     previous.isMainRow === next.isMainRow &&
+    previous.customTitle === next.customTitle &&
+    previous.generatedTitle === next.generatedTitle &&
     previous.row.state === next.row.state &&
     previous.row.title === next.row.title &&
     previous.row.secondary === next.row.secondary &&
@@ -115,6 +224,8 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
   reserveDisclosureGutter = false,
   isChildRow = false,
   isMainRow = false,
+  customTitle = null,
+  generatedTitle = null,
 }: WorktreeAgentRowProps) {
   const handleActivate = useCallback(
     (event: React.MouseEvent) => {
@@ -135,15 +246,38 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
     },
     [onToggleChildren],
   );
-  const primary = row.title || agentStateLabel(row.state);
+  // Owner's guide: a prompt-derived title folds back to the concise
+  // provider name (sidebar branding: "Claude Code"); the full generated
+  // title stays in the accessible label below, so no prompt detail is lost
+  // to a screen reader or tooltip.
+  const concise = resolveRowConciseIdentity(row, {
+    customTitle,
+    generatedTitle,
+  });
+  const primary =
+    resolveRowDisplayPrimary(row, { customTitle, generatedTitle }) ||
+    agentStateLabel(row.state);
   // Why: while a session is not reporting, its secondary slot repeats the
   // freshness report the trailing state text already carries — one honest
   // line, not two.
-  const secondary =
-    row.state === "unknown" && row.secondary === row.stateLabel
+  const secondary = concise
+    ? concise.secondary
+    : row.state === "unknown" && row.secondary === row.stateLabel
       ? ""
       : row.secondary;
-  const rowTitle = [primary, secondary, row.stateLabel]
+  // Why: the trailing state text IS the freshness report for a session that
+  // is not reporting ("No update in 17h"), so the row's own age column would
+  // print that duration a second time. A row that knows its state keeps the
+  // age: "Idle 5m" is two different facts.
+  const showAge = row.state !== "unknown" && row.relativeTime !== "";
+  const rowTitle = [
+    // A folded-back row announces its full generated title, not the
+    // concise provider name standing in for it; a sidebar-branded default
+    // title ("Claude Code" for F1's "Claude") announces as displayed.
+    concise ? row.title : primary,
+    secondary,
+    row.stateLabel,
+  ]
     .filter(Boolean)
     .join(" - ");
   const focused = row.focused;
@@ -182,13 +316,16 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
   // icon for a session running an agent, the Terminal glyph only when
   // nothing is resolved.
   const resolvedHarnessId = resolveRowHarnessId(row.session);
+  // The glyph tooltip keeps F1's shared harness label (pinned by the
+  // row-identity suite): sidebar "Claude Code" branding applies to the
+  // visible primary name only, never to the shared label surfaces.
   const identity = (
     <span
       className="shell-worktree-agent-glyph inline-flex shrink-0"
       title={formatRowHarnessLabel(resolvedHarnessId)}
     >
       {resolvedHarnessId ? (
-        <HarnessMenuIcon
+        <SidebarProviderGlyph
           harnessId={resolvedHarnessId}
           displayName={formatRowHarnessLabel(resolvedHarnessId)}
           size={13}
@@ -199,34 +336,54 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
     </span>
   );
 
+  // Width budget (owner's guide: the provider name must stay readable at the
+  // natural 280px sidebar width, with MAIN outside truncation and the row's
+  // own state visible): the identity group never shrinks — a long rename
+  // truncates inside it, a short provider name always reads whole. The
+  // secondary yields first (flex-basis 0: it collapses toward nothing before
+  // anything else gives). The state group never shrinks either: when even
+  // the collapsed secondary leaves no room, the row wraps and the state
+  // rides a second line, right-aligned, instead of eating the identity.
   const text = (
-    <span className="min-w-0 flex-1 truncate" aria-hidden="true">
-      {/* Why: the selected-row fill washes out dimmed text, so both
-          spans lift toward full foreground when focused (source). */}
-      <span className={focused ? "text-foreground" : "text-muted-foreground/90"}>
-        {primary}
+    <>
+      <span className="shell-worktree-agent-identity" aria-hidden="true">
+        {/* Why: the selected-row fill washes out dimmed text, so the name
+            lifts toward full foreground when focused (source). */}
+        <span
+          data-worktree-agent-primary=""
+          className={
+            "shell-worktree-agent-primary " +
+            (focused ? "text-foreground" : "text-muted-foreground/90")
+          }
+        >
+          {primary}
+        </span>
+        {/* Why: the badge sits OUTSIDE the truncating name — a long title
+            truncates, the fact that this row is the tree's main agent must
+            not disappear with it. */}
+        {isMainRow && (
+          <span className="shell-worktree-agent-main-badge" aria-hidden="true">
+            MAIN
+          </span>
+        )}
       </span>
       {secondary && (
         <span
-          className={focused ? "text-foreground/70" : "text-muted-foreground/65"}
+          data-worktree-agent-secondary=""
+          className={
+            "shell-worktree-agent-secondary " +
+            (focused ? "text-foreground/70" : "text-muted-foreground/65")
+          }
+          aria-hidden="true"
         >
-          {" "}
-          - {secondary}
+          {" "}- {secondary}
         </span>
       )}
-    </span>
+    </>
   );
 
   const tail = (
-    <>
-      {/* Why: the badge sits OUTSIDE the truncating name column — a long
-          title truncates, the fact that this row is the tree's main agent
-          must not disappear with it. */}
-      {isMainRow && (
-        <span className="shell-worktree-agent-main-badge" aria-hidden="true">
-          MAIN
-        </span>
-      )}
+    <span className="shell-worktree-agent-tail">
       {hasChildDisclosure && !childrenExpanded && (
         <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
           +{childCount}
@@ -246,8 +403,9 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
         </span>
       </span>
       <AgentCacheTimer session={row.session} />
-      {row.relativeTime && (
+      {showAge && (
         <span
+          data-worktree-agent-age=""
           className={
             "shrink-0 text-[10px] tabular-nums " +
             // Why: the muted timestamp drops out against the
@@ -258,7 +416,7 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
           {row.relativeTime}
         </span>
       )}
-    </>
+    </span>
   );
 
   if (hasChildDisclosure) {
@@ -269,7 +427,7 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
     return (
       <div
         className={
-          "compact-agent-row group/compact-agent-row flex h-6 min-w-0 cursor-pointer items-center gap-1 overflow-hidden rounded-sm px-1 text-[11px] leading-none text-muted-foreground worktree-agent-row-hover" +
+          "compact-agent-row group/compact-agent-row flex h-auto min-h-6 min-w-0 cursor-pointer flex-wrap items-center gap-x-1 gap-y-0.5 overflow-hidden rounded-sm px-1 py-px text-[11px] leading-none text-muted-foreground worktree-agent-row-hover" +
           (focused ? " bg-worktree-sidebar-accent" : "") +
           lineageClasses
         }
@@ -294,7 +452,7 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
       type="button"
       disabled={disabled}
       className={
-        "compact-agent-row group/compact-agent-row flex h-6 w-full min-w-0 cursor-pointer items-center gap-1 overflow-hidden rounded-sm px-1 text-left text-[11px] leading-none text-muted-foreground worktree-agent-row-hover" +
+        "compact-agent-row group/compact-agent-row flex h-auto min-h-6 w-full min-w-0 cursor-pointer flex-wrap items-center gap-x-1 gap-y-0.5 overflow-hidden rounded-sm px-1 py-px text-left text-[11px] leading-none text-muted-foreground worktree-agent-row-hover" +
         (focused ? " bg-worktree-sidebar-accent" : "") +
         lineageClasses
       }

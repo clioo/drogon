@@ -5,9 +5,11 @@ import { describe, expect, test } from "vitest";
 import type { Session } from "../../../../shared/session-contract";
 import {
   SIDEBAR_SCOPED_READ_BATCH,
+  SIDEBAR_SCOPED_READ_MAX_WORKSPACES,
   createSidebarSessionCollector,
   pollSidebarSessions,
 } from "./sidebar-session-source";
+import { observationKeyOf } from "./sidebar-session-observation";
 
 function session(id: string, workspaceId: string): Session {
   return {
@@ -159,6 +161,92 @@ describe("one sidebar poll", () => {
     expect(recovered.sessions.map((row) => row.id)).toEqual(["fresh"]);
   });
 
+});
+
+describe("observation freshness provenance (R3)", () => {
+  test("a host-wide success marks every delivered row fresh", () => {
+    const collector = createSidebarSessionCollector();
+    const rows = [session("a", "ws-1"), session("b", "ws-2")];
+    collector.noteHostWide(rows);
+    const view = collector.view();
+    expect(view.degraded).toBe(false);
+    expect(view.freshKeys).toEqual(new Set(rows.map(observationKeyOf)));
+    expect(view.freshWorkspaceIds).toEqual(new Set(["ws-1", "ws-2"]));
+  });
+
+  test("a degraded poll marks only the workspaces it actually read fresh", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([session("target", "ws-1"), session("other", "ws-2")]);
+    const view = await pollSidebarSessions({
+      collector,
+      workspaceIds: ["ws-1", "ws-2"],
+      fetchHostWide: async () => ({ ok: false }),
+      // The target's read fails; the other workspace progresses.
+      fetchScoped: async (id) =>
+        id === "ws-2"
+          ? { ok: true, sessions: [session("other", "ws-2"), session("other-new", "ws-2")] }
+          : { ok: false },
+    });
+    expect(view.degraded).toBe(true);
+    // The retained target row still renders (no blanking) but is NOT fresh.
+    expect(view.sessions.map((row) => row.id).sort()).toEqual([
+      "other",
+      "other-new",
+      "target",
+    ]);
+    expect(view.freshKeys.has(observationKeyOf(session("other-new", "ws-2")))).toBe(true);
+    expect(view.freshKeys.has(observationKeyOf(session("target", "ws-1")))).toBe(false);
+    expect(view.freshWorkspaceIds).toEqual(new Set(["ws-2"]));
+  });
+
+  test("the next degraded poll resets freshness to what it read", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWideFailure();
+    collector.noteScoped("ws-1", [session("one", "ws-1")]);
+    expect(collector.view().freshKeys.has(observationKeyOf(session("one", "ws-1")))).toBe(
+      true,
+    );
+    collector.noteHostWideFailure();
+    collector.noteScoped("ws-2", [session("two", "ws-2")]);
+    const fresh = collector.view().freshKeys;
+    expect(fresh.has(observationKeyOf(session("two", "ws-2")))).toBe(true);
+    expect(fresh.has(observationKeyOf(session("one", "ws-1")))).toBe(false);
+    expect(collector.view().freshWorkspaceIds).toEqual(new Set(["ws-2"]));
+  });
+
+  test("recovering host-wide replaces the fresh set with the full truth", () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWideFailure();
+    collector.noteScoped("ws-1", [session("one", "ws-1")]);
+    collector.noteHostWide([session("fresh", "ws-2")]);
+    expect(collector.view().freshKeys).toEqual(
+      new Set([observationKeyOf(session("fresh", "ws-2"))]),
+    );
+    expect(collector.view().freshWorkspaceIds).toEqual(new Set(["ws-2"]));
+  });
+
+  test("successful empty scoped reads still prove workspace freshness", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([session("retained", "ws-1")]);
+    const view = await pollSidebarSessions({
+      collector,
+      workspaceIds: ["ws-empty"],
+      fetchHostWide: async () => ({ ok: false }),
+      fetchScoped: async () => ({ ok: true, sessions: [] }),
+    });
+    expect(view.freshKeys).toEqual(new Set());
+    expect(view.freshWorkspaceIds).toEqual(new Set(["ws-empty"]));
+  });
+
+  test("fresh keys are exact host+id+incarnation matches", () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([session("a", "ws-1")]);
+    const staleIncarnation = { ...session("a", "ws-1"), incarnation: "2" };
+    expect(collector.view().freshKeys.has(observationKeyOf(staleIncarnation))).toBe(false);
+  });
+});
+
+describe("one sidebar poll", () => {
   test("one workspace's failure keeps its own last list, not a blank card", async () => {
     const collector = createSidebarSessionCollector();
     let wsTwoFails = false;
@@ -179,5 +267,117 @@ describe("one sidebar poll", () => {
       "ws-1-session",
       "ws-2-session",
     ]);
+  });
+});
+
+describe("degraded bounds (R3 preserves 8/512)", () => {
+  test("the scoped workspace set never grows past the cap", () => {
+    expect(SIDEBAR_SCOPED_READ_BATCH).toBe(8);
+    expect(SIDEBAR_SCOPED_READ_MAX_WORKSPACES).toBe(512);
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWideFailure();
+    const many = Array.from({ length: 600 }, (_, index) => `ws-${index}`);
+    const batch = collector.planScopedReads(many);
+    expect(batch).toHaveLength(SIDEBAR_SCOPED_READ_BATCH);
+    // The deleted-workspace prune keeps only wanted ids: a later view with a
+    // small wanted set drops the rest instead of growing without bound.
+    expect(collector.planScopedReads(["ws-1"])).toEqual(["ws-1"]);
+    expect(collector.view().sessions).toEqual([]);
+  });
+});
+
+describe("poll rejection and host changes (R3 epoch isolation)", () => {
+  test("a rejecting fetcher leaves the shared collector untouched", async () => {
+    const shared = createSidebarSessionCollector();
+    shared.noteHostWide([session("committed", "ws-1")]);
+    const fork = shared.fork();
+    await expect(
+      pollSidebarSessions({
+        collector: fork,
+        workspaceIds: ["ws-1"],
+        fetchHostWide: async () => {
+          throw new Error("boom");
+        },
+        fetchScoped: async () => ({ ok: false }),
+      }),
+    ).rejects.toThrow("boom");
+    // The fork may have been touched, but the committed truth never was:
+    // the shell drops a rejected epoch's fork outright.
+    expect(shared.view().sessions.map((row) => row.id)).toEqual(["committed"]);
+    expect(shared.isDegraded()).toBe(false);
+  });
+
+  test("a reconnect (new host truth) replaces the committed view", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([session("old", "ws-1")]);
+    const view = await pollSidebarSessions({
+      collector,
+      workspaceIds: ["ws-1"],
+      fetchHostWide: async () => ({ ok: true, sessions: [session("new", "ws-1")] }),
+      fetchScoped: async () => ({ ok: false }),
+    });
+    expect(view.sessions.map((row) => row.id)).toEqual(["new"]);
+    expect(view.freshKeys).toEqual(
+      new Set([observationKeyOf(session("new", "ws-1"))]),
+    );
+    expect(view.freshWorkspaceIds).toEqual(new Set(["ws-1"]));
+  });
+});
+
+describe("collector forks (R3 epoch isolation)", () => {
+  test("a discarded fork (cancelled or stale poll) leaves the shared collector untouched", async () => {
+    // A cancelled epoch's poll still runs to completion against its fork;
+    // dropping its view must not disturb the last committed truth.
+    const shared = createSidebarSessionCollector();
+    shared.noteHostWide([session("committed", "ws-1")]);
+    const fork = shared.fork();
+    await pollSidebarSessions({
+      collector: fork,
+      workspaceIds: ["ws-1"],
+      fetchHostWide: async () => ({ ok: true, sessions: [session("stale", "ws-1")] }),
+      fetchScoped: async () => ({ ok: false }),
+    });
+    expect(fork.view().sessions.map((row) => row.id)).toEqual(["stale"]);
+    const view = shared.view();
+    expect(view.sessions.map((row) => row.id)).toEqual(["committed"]);
+    expect(view.freshKeys).toEqual(
+      new Set([observationKeyOf(session("committed", "ws-1"))]),
+    );
+    expect(view.degraded).toBe(false);
+  });
+
+  test("a fork starts from the committed state and diverges independently", async () => {
+    const shared = createSidebarSessionCollector();
+    shared.noteHostWideFailure();
+    shared.noteScoped("ws-1", [session("one", "ws-1")]);
+    const fork = shared.fork();
+    expect(fork.isDegraded()).toBe(true);
+    fork.noteScoped("ws-2", [session("two", "ws-2")]);
+    expect(fork.view().sessions.map((row) => row.id).sort()).toEqual(["one", "two"]);
+    // The shared collector never saw ws-2.
+    expect(shared.view().sessions.map((row) => row.id)).toEqual(["one"]);
+    // And shared writes after the fork do not leak into it either.
+    shared.noteScoped("ws-3", [session("three", "ws-3")]);
+    expect(fork.view().sessions.map((row) => row.id).sort()).toEqual(["one", "two"]);
+    expect(shared.view().sessions.map((row) => row.id).sort()).toEqual([
+      "one",
+      "three",
+    ]);
+  });
+
+  test("a committed view is immutable: later polls never mutate a held array or proof", async () => {
+    const collector = createSidebarSessionCollector();
+    collector.noteHostWide([session("a", "ws-1")]);
+    const committed = collector.view();
+    const heldSessions = committed.sessions;
+    const heldKeys = committed.freshKeys;
+    await pollSidebarSessions({
+      collector,
+      workspaceIds: ["ws-1"],
+      fetchHostWide: async () => ({ ok: true, sessions: [session("b", "ws-1")] }),
+      fetchScoped: async () => ({ ok: false }),
+    });
+    expect(heldSessions.map((row) => row.id)).toEqual(["a"]);
+    expect(heldKeys).toEqual(new Set([observationKeyOf(session("a", "ws-1"))]));
   });
 });

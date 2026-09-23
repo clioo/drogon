@@ -132,6 +132,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function ownerResolvingScope(scope: BotScope & { locale: string }): BotScope & { locale: string } {
+  return { ...scope, workspaceId: "" };
+}
+
 /** The daemon's own reason a monitor read failed.
  *
  *  The injectable `monitorList` dep type declares only `{ ok, result }` —
@@ -423,7 +427,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       setActionError(null);
       try {
         const response = await bridge.botResponsibilityCreate({
-          ...scope,
+          ...ownerResolvingScope(scope),
           requestId: mintRequestId("bot-responsibility"),
           botId,
           name: responsibilityForm.name.trim(),
@@ -458,7 +462,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       setActionError(null);
       try {
         const response = await bridge.botDelete({
-          ...scope,
+          ...ownerResolvingScope(scope),
           requestId: mintRequestId("bot-delete"),
           botId,
         });
@@ -497,7 +501,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       try {
         const response = await monitorApprove({
           hostId: scope.hostId,
-          workspaceId: scope.workspaceId,
+          workspaceId: "",
           botId,
           monitorId,
         });

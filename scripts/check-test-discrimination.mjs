@@ -13,6 +13,12 @@ import { parseArgs } from "node:util";
 
 export const SCHEMA = "drogon.test-discrimination/1";
 export const DEFAULT_TIMEOUT_MS = 180000;
+// `git diff --base origin/main` can legitimately exceed Node's default
+// 1 MiB spawnSync buffer on long-lived PR branches. Keep the gate bounded,
+// but make that bound explicit and large enough for inherited main diffs;
+// a truly larger diff reports an infra failure instead of aborting with the
+// opaque spawnSync ENOBUFS error CI hit before the gate could test anything.
+export const DEFAULT_GIT_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
 export const JS_EXTS = new Set([".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".jsx"]);
 const IMPORT_EXTS = ["", ".mjs", ".js", ".mts", ".ts", ".tsx", ".jsx", ".cjs", ".cts"];
 
@@ -276,14 +282,17 @@ export function sha256Hex(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function gitSync(root, args, timeoutMs = 30000) {
-  const result = spawnSync("git", args, { cwd: root, encoding: "utf8", timeout: timeoutMs });
+function gitSync(root, args, timeoutMs = 30000, maxBuffer = DEFAULT_GIT_OUTPUT_MAX_BYTES) {
+  const result = spawnSync("git", args, { cwd: root, encoding: "utf8", timeout: timeoutMs, maxBuffer });
+  const errorMessage = result.error ? String(result.error?.message ?? result.error) : null;
   return {
     ok: result.status === 0,
     code: result.status,
     stdout: typeof result.stdout === "string" ? result.stdout : "",
     stderr: typeof result.stderr === "string" ? result.stderr : "",
-    error: result.error ? String(result.error?.message ?? result.error) : null,
+    error: errorMessage?.includes("ENOBUFS")
+      ? `git output exceeded bounded buffer (${maxBuffer} bytes): ${errorMessage}`
+      : errorMessage,
   };
 }
 
