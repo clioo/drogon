@@ -418,7 +418,6 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
       <div
         className={
           "compact-agent-row group/compact-agent-row flex h-auto min-h-6 min-w-0 cursor-pointer flex-wrap items-center gap-x-1 gap-y-0.5 overflow-hidden rounded-sm px-1 py-px text-[11px] leading-none text-muted-foreground worktree-agent-row-hover" +
-          (focused ? " bg-worktree-sidebar-accent" : "") +
           lineageClasses
         }
         onClick={handleActivate}
@@ -443,7 +442,6 @@ export const WorktreeAgentRow = memo(function WorktreeAgentRow({
       disabled={disabled}
       className={
         "compact-agent-row group/compact-agent-row flex h-auto min-h-6 w-full min-w-0 cursor-pointer flex-wrap items-center gap-x-1 gap-y-0.5 overflow-hidden rounded-sm px-1 py-px text-left text-[11px] leading-none text-muted-foreground worktree-agent-row-hover" +
-        (focused ? " bg-worktree-sidebar-accent" : "") +
         lineageClasses
       }
       onClick={handleActivate}
