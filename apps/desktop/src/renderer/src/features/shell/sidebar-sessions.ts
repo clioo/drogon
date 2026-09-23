@@ -15,10 +15,6 @@
    (`window.drogon.sessions()` with no workspaceId) and merges the selected
    workspace's fresher push-updated copies on top. */
 import type { Session } from "../../../../shared/session-contract";
-import {
-  observationKeyOf,
-  readObservationSnapshot,
-} from "./sidebar-session-observation";
 
 /** Session ids that must never appear as sidebar rows (split second panes,
  *  R16-N: only root sessions own strip tabs and cards). */
@@ -38,29 +34,18 @@ export function sidebarSessionView(
   hostWideSessions: readonly Session[],
   selectedWorkspaceSessions: readonly Session[],
   splitSecondaryIds: SplitSecondaryIds,
-  freshHostWideObservationKeys?: ReadonlySet<string>,
 ): Session[] {
   const merged = new Map<string, Session>();
-  const hostWideByObservationKey = new Map<string, Session>();
   for (const session of hostWideSessions) {
     if (splitSecondaryIds.has(session.id)) continue;
     merged.set(session.id, session);
-    hostWideByObservationKey.set(observationKeyOf(session), session);
   }
   for (const session of selectedWorkspaceSessions) {
     if (splitSecondaryIds.has(session.id)) continue;
-    const key = observationKeyOf(session);
-    const freshHostWide = hostWideByObservationKey.get(key);
-    if (freshHostWideObservationKeys?.has(key) === true && freshHostWide) {
-      const snapshot = readObservationSnapshot(freshHostWide);
-      merged.set(session.id, {
-        ...session,
-        observedHarnessId: snapshot.observedHarnessId,
-        observedHarnessAt: snapshot.observedHarnessAt,
-        hasForegroundChild: snapshot.hasForegroundChild,
-      });
-      continue;
-    }
+    // The selected list already carries the observation facts admitted by
+    // App's ordered, bounded ledger. A raw host-wide poll key is only read
+    // proof, not render authority: after a newer selected clear, an older
+    // poll must not overlay stale Pi/foreground metadata here.
     merged.set(session.id, session);
   }
   return [...merged.values()];

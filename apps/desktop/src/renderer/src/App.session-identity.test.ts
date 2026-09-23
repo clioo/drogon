@@ -3,6 +3,7 @@ import {
   adoptOutOfBandSessions,
   applyQueuedAdopt,
   applySelectedFetch,
+  chooseActiveAfterSelectedFetch,
   commitObservationProof,
   planAdoptOutOfBandSessions,
   planQueuedAdopt,
@@ -1454,6 +1455,36 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     expect(next[0].incarnation).toBe("inc-2");
     expect(next[0].observedHarnessId ?? null).toBeNull();
     expect(next[0].hasForegroundChild).toBe(false);
+  });
+
+  test("an unchanged first selected fetch still chooses an active tab", () => {
+    // Production selected-fetch boundary: the poll/adopt path can populate
+    // the selected rows before the selected workspace's own first load
+    // returns. Even when reconciliation keeps the same session array (no
+    // field change), the controller must still select a tab; an early
+    // whole-response return here left the strip blank.
+    const ledger = createObservationLedger();
+    const rows = [target(freshPi)];
+    const plan = planSelectedFetch(rows, 9, ledger);
+    commitObservationProof(ledger, plan.appliedKeys, 9);
+    const input = [target(freshPi)];
+    expect(applySelectedFetch(input, plan)).toBe(input);
+    expect(chooseActiveAfterSelectedFetch("", rows)).toBe("s1");
+  });
+
+  test("selected fetch membership reconciliation removes previous-workspace rows", () => {
+    // Poll adoption never owns selected-tab membership. The selected
+    // workspace fetch remains authoritative for the tab strip: rows missing
+    // from this scoped read leave, listed rows enter, and active is chosen
+    // from the fetched membership.
+    const ledger = createObservationLedger();
+    const previousWorkspace = session("old", { workspaceId: "w-old" });
+    const fetched = [target({ id: "fresh" })];
+    const plan = planSelectedFetch(fetched, 9, ledger);
+    commitObservationProof(ledger, plan.appliedKeys, 9);
+    const reconciled = applySelectedFetch([previousWorkspace], plan);
+    expect(reconciled.map((item) => item.id)).toEqual(["fresh"]);
+    expect(chooseActiveAfterSelectedFetch("old", fetched)).toBe("fresh");
   });
 
   test("an unchanged fetch commits nothing new", () => {

@@ -888,6 +888,15 @@ export function planSelectedFetch(
  * merge, every other daemon field from the fetch. Returns the input array
  * itself when field-equal, so an unchanged fetch commits nothing.
  */
+export function chooseActiveAfterSelectedFetch(
+  currentActive: string,
+  visible: readonly Session[],
+): string {
+  return visible.some((item) => item.id === currentActive)
+    ? currentActive
+    : (visible.at(-1)?.id ?? "");
+}
+
 export function applySelectedFetch(
   current: Session[],
   plan: SelectedFetchPlan,
@@ -2952,11 +2961,7 @@ export function App() {
           requestSeq,
         );
         setSessions((items) => applySelectedFetch(items, fetchPlan));
-        setActive((value) =>
-          visible.some((item) => item.id === value)
-            ? value
-            : (visible.at(-1)?.id ?? ""),
-        );
+        setActive((value) => chooseActiveAfterSelectedFetch(value, visible));
       })
       .catch(() => {
         if (!cancelled)
@@ -3397,7 +3402,6 @@ export function App() {
     allBotSessions,
     sessions,
     splitSecondaryIds,
-    sidebarObservationProvenance.current.freshKeys,
   );
   // Defect 1: the host owns liveness, and the decision must be
   // workspace-independent. The daemon projects the recorded link's own
