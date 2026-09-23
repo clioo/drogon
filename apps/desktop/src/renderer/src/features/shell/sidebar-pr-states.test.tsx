@@ -279,6 +279,16 @@ describe("sidebar PR states: ProjectList wiring", () => {
     await waitFor(() => expect(cardPrState(container, "wt-none")).toBeNull());
     expect(cardPrState(container, "wt-bad")).toBeNull();
     expect(container.querySelector("[data-worktree-card-pr-state]")).toBeNull();
+    // The PR-less branch reads "no PR"; the failed project says its state is
+    // unknown instead of claiming there is none (e.g. a GitHub rate limit).
+    const marker = (id: string) =>
+      container.querySelector(`[data-worktree-card-id="${id}"] [data-worktree-card-pr-none]`);
+    await waitFor(() =>
+      expect(marker("wt-bad")?.getAttribute("aria-label")).toBe(
+        "Pull request status unavailable",
+      ),
+    );
+    expect(marker("wt-none")?.getAttribute("aria-label")).toBe("No pull request");
   });
 
   test("a failed project retries once the visible project set changes", async () => {
@@ -553,6 +563,57 @@ describe("sidebar PR states: ProjectList wiring", () => {
       });
       expect(tasksList).toHaveBeenCalledTimes(2);
       expect(cardPrState(container, "wt-1")).toBe("merged");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("between full walks a refresh reads page 1 only and keeps deeper reviews", async () => {
+    vi.useFakeTimers();
+    try {
+      const page = (n: number, pulls: TaskPullRequest[], hasNextPage: boolean) => ({
+        ok: true as const,
+        result: { repo: "example/repo", issues: [], pulls, page: n, perPage: 100, hasNextPage },
+      });
+      let newest = pull({ number: 20, title: "New", state: "open", headRefName: "fresh" });
+      const tasksList = vi.fn(async (input: { page?: number }) =>
+        (input.page ?? 1) === 1
+          ? page(1, [newest], true)
+          : page(2, [pull({ number: 3, title: "Old", state: "merged", headRefName: "old" })], false),
+      );
+      (window as unknown as { drogon: Record<string, unknown> }).drogon = {
+        tasks: { tasksList },
+      };
+      const { container } = mount({
+        groups: [
+          {
+            project: project(),
+            worktrees: [
+              worktree({ id: "wt-fresh", branch: "fresh" }),
+              worktree({ id: "wt-old", branch: "old", linkedPr: null }),
+            ],
+          },
+        ],
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      expect(cardPrState(container, "wt-old")).toBe("merged");
+      const firstWalk = tasksList.mock.calls.length;
+      expect(firstWalk).toBe(2);
+      newest = pull({ number: 20, title: "New", state: "merged", headRefName: "fresh" });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SIDEBAR_PULLS_REFRESH_MS + 1_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
+      // One more request (page 1), not a second full walk; the deeper review
+      // found by the first walk is kept and the fresh one updates.
+      expect(tasksList.mock.calls.length).toBe(firstWalk + 1);
+      expect((tasksList.mock.calls.at(-1)![0] as { page?: number }).page).toBeUndefined();
+      expect(cardPrState(container, "wt-fresh")).toBe("merged");
+      expect(cardPrState(container, "wt-old")).toBe("merged");
     } finally {
       vi.useRealTimers();
     }

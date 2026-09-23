@@ -130,6 +130,8 @@ import {
   selectStaleSidebarPrProjects,
   SIDEBAR_PULLS_MAX_PAGES,
   SIDEBAR_PULLS_PER_PAGE,
+  mergeSidebarPrRevalidation,
+  sidebarPullsRefreshIsShallow,
   sidebarLinkedPrAttemptKey,
   sidebarPrFetchSignature,
   sidebarPrNextWakeDelayMs,
@@ -893,6 +895,9 @@ export function ProjectList({
   // skips them (single-flight — a wake or re-render never doubles a
   // request), and settle always releases them, even when superseded.
   const pullsInFlightRef = useRef<Set<string>>(new Set());
+  // When each project's listing was last walked to completion; between full
+  // walks a refresh reads page 1 only (sidebarPullsRefreshIsShallow).
+  const pullsFullWalkAtRef = useRef<Map<string, number>>(new Map());
   // Projects whose page walk exhausted the page budget with branches still
   // unmatched: the honest record behind `sidebarPrBranchCoverage`'s
   // `incomplete` (retryable, never "no PR").
@@ -958,6 +963,9 @@ export function ProjectList({
     for (const id of [...pullsIncompleteRef.current]) {
       if (!liveIds.has(id)) pullsIncompleteRef.current.delete(id);
     }
+    for (const id of [...pullsFullWalkAtRef.current.keys()]) {
+      if (!liveIds.has(id)) pullsFullWalkAtRef.current.delete(id);
+    }
     const signature = sidebarPrFetchSignature(gitProjectIds);
     const nowMs = Date.now();
     const toFetch = selectSidebarPrDueIds({
@@ -1022,6 +1030,12 @@ export function ProjectList({
             let pages: SidebarPullsCache = new Map();
             let page = 0;
             let incomplete = false;
+            const cachedListing = pullsByProjectId.get(projectId);
+            const shallow = sidebarPullsRefreshIsShallow(
+              cachedListing,
+              pullsFullWalkAtRef.current.get(projectId),
+              Date.now(),
+            );
             for (;;) {
               if (cancelled || generation !== pullsFetchGenerationRef.current) return null;
               page += 1;
@@ -1040,6 +1054,14 @@ export function ProjectList({
               if (cancelled || generation !== pullsFetchGenerationRef.current) return null;
               if (!result.ok) return sidebarPullsWalkErrorOutcome(pages, projectId);
               const rows = result.result.pulls ?? [];
+              if (shallow && Array.isArray(cachedListing)) {
+                return {
+                  projectId,
+                  pulls: mergeSidebarPrRevalidation(cachedListing, rows),
+                  incomplete: pullsIncompleteRef.current.has(projectId),
+                  failed: false,
+                };
+              }
               pages = mergeSidebarPrPageResults(pages, projectId, rows, page);
               const merged = pages.get(projectId) ?? [];
               if (result.result.hasNextPage !== true) break;
@@ -1051,6 +1073,7 @@ export function ProjectList({
                 break;
               }
             }
+            pullsFullWalkAtRef.current.set(projectId, Date.now());
             return { projectId, pulls: pages.get(projectId) ?? [], incomplete, failed: false };
           } finally {
             pullsInFlightRef.current.delete(projectId);

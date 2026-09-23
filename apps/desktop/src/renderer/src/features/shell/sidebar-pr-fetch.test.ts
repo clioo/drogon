@@ -5,6 +5,7 @@ import {
   mergeSidebarLinkedPrResults,
   mergeSidebarPrPageResults,
   mergeSidebarPrResults,
+  mergeSidebarPrRevalidation,
   pruneSidebarLinkedPrAttempts,
   pruneSidebarPrCache,
   pruneSidebarPrFreshness,
@@ -13,6 +14,7 @@ import {
   selectSidebarPrDueIds,
   selectSidebarPrFetchIds,
   selectStaleSidebarPrProjects,
+  SIDEBAR_PULLS_FULL_WALK_MS,
   SIDEBAR_PULLS_MAX_PAGES,
   SIDEBAR_PULLS_PER_PAGE,
   SIDEBAR_PULLS_REFRESH_MS,
@@ -23,6 +25,7 @@ import {
   sidebarProjectHasUnresolvedBranches,
   sidebarProjectHasUnresolvedLiveBranches,
   sidebarPrProjectIds,
+  sidebarPullsRefreshIsShallow,
   sidebarPullsRetryDelayMs,
   sidebarPullsWalkErrorOutcome,
   sortSidebarPullsBestFirst,
@@ -591,5 +594,32 @@ describe("sidebar PR pagination", () => {
     );
     expect(incomplete.get("wt-miss")).toBe("incomplete");
     expect(incomplete.get("wt-hit")).toBe("matched");
+  });
+});
+
+describe("quota-bounded refresh (page 1 between full walks)", () => {
+  const pull = (number: number, state = "open") =>
+    ({ number, title: `#${number}`, state, headRefName: `b${number}` }) as never;
+
+  test("a refresh is shallow only with a cached listing and a recent full walk", () => {
+    const now = 1_000_000_000;
+    expect(sidebarPullsRefreshIsShallow(undefined, now - 1000, now)).toBe(false);
+    expect(sidebarPullsRefreshIsShallow(null, now - 1000, now)).toBe(false);
+    expect(sidebarPullsRefreshIsShallow([], undefined, now)).toBe(false);
+    expect(sidebarPullsRefreshIsShallow([], now - 1000, now)).toBe(true);
+    expect(
+      sidebarPullsRefreshIsShallow([], now - SIDEBAR_PULLS_FULL_WALK_MS, now),
+    ).toBe(false);
+  });
+
+  test("page 1 wins for the reviews it lists and older cached reviews are kept", () => {
+    const merged = mergeSidebarPrRevalidation(
+      [pull(1, "open"), pull(2, "open")],
+      [pull(2, "merged"), pull(3, "open")],
+    );
+    const byNumber = new Map(merged.map((item: { number: number; state: string }) => [item.number, item.state]));
+    expect([...byNumber.keys()].sort()).toEqual([1, 2, 3]);
+    expect(byNumber.get(2)).toBe("merged");
+    expect(byNumber.get(1)).toBe("open");
   });
 });

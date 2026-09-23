@@ -154,19 +154,18 @@ describe("marker tones", () => {
     assert.deepEqual(PR_MARKER_TONES, {
       merged: "text-emerald-500",
       ready: "text-cyan-500",
-      open: "text-muted-foreground",
+      open: "text-blue-500",
       draft: "text-muted-foreground/70",
       conflicts: "text-rose-500",
       closed: "text-muted-foreground/70",
     });
   });
 
-  it("matches tones by whole class token, so muted never reads as open", () => {
-    // "text-muted-foreground/70" contains "text-muted-foreground" as a
-    // substring: token membership keeps draft/closed distinct from open.
+  it("matches tones by whole class token, so grey never reads as open", () => {
     assert.equal(markerHasTone({ tone: ["text-muted-foreground/70"] }, "draft"), true);
     assert.equal(markerHasTone({ tone: ["text-muted-foreground/70"] }, "open"), false);
-    assert.equal(markerHasTone({ tone: ["text-muted-foreground"] }, "open"), true);
+    assert.equal(markerHasTone({ tone: ["text-muted-foreground"] }, "open"), false);
+    assert.equal(markerHasTone({ tone: ["text-blue-500", "dark:text-blue-400"] }, "open"), true);
   });
 });
 

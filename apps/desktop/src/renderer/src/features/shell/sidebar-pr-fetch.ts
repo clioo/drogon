@@ -280,6 +280,37 @@ export const SIDEBAR_PULLS_REFRESH_MS = 120_000;
 export const SIDEBAR_PULLS_RETRY_BASE_MS = 15_000;
 export const SIDEBAR_PULLS_RETRY_MAX_MS = 300_000;
 
+/** How long a project's full page walk stays trusted. Between full walks a
+ *  scheduled refresh reads only page 1 (the newest reviews, where a new or
+ *  just-changed PR lands) and folds it over the cached listing: the walk
+ *  holds pages open for every branch without a live review, so walking all
+ *  pages every refresh drained the user's GitHub GraphQL quota. */
+export const SIDEBAR_PULLS_FULL_WALK_MS = 15 * 60_000;
+
+/** True when a refresh may read page 1 only: a listing is cached and the
+ *  last complete walk is recent enough. */
+export function sidebarPullsRefreshIsShallow(
+  cached: readonly TaskPullRequest[] | null | undefined,
+  lastFullWalkAt: number | undefined,
+  nowMs: number,
+): boolean {
+  if (!Array.isArray(cached) || lastFullWalkAt === undefined) return false;
+  return nowMs - lastFullWalkAt < SIDEBAR_PULLS_FULL_WALK_MS;
+}
+
+/** Folds a fresh page 1 over the cached listing: page 1 wins for the reviews
+ *  it carries, older cached reviews it did not re-list are kept. */
+export function mergeSidebarPrRevalidation(
+  cached: readonly TaskPullRequest[],
+  pageOne: readonly TaskPullRequest[],
+): TaskPullRequest[] {
+  const fresh = new Set(pageOne.map((pull) => pull.number));
+  return sortSidebarPullsBestFirst([
+    ...pageOne,
+    ...cached.filter((pull) => !fresh.has(pull.number)),
+  ]);
+}
+
 /** Explicit request budget for one project's page walk: the shared bridge
  *  caps `page` at 10, and follow-up pages are fetched only while visible
  *  branches stay unmatched (early stop), so the common case stays one

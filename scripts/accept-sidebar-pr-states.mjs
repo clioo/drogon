@@ -236,7 +236,7 @@ export function projectPrMarker(raw) {
 export const PR_MARKER_TONES = {
   merged: "text-emerald-500",
   ready: "text-cyan-500",
-  open: "text-muted-foreground",
+  open: "text-blue-500",
   draft: "text-muted-foreground/70",
   conflicts: "text-rose-500",
   closed: "text-muted-foreground/70",

@@ -188,7 +188,7 @@ describe("card activity sentence", () => {
     expect(waitingLane.querySelector('[aria-label="Waiting for input"]')).not.toBeNull();
     expect(
       waitingLane.querySelector("[data-worktree-activity]")?.getAttribute("aria-label"),
-    ).toBe("Agent activity: needs input");
+    ).toBe("Agent activity: waiting for input");
   });
 });
 
@@ -200,8 +200,8 @@ describe("card activity ring (owner's guideline: agent activity, left status)", 
 
   test.each([
     ["working", [session({ agentState: "working" })], "active", "Agent activity: working"],
-    ["idle", [session({ agentState: "idle" })], "quiet", "Agent activity: no active agents"],
-    ["no session", [], "none", "Agent activity: none"],
+    ["idle", [session({ agentState: "idle" })], "quiet", "Agent activity: done"],
+    ["no session", [], "none", "Agent activity: idle"],
   ] as const)("a %s card draws the %s ring", (_name, sessions, tone, label) => {
     const { container } = renderCard({ sessions: [...sessions] });
     const ring = ringOf(container);

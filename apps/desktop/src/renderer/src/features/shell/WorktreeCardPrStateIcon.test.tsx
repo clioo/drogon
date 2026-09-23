@@ -65,7 +65,7 @@ describe("WorktreeCardPrStateIcon", () => {
     expect(marker?.querySelector("svg.lucide-check")).toBeNull();
   });
 
-  test("REVIEW_REQUIRED with green checks stays neutral open, never cyan-ready", () => {
+  test("REVIEW_REQUIRED with green checks stays blue open, never cyan-ready", () => {
     const marker = icon(
       base({
         state: "open",
@@ -75,7 +75,9 @@ describe("WorktreeCardPrStateIcon", () => {
       }),
     );
     expect(marker?.getAttribute("data-worktree-card-pr-state")).toBe("open");
-    expect(marker?.className).toContain("text-muted-foreground");
+    // Owner: an open review is blue, never the grey of "no PR".
+    expect(marker?.className).toContain("text-blue-500");
+    expect(marker?.className).not.toContain("text-muted-foreground");
     expect(marker?.className).not.toContain("text-cyan-500");
     expect(marker?.querySelector("svg.lucide-check")).toBeNull();
   });
@@ -99,20 +101,38 @@ describe("WorktreeCardPrStateIcon", () => {
     );
   });
 
-  test("pending checks and unknown mergeability stay neutral open, never cyan", () => {
+  test("pending checks and unknown mergeability stay blue open, never cyan", () => {
     const pending = icon(
       base({ state: "open", mergeable: "MERGEABLE", checks: "pending" }),
     );
     expect(pending?.getAttribute("data-worktree-card-pr-state")).toBe("open");
-    expect(pending?.className).toContain("text-muted-foreground");
+    // Owner: an open review is blue, never the grey of "no PR".
+    expect(pending?.className).toContain("text-blue-500");
+    expect(pending?.className).not.toContain("text-muted-foreground");
     expect(pending?.className).not.toContain("text-cyan-500");
     expect(pending?.getAttribute("aria-label")).toBe("Linked PR #123 checks: Pending");
 
     const unknown = icon(base({ state: "open", mergeable: "UNKNOWN" }));
     expect(unknown?.getAttribute("data-worktree-card-pr-state")).toBe("open");
-    expect(unknown?.className).toContain("text-muted-foreground");
+    // Owner: an open review is blue, never the grey of "no PR".
+    expect(unknown?.className).toContain("text-blue-500");
+    expect(unknown?.className).not.toContain("text-muted-foreground");
     expect(unknown?.className).not.toContain("text-cyan-500");
     expect(unknown?.getAttribute("aria-label")).toBe("Linked PR #123: Open");
+  });
+
+  test("on a card, no PR draws the grey marker and an unknown listing says so", () => {
+    const none = render(<WorktreeCardPrStateIcon pr={null} showNone />);
+    const noneMarker = none.container.querySelector("[data-worktree-card-pr-none]");
+    expect(noneMarker?.getAttribute("aria-label")).toBe("No pull request");
+    expect(noneMarker?.className).toContain("text-muted-foreground");
+    none.unmount();
+    const unknown = render(<WorktreeCardPrStateIcon pr={null} showNone unknown />);
+    const unknownMarker = unknown.container.querySelector("[data-worktree-card-pr-none]");
+    expect(unknownMarker?.getAttribute("aria-label")).toBe(
+      "Pull request status unavailable",
+    );
+    expect(unknownMarker?.getAttribute("data-worktree-card-pr-none")).toBe("unknown");
   });
 
   test("no linked review draws no icon at all", () => {
