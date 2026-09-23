@@ -62,12 +62,19 @@ export function sameObservation(
 /** Bound on per-session ordering proofs (see the ledger below). */
 export const OBSERVATION_LEDGER_MAX_ENTRIES = 1024;
 
+export type AdmittedObservation = {
+  seq: number;
+  snapshot: ObservationSnapshot | null;
+};
+
 export type ObservationLedger = {
   /** True when `seq` is newer than whatever last wrote `key` (or nothing did). */
   shouldApply(key: string, seq: number): boolean;
-  /** Records that `seq` wrote `key`. Callers check `shouldApply` first, so
-   *  the stored proof only ever moves forward. */
-  markApplied(key: string, seq: number): void;
+  /** Records that `seq` wrote `key` and the exact admitted value. Callers check
+   *  `shouldApply` first, so the stored proof only ever moves forward. */
+  markApplied(key: string, seq: number, snapshot?: ObservationSnapshot | null): void;
+  /** The exact value admitted for this key, bounded and pruned with the proof. */
+  admitted(key: string): AdmittedObservation | null;
   /** Drops proof for keys outside `keep` (normally the live selected copy),
    *  so retained state stays bounded by selection size instead of history.
    *  Pruning an unselected key only costs one redundant fresh re-apply when
@@ -91,16 +98,16 @@ export type ObservationLedger = {
 export function createObservationLedger(
   maxEntries: number = OBSERVATION_LEDGER_MAX_ENTRIES,
 ): ObservationLedger {
-  const applied = new Map<string, number>();
+  const applied = new Map<string, AdmittedObservation>();
   const bound = Math.max(1, Math.floor(maxEntries));
   return {
     shouldApply(key, seq) {
       const last = applied.get(key);
-      return last === undefined || seq > last;
+      return last === undefined || seq > last.seq;
     },
-    markApplied(key, seq) {
+    markApplied(key, seq, snapshot = null) {
       const last = applied.get(key);
-      if (last !== undefined && seq <= last) return;
+      if (last !== undefined && seq <= last.seq) return;
       if (!applied.has(key)) {
         while (applied.size >= bound) {
           const oldest = applied.keys().next();
@@ -110,7 +117,11 @@ export function createObservationLedger(
       } else {
         applied.delete(key);
       }
-      applied.set(key, seq);
+      applied.set(key, { seq, snapshot });
+    },
+    admitted(key) {
+      const value = applied.get(key);
+      return value ? { seq: value.seq, snapshot: value.snapshot } : null;
     },
     prune(keep) {
       for (const key of [...applied.keys()]) {

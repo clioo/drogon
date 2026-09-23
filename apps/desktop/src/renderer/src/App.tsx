@@ -609,20 +609,24 @@ export type AdoptOutOfBandPlan = {
    * inputs (a React setState updater may run twice) always agrees.
    */
   appliedKeys: string[];
+  appliedObservations: { key: string; snapshot: ObservationSnapshot }[];
 };
 
 /**
- * Records that `seq` wrote each applied key. Forward-only and idempotent:
+ * Records that `seq` wrote each applied value. Forward-only and idempotent:
  * a stale or repeated commit never moves proof back, so committing the same
  * plan twice (StrictMode effect replay) is a no-op the second time.
  */
 export function commitObservationProof(
   ledger: ObservationLedger | undefined,
-  appliedKeys: readonly string[],
+  applied: readonly string[] | readonly { key: string; snapshot: ObservationSnapshot }[],
   seq: number | undefined,
 ): void {
   if (ledger === undefined || seq === undefined) return;
-  for (const key of appliedKeys) ledger.markApplied(key, seq);
+  for (const item of applied) {
+    if (typeof item === "string") ledger.markApplied(item, seq);
+    else ledger.markApplied(item.key, seq, item.snapshot);
+  }
 }
 
 export function pruneObservationProofForSessions(
@@ -649,6 +653,7 @@ export function planAdoptOutOfBandSessions(
   const seq = provenance?.seq;
   const ledger = provenance?.ledger;
   const appliedKeys: string[] = [];
+  const appliedObservations: { key: string; snapshot: ObservationSnapshot }[] = [];
   // R3: a retained row is last-known rendering, never news — an id the
   // selected list never saw cannot join it from a row no successful read
   // delivered.
@@ -691,7 +696,11 @@ export function planAdoptOutOfBandSessions(
     // proof is committed once, by the committer, so a later stale poll
     // cannot move what it just wrote.
     if (seq !== undefined && ledger !== undefined)
-      for (const item of adopted) appliedKeys.push(observationKeyOf(item));
+      for (const item of adopted) {
+        const key = observationKeyOf(item);
+        appliedKeys.push(key);
+        appliedObservations.push({ key, snapshot: readObservationSnapshot(item) });
+      }
   }
   for (let index = 0; index < current.length; index += 1) {
     const item = result[index]!;
@@ -710,8 +719,11 @@ export function planAdoptOutOfBandSessions(
     // timestamp of their own, so the request order IS the evidence. Commit
     // before the value comparison so an equal read still advances the ledger;
     // the array keeps its identity below when nothing moved.
-    if (seq !== undefined && ledger !== undefined) appliedKeys.push(key);
     const snapshot = readObservationSnapshot(fresh);
+    if (seq !== undefined && ledger !== undefined) {
+      appliedKeys.push(key);
+      appliedObservations.push({ key, snapshot });
+    }
     if (sameObservation(readObservationSnapshot(item), snapshot)) continue;
     if (result === current) result = current.slice();
     result[index] = {
@@ -721,7 +733,7 @@ export function planAdoptOutOfBandSessions(
       hasForegroundChild: snapshot.hasForegroundChild,
     };
   }
-  return { sessions: result, appliedKeys };
+  return { sessions: result, appliedKeys, appliedObservations };
 }
 
 /**
@@ -766,6 +778,8 @@ export type QueuedAdoptProjection = {
   observations: { key: string; snapshot: ObservationSnapshot }[];
   /** Exact observation keys the caller commits with `commitObservationProof`. */
   appliedKeys: string[];
+  /** Exact admitted observation values, stored with their ordering proof. */
+  appliedObservations: { key: string; snapshot: ObservationSnapshot }[];
 };
 
 export function planQueuedAdopt(
@@ -807,7 +821,7 @@ export function planQueuedAdopt(
   // Adopted rows carry full state for the append path; observations carry
   // the frozen trio for the same keys (a freshly appended row reconciles
   // its own observation as a no-op).
-  return { adopted, observations, appliedKeys };
+  return { adopted, observations, appliedKeys, appliedObservations: observations };
 }
 
 /**
@@ -859,6 +873,7 @@ export type SelectedFetchPlan = {
   rows: Session[];
   fetchWinsObservation: ReadonlyMap<string, boolean>;
   appliedKeys: string[];
+  appliedObservations: { key: string; snapshot: ObservationSnapshot }[];
 };
 
 export function planSelectedFetch(
@@ -869,13 +884,17 @@ export function planSelectedFetch(
   const rows = [...visible];
   const fetchWinsObservation = new Map<string, boolean>();
   const appliedKeys: string[] = [];
+  const appliedObservations: { key: string; snapshot: ObservationSnapshot }[] = [];
   for (const row of rows) {
     const key = observationKeyOf(row);
     const wins = ledger === undefined || ledger.shouldApply(key, requestSeq);
     fetchWinsObservation.set(key, wins);
-    if (wins) appliedKeys.push(key);
+    if (wins) {
+      appliedKeys.push(key);
+      appliedObservations.push({ key, snapshot: readObservationSnapshot(row) });
+    }
   }
-  return { rows, fetchWinsObservation, appliedKeys };
+  return { rows, fetchWinsObservation, appliedKeys, appliedObservations };
 }
 
 /**
@@ -964,14 +983,25 @@ export type SidebarPollSettlement = {
  * freshKeys) always advances to this poll. The data array keeps its
  * identity while idle so the 3 s tick still commits nothing new.
  */
+export const WORKSPACE_READ_PROOF_MAX_ENTRIES = 512;
+
 export function markWorkspaceReadProof(
   proof: Map<string, number>,
   workspaceIds: Iterable<string>,
   seq: number,
+  maxEntries: number = WORKSPACE_READ_PROOF_MAX_ENTRIES,
 ): void {
+  const bound = Math.max(1, Math.floor(maxEntries));
   for (const workspaceId of workspaceIds) {
     const last = proof.get(workspaceId);
-    if (last === undefined || seq > last) proof.set(workspaceId, seq);
+    if (last !== undefined && seq <= last) continue;
+    if (proof.has(workspaceId)) proof.delete(workspaceId);
+    while (proof.size >= bound) {
+      const oldest = proof.keys().next();
+      if (oldest.done) break;
+      proof.delete(oldest.value);
+    }
+    proof.set(workspaceId, seq);
   }
 }
 
@@ -982,6 +1012,24 @@ export function isStaleWorkspaceRead(
 ): boolean {
   const last = proof.get(workspaceId);
   return last !== undefined && requestSeq < last;
+}
+
+export function settleSelectedWorkspaceFetch(args: {
+  visible: readonly Session[];
+  workspaceId: string;
+  requestSeq: number;
+  ledger: ObservationLedger;
+  workspaceProof: Map<string, number>;
+}): { stale: boolean; plan: SelectedFetchPlan | null } {
+  if (
+    isStaleWorkspaceRead(args.workspaceProof, args.workspaceId, args.requestSeq)
+  ) {
+    return { stale: true, plan: null };
+  }
+  const plan = planSelectedFetch(args.visible, args.requestSeq, args.ledger);
+  commitObservationProof(args.ledger, plan.appliedObservations, args.requestSeq);
+  markWorkspaceReadProof(args.workspaceProof, [args.workspaceId], args.requestSeq);
+  return { stale: false, plan };
 }
 
 export function settleSidebarPoll(
@@ -2077,7 +2125,6 @@ export function App() {
   // poll can pair the adopt proof with the exact array it describes
   // (a `useState` updater runs at render time, too late to pair).
   const allBotSessionsRef = useRef<Session[]>([]);
-  allBotSessionsRef.current = allBotSessions;
   // PERF-03: the focused Bot session's live pid + Started clock live in
   // BotSessionInspectorLive's own subtree now (see above), not here — App
   // keeps only the identity (`botSessions` map) it records synchronously.
@@ -2866,7 +2913,7 @@ export function App() {
       projection.observations.length === 0
     )
       return;
-    commitObservationProof(ledger, projection.appliedKeys, provenance.seq);
+    commitObservationProof(ledger, projection.appliedObservations, provenance.seq);
     setSessions((items) => applyQueuedAdopt(items, projection));
   }, []);
   useEffect(() => {
@@ -2915,18 +2962,6 @@ export function App() {
           setError(response.error.message);
           return;
         }
-        // Drop only when a newer successful read of THIS workspace already
-        // settled. A poll that merely refreshed another workspace must not
-        // discard the selected response; per-key observation proof below
-        // still protects rows that a newer selected read actually touched.
-        if (
-          isStaleWorkspaceRead(
-            workspaceReadProof.current,
-            selected,
-            requestSeq,
-          )
-        )
-          return;
         const dismissed = loadDismissedSessions();
         // Each session's own recorded host is what a dismissal is checked
         // against — not this connection's current `status.hostId` — and
@@ -2945,23 +2980,17 @@ export function App() {
         // observation the ledger already proved newer is kept, not rolled
         // back. The per-key verdict is captured here, once, so the updater
         // itself stays pure (replay always agrees).
-        const fetchPlan = planSelectedFetch(
+        const settlement = settleSelectedWorkspaceFetch({
           visible,
+          workspaceId: selected,
           requestSeq,
-          observationLedger.current,
-        );
-        commitObservationProof(
-          observationLedger.current,
-          fetchPlan.appliedKeys,
-          requestSeq,
-        );
-        markWorkspaceReadProof(
-          workspaceReadProof.current,
-          [selected],
-          requestSeq,
-        );
-        setSessions((items) => applySelectedFetch(items, fetchPlan));
-        setActive((value) => chooseActiveAfterSelectedFetch(value, visible));
+          ledger: observationLedger.current,
+          workspaceProof: workspaceReadProof.current,
+        });
+        if (settlement.plan)
+          setSessions((items) => applySelectedFetch(items, settlement.plan!));
+        if (!settlement.stale)
+          setActive((value) => chooseActiveAfterSelectedFetch(value, visible));
       })
       .catch(() => {
         if (!cancelled)
@@ -3059,11 +3088,6 @@ export function App() {
         // the shared collector.
         if (isStalePollSettlement(requestSeq, sidebarSettledSeq.current)) return;
         sidebarSettledSeq.current = requestSeq;
-        markWorkspaceReadProof(
-          workspaceReadProof.current,
-          view.freshWorkspaceIds,
-          requestSeq,
-        );
         // Fresh: the fork becomes the committed truth (its rotation,
         // scoped cache and fresh set included).
         sidebarSessionsSource.current = fork;

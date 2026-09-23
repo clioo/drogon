@@ -20,6 +20,7 @@ import {
   removeSessionExact,
   sameBotsLoadResult,
   sameSessions,
+  settleSelectedWorkspaceFetch,
   settleSidebarPoll,
   shouldSessionPollTick,
 } from "./App";
@@ -1457,34 +1458,112 @@ describe("R3 observation freshness (retained rows are not new facts)", () => {
     expect(next[0].hasForegroundChild).toBe(false);
   });
 
-  test("an unchanged first selected fetch still chooses an active tab", () => {
+  test("production selected settlement reaches active tab even after an equal poll", () => {
     // Production selected-fetch boundary: the poll/adopt path can populate
     // the selected rows before the selected workspace's own first load
-    // returns. Even when reconciliation keeps the same session array (no
-    // field change), the controller must still select a tab; an early
-    // whole-response return here left the strip blank.
+    // returns. A host-wide poll of the same workspace is observation proof,
+    // not selected-membership proof, so it must not trip a whole-response
+    // early return before active tab selection.
     const ledger = createObservationLedger();
     const rows = [target(freshPi)];
-    const plan = planSelectedFetch(rows, 9, ledger);
-    commitObservationProof(ledger, plan.appliedKeys, 9);
+    const workspaceProof = new Map<string, number>();
     const input = [target(freshPi)];
-    expect(applySelectedFetch(input, plan)).toBe(input);
+    const settlement = settleSelectedWorkspaceFetch({
+      visible: rows,
+      workspaceId: "w1",
+      requestSeq: 5,
+      ledger,
+      workspaceProof,
+    });
+    expect(settlement.stale).toBe(false);
+    expect(settlement.plan).not.toBeNull();
+    expect(applySelectedFetch(input, settlement.plan!)).toBe(input);
     expect(chooseActiveAfterSelectedFetch("", rows)).toBe("s1");
+    expect(ledger.admitted(observationKeyOf(target()))?.snapshot).toEqual(freshPi);
   });
 
-  test("selected fetch membership reconciliation removes previous-workspace rows", () => {
+  test("production selected settlement removes previous-workspace rows", () => {
     // Poll adoption never owns selected-tab membership. The selected
     // workspace fetch remains authoritative for the tab strip: rows missing
     // from this scoped read leave, listed rows enter, and active is chosen
     // from the fetched membership.
     const ledger = createObservationLedger();
+    const workspaceProof = new Map<string, number>();
     const previousWorkspace = session("old", { workspaceId: "w-old" });
     const fetched = [target({ id: "fresh" })];
-    const plan = planSelectedFetch(fetched, 9, ledger);
-    commitObservationProof(ledger, plan.appliedKeys, 9);
-    const reconciled = applySelectedFetch([previousWorkspace], plan);
+    const settlement = settleSelectedWorkspaceFetch({
+      visible: fetched,
+      workspaceId: "w1",
+      requestSeq: 9,
+      ledger,
+      workspaceProof,
+    });
+    expect(settlement.stale).toBe(false);
+    const reconciled = applySelectedFetch([previousWorkspace], settlement.plan!);
     expect(reconciled.map((item) => item.id)).toEqual(["fresh"]);
     expect(chooseActiveAfterSelectedFetch("old", fetched)).toBe("fresh");
+  });
+
+  test("production selected settlement stores admitted values on equal rereads", () => {
+    const ledger = createObservationLedger();
+    const workspaceProof = new Map<string, number>();
+    const rows = [target(freshPi)];
+    const first = settleSelectedWorkspaceFetch({
+      visible: rows,
+      workspaceId: "w1",
+      requestSeq: 6,
+      ledger,
+      workspaceProof,
+    });
+    expect(first.stale).toBe(false);
+    expect(ledger.admitted(observationKeyOf(target()))).toEqual({
+      seq: 6,
+      snapshot: freshPi,
+    });
+    const second = settleSelectedWorkspaceFetch({
+      visible: rows.map((row) => ({ ...row })),
+      workspaceId: "w1",
+      requestSeq: 7,
+      ledger,
+      workspaceProof,
+    });
+    expect(second.stale).toBe(false);
+    expect(ledger.admitted(observationKeyOf(target()))).toEqual({
+      seq: 7,
+      snapshot: freshPi,
+    });
+  });
+
+  test("production selected settlement fences older selected membership only", () => {
+    const ledger = createObservationLedger();
+    const workspaceProof = new Map<string, number>();
+    const newer = settleSelectedWorkspaceFetch({
+      visible: [target({ id: "new" })],
+      workspaceId: "w1",
+      requestSeq: 9,
+      ledger,
+      workspaceProof,
+    });
+    expect(newer.stale).toBe(false);
+    const older = settleSelectedWorkspaceFetch({
+      visible: [target({ id: "old" })],
+      workspaceId: "w1",
+      requestSeq: 8,
+      ledger,
+      workspaceProof,
+    });
+    expect(older).toEqual({ stale: true, plan: null });
+  });
+
+  test("workspace selected-read proof is bounded", () => {
+    const proof = new Map<string, number>();
+    markWorkspaceReadProof(proof, ["w1"], 1, 2);
+    markWorkspaceReadProof(proof, ["w2"], 2, 2);
+    markWorkspaceReadProof(proof, ["w3"], 3, 2);
+    expect([...proof.entries()]).toEqual([
+      ["w2", 2],
+      ["w3", 3],
+    ]);
   });
 
   test("an unchanged fetch commits nothing new", () => {
