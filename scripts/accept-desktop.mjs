@@ -707,7 +707,10 @@ try {
       ? value.result.sessions.find((session) => session.id === sessionId) ?? null
       : null;
   }, { workspaceId: registered.id, sessionId: originalSessionId });
-  assert.ok(original?.incarnation);
+  assert.ok(
+    original?.incarnation,
+    `could not read the launched terminal session ${originalSessionId}: ${JSON.stringify(original)}`,
+  );
   if (process.platform !== "win32") {
     report.checks.push(...await probeTerminalInputLayout({ page, session: original, output, expectedHome: privateEnvironment.home, dataDir }));
     // #605: an agent TUI redrawing its input zone while the pane is resized
