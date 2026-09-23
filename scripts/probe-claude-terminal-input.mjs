@@ -54,10 +54,10 @@ export async function probeClaudeTerminalInput({ page, workspaceId, output }) {
     // select a renderer tab. Activate the visible sidebar row as a user would
     // before probing keyboard input; otherwise this waits on a tab the shell
     // has no reason to mount.
-    const sidebarSession = page.locator(`[data-worktree-agent-row="${CSS.escape(session.id)}"]`);
+    const sidebarSession = page.locator(`[data-worktree-agent-row="${session.id}"]`);
     await sidebarSession.waitFor();
     await sidebarSession.click();
-    const tab = page.locator(`[role="tab"][data-tab-id="${CSS.escape(session.id)}"]`);
+    const tab = page.locator(`[role="tab"][data-tab-id="${session.id}"]`);
     await tab.waitFor();
     await tab.click();
     await page.waitForFunction((id) => {
