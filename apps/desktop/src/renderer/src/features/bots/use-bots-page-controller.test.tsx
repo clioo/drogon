@@ -120,7 +120,7 @@ function fakeBridge(initial: BotsPanelBot[]) {
       bots.push(created);
       return { ok: true as const, result: created };
     },
-    botResponsibilityCreate: async () => ({
+    botResponsibilityCreate: async (_input: unknown) => ({
       ok: true as const,
       result: {
         ...scope,
@@ -129,7 +129,7 @@ function fakeBridge(initial: BotsPanelBot[]) {
         automationId: "auto-new",
       },
     }),
-    botResponsibilityDelete: async () => ({
+    botResponsibilityDelete: async (_input: unknown) => ({
       ok: true as const,
       result: {
         ...scope,
@@ -139,7 +139,7 @@ function fakeBridge(initial: BotsPanelBot[]) {
         automationId: "auto-1",
       },
     }),
-    botDelete: async () => {
+    botDelete: async (_input: unknown) => {
       const index = bots.findIndex((entry) => entry.id === "bot-1");
       if (index >= 0) bots.splice(index, 1);
       return {
@@ -430,13 +430,27 @@ describe("use-bots-page-controller", () => {
     );
   });
 
-  it("adds a responsibility from the selected card and reloads", async () => {
+  it("adds a responsibility from the selected card through app-global owner resolution and reloads", async () => {
     const fake = fakeBridge([bot()]);
+    const responsibilityCalls: unknown[] = [];
+    fake.bridge.botResponsibilityCreate = async (input: unknown) => {
+      responsibilityCalls.push(input);
+      return {
+        ok: true as const,
+        result: {
+          ...scope,
+          workspaceId: "owner-workspace",
+          botId: "bot-1",
+          responsibilityId: "resp-new",
+          automationId: "auto-new",
+        },
+      };
+    };
     render(
       <BotsPanel
         snapshot={{ bots: [bot()], history: [] }}
         bridge={fake.bridge}
-        scope={scope}
+        scope={{ ...scope, workspaceId: "foreign-selected-workspace" }}
       />,
     );
     fireEvent.click(await screen.findByTestId("open-session-bot-1"));
@@ -457,23 +471,49 @@ describe("use-bots-page-controller", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("responsibility-form")).toBeNull(),
     );
+    expect(responsibilityCalls).toHaveLength(1);
+    expect(responsibilityCalls[0]).toMatchObject({
+      hostId: scope.hostId,
+      workspaceId: "",
+      botId: "bot-1",
+      name: "Nightly review",
+    });
     // Mount load + the post-mutation reload.
     expect(fake.snapshots()).toBe(2);
   });
 
-  it("deletes the bot immediately, like the source, and reloads (#348)", async () => {
+  it("deletes an existing bot through app-global owner resolution and reloads (#348)", async () => {
     // Fork parity: the header Delete acts immediately — the pre-parity
     // confirm dialog was invented UI and is gone.
     const fake = fakeBridge([bot()]);
+    const deleteCalls: unknown[] = [];
+    fake.bridge.botDelete = async (input: unknown) => {
+      deleteCalls.push(input);
+      return {
+        ok: true as const,
+        result: {
+          ...scope,
+          workspaceId: "owner-workspace",
+          botId: "bot-1",
+          removed: true,
+          automationIds: [],
+        },
+      };
+    };
     render(
       <BotsPanel
         snapshot={{ bots: [bot()], history: [] }}
         bridge={fake.bridge}
-        scope={scope}
+        scope={{ ...scope, workspaceId: "foreign-selected-workspace" }}
       />,
     );
     fireEvent.click(await screen.findByTestId("delete-bot-bot-1"));
-    await waitFor(() => expect(screen.getByTestId("bots-empty")).toBeTruthy());
+    await waitFor(() => expect(deleteCalls).toHaveLength(1));
+    expect(deleteCalls[0]).toMatchObject({
+      hostId: scope.hostId,
+      workspaceId: "",
+      botId: "bot-1",
+    });
     // Mount load + the post-delete reload.
     expect(fake.snapshots()).toBe(2);
   });
@@ -627,6 +667,46 @@ describe("use-bots-page-controller: design column side reads", () => {
     // The resource renders twice (card title + SOURCE cell); both real.
     expect(screen.getAllByText("notes/status.md").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("3 consecutive errors")).toBeTruthy();
+  });
+
+  it("approves a parked monitor through app-global owner resolution", async () => {
+    const monitorApprove = vi.fn(async () => ({ ok: true as const }));
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [bot({ responsibilities: [responsibility()] })],
+          history: [],
+        }}
+        scope={{ ...scope, workspaceId: "foreign-selected-workspace" }}
+        monitorList={async () => ({
+          ok: true as const,
+          result: {
+            monitors: [
+              {
+                ...monitorView(),
+                ruleKind: "github_pr.v1",
+                approved: false,
+                health: "needs_approval",
+                repo: "clioo/drogon",
+                filter: "review_requested",
+                login: "clioo",
+                responsibilityId: "resp-1",
+              },
+            ],
+            workspaceId: "owner-workspace",
+          },
+        })}
+        monitorApprove={monitorApprove}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Approve this watch" }));
+    await waitFor(() => expect(monitorApprove).toHaveBeenCalledTimes(1));
+    expect(monitorApprove).toHaveBeenCalledWith({
+      hostId: scope.hostId,
+      workspaceId: "",
+      botId: "bot-1",
+      monitorId: "mon-1",
+    });
   });
 
   it("names the REASON a monitor read failed instead of blaming the bridge", async () => {

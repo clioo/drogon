@@ -506,7 +506,7 @@ describe("buildWiredBotsPanelProps", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       hostId: scope.hostId,
-      workspaceId: scope.workspaceId,
+      workspaceId: "",
       locale: scope.locale,
       botId: "bot-1",
       responsibilityId: "resp-1",

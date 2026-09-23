@@ -317,6 +317,32 @@ test("(e) source changed with no test change fails with a clear reason", () => {
   }
 });
 
+test("(e2) a large inherited diff is still tested instead of aborting with ENOBUFS", () => {
+  const dir = initRepo();
+  try {
+    writeFiles(dir, { "README.md": "base\n" });
+    const base = commitAll(dir, "base");
+    const largeSource = [
+      "export const fixture = [",
+      ...Array.from({ length: 200_000 }, (_, index) => `  ${index},`),
+      "];",
+      "",
+    ].join("\n");
+    writeFiles(dir, { "scripts/large.mjs": largeSource });
+    commitAll(dir, "large source change");
+    const run = runGate(dir, "--base", base, "--json");
+    assert.equal(run.status, 1, `stdout:\n${run.stdout.slice(0, 1000)}\nstderr:\n${run.stderr}`);
+    assert.doesNotMatch(run.stderr, /ENOBUFS/);
+    const report = JSON.parse(run.stdout);
+    assert.equal(report.hunks.length, 1);
+    assert.equal(report.hunks[0].file, "scripts/large.mjs");
+    assert.equal(report.hunks[0].verdict, "no-tests");
+    assert.equal(treeState(dir), "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("(f) infrastructure failure exits 2, never 0", () => {
   const dir = initRepo();
   try {
