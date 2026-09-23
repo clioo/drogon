@@ -129,8 +129,9 @@ export function BotMonitorCardItem({
           <p className="text-xs text-foreground">
             Parked at needs-approval. Approving arms the CURRENT rule text
             (hash-bound, the same approval the CLI uses):{" "}
-            {monitor.ruleKind === "github_pr.v1"
-              ? `a pull-request watch on ${repo ?? "the recorded repository"}${filter ? ` (${filter}${login ? `, ${login}` : ""})` : ""}`
+            {monitor.ruleKind === "github_pr.v1" ||
+            monitor.ruleKind === "github_issue.v1"
+              ? `${monitor.ruleKind === "github_issue.v1" ? "an issue" : "a pull-request"} watch on ${repo ?? "the recorded repository"}${filter ? ` (${filter}${login ? `, ${login}` : ""})` : ""}`
               : `a ${monitor.ruleKind} watch`}
             {" "}
             {monitor.responsibilityId

@@ -240,15 +240,21 @@ impl Daemon {
             Some(prefix) => format!("{}:{}", prefix.display(), existing_path),
             None => existing_path,
         };
-        let child = Command::new(drogond_path)
+        let mut command = Command::new(drogond_path);
+        command
             .arg("--data-dir")
             .arg(data_dir)
             .env("PATH", path_value)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn drogond");
+            .stderr(Stdio::piped());
+        // The daemon hands its own environment to the sessions it spawns, so
+        // a binding inherited from the Drogon session running this suite must
+        // not reach them either.
+        for name in common::INHERITED_BINDINGS {
+            command.env_remove(name);
+        }
+        let child = command.spawn().expect("spawn drogond");
         let daemon = Daemon {
             data_dir: data_dir.to_path_buf(),
             child,

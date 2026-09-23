@@ -295,6 +295,48 @@ describe("live watch ticks", () => {
   });
 });
 
+describe("open in terminal (#335 startupCwd regression: #275 must keep passing the row directory)", () => {
+  it("passes the directory itself for a directory row", async () => {
+    const onOpenTerminal = vi.fn();
+    const harness = makeSource([node("src", "src", true, 0)]);
+    await renderExplorer(harness, { onOpenTerminal });
+
+    fireEvent.contextMenu(row("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in Terminal" }));
+
+    expect(onOpenTerminal).toHaveBeenCalledTimes(1);
+    expect(onOpenTerminal).toHaveBeenCalledWith("src");
+  });
+
+  it("passes the full relative path for a nested directory row", async () => {
+    const onOpenTerminal = vi.fn();
+    // Flat root listing with a nested path: the tree renders the row as
+    // listed, and the terminal still starts in that exact directory —
+    // never the base name, never the workspace root.
+    const harness = makeSource([node("nested", "src/nested", true, 1)]);
+    await renderExplorer(harness, { onOpenTerminal });
+
+    fireEvent.contextMenu(row("nested"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in Terminal" }));
+
+    expect(onOpenTerminal).toHaveBeenCalledTimes(1);
+    expect(onOpenTerminal).toHaveBeenCalledWith("src/nested");
+  });
+
+  it("offers no terminal row for files (directories only, like the source)", async () => {
+    const onOpenTerminal = vi.fn();
+    const harness = makeSource([node("notes.txt", "notes.txt")]);
+    await renderExplorer(harness, { onOpenTerminal });
+
+    fireEvent.contextMenu(row("notes.txt"));
+    await screen.findByRole("menuitem", { name: "Copy Path" });
+    expect(
+      screen.queryByRole("menuitem", { name: "Open in Terminal" }),
+    ).toBeNull();
+    expect(onOpenTerminal).not.toHaveBeenCalled();
+  });
+});
+
 describe("reveal in finder (fork shell.openPath → showItemInFolder semantics)", () => {
   const revealName = /Reveal in Finder|Open Containing Folder|Reveal in File Explorer/;
 

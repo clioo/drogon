@@ -12,8 +12,6 @@
 // wakeups); native `needs_input` banners stay with it too, so this loop
 // never notifies and can never double-banner.
 import { randomUUID } from "node:crypto";
-import { readFile, realpath } from "node:fs/promises";
-import { createConnection } from "node:net";
 import type { BrowserWindow } from "electron";
 import { z } from "zod";
 import {
@@ -21,9 +19,8 @@ import {
   sessionStateChangedSchema,
 } from "../shared/notifications-contract";
 import type { Result } from "../shared/session-contract";
-import { dataDirectory, resolveEndpointPath } from "./native-client";
+import { callNativeHold } from "./native-client";
 
-const MAX_FRAME_BYTES = 1024 * 1024;
 /** Long-poll hold per round trip; under the socket deadline below. */
 const POLL_WAIT_MS = 20_000;
 const POLL_CALL_TIMEOUT_MS = 25_000;
@@ -50,124 +47,60 @@ export type SessionDaemonCall = (
   timeoutMs: number,
 ) => Promise<Result<unknown>>;
 
-function unreachable(message: string): Result<never> {
-  return {
-    ok: false,
-    error: { code: "unverifiable", message, retryable: true },
+/**
+ * PERF-05 push fan-out: the loop below already dedupes every pushed event;
+ * these additive subscribers let the notifications and awake-auto watchers
+ * consume the same deduped push as their primary source instead of each
+ * running their own 2 s `session.list` walk (those walks stay as the
+ * reconciliation fallback). A throwing subscriber never breaks the loop or
+ * the renderer forward. `index.ts` needs no change: each watcher subscribes
+ * itself on creation and unsubscribes on stop.
+ */
+export type SessionPushListener = (event: PushedSessionEvent) => void;
+
+const pushListeners = new Set<SessionPushListener>();
+
+export function subscribeSessionPush(
+  listener: SessionPushListener,
+): () => void {
+  pushListeners.add(listener);
+  return () => {
+    pushListeners.delete(listener);
   };
 }
 
-/** One framed-JSON round trip to the local daemon. Same shape as the browser
- * relay's client (which cannot be reused without dragging relay log copy
- * along); `callNative` is unusable here because the shared `resultSchemas`
- * map — coordinator-owned — has no `session.events.poll` entry. */
+/** Test seam: drop every push subscriber between isolated tests. */
+export function resetSessionPushListenersForTests(): void {
+  pushListeners.clear();
+}
+
+function fanOutPush(event: PushedSessionEvent): void {
+  for (const listener of [...pushListeners]) {
+    try {
+      listener(event);
+    } catch {
+      // One consumer's bug must never starve the loop or the renderer.
+    }
+  }
+}
+
+/** One framed-JSON round trip to the local daemon over a dedicated
+ * one-shot connection (never the pool: a hold would head-of-line-block
+ * every short call sharing its entry). Same reason `callNative` is
+ * unusable here: the shared `resultSchemas` map has no
+ * `session.events.poll` entry, and the pool is for short calls only.
+ * Delegates to the lifted `callNativeHold` primitive (same framing, same
+ * envelope validation, same `unverifiable` verdict family); the payload
+ * contract below is unchanged. */
 export function callSessionDaemon(
   method: string,
   params: Record<string, unknown>,
   timeoutMs: number,
   requestId: string = randomUUID(),
 ): Promise<Result<unknown>> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let socket: ReturnType<typeof createConnection> | undefined;
-    const finish = (result: Result<unknown>) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(deadline);
-      try {
-        socket?.destroy();
-      } catch {
-        // Destroying a half-open socket must never mask the result.
-      }
-      resolve(result);
-    };
-    const deadline = setTimeout(
-      () => finish(unreachable("Session push request timed out.")),
-      timeoutMs,
-    );
-    const start = async () => {
-      let directory: string;
-      let auth: string;
-      try {
-        directory = await realpath(dataDirectory());
-        auth = (await readFile(`${directory}/auth.token`, "utf8")).trim();
-      } catch {
-        finish(unreachable("Session push cannot reach the Drogon service."));
-        return;
-      }
-      const endpoint = resolveEndpointPath(directory, process.platform);
-      const connected = createConnection(endpoint);
-      socket = connected;
-      const frame =
-        JSON.stringify({ protocol: 1, requestId, auth, method, params }) + "\n";
-      let bytes = Buffer.alloc(0);
-      connected.on("connect", () => connected.write(frame));
-      connected.on("error", () =>
-        finish(unreachable("Session push cannot reach the Drogon service.")),
-      );
-      connected.on("end", () =>
-        finish(unreachable("Session push lost the Drogon service.")),
-      );
-      connected.on("data", (chunk: Buffer) => {
-        if (settled) return;
-        if (bytes.length + chunk.length > MAX_FRAME_BYTES) {
-          finish({
-            ok: false,
-            error: {
-              code: "internal_error",
-              message: "Session push response is too large.",
-              retryable: false,
-            },
-          });
-          return;
-        }
-        bytes = Buffer.concat([bytes, chunk]);
-        const newline = bytes.indexOf(10);
-        if (newline < 0) return;
-        try {
-          const envelope = JSON.parse(
-            bytes.subarray(0, newline).toString("utf8"),
-          ) as Record<string, unknown>;
-          if (
-            envelope.protocol !== 1 ||
-            envelope.requestId !== requestId ||
-            typeof envelope.ok !== "boolean"
-          )
-            throw new Error("bad envelope");
-          if (envelope.ok) {
-            finish({ ok: true, result: envelope.result });
-          } else {
-            const error = envelope.error as Record<string, unknown>;
-            if (
-              !error ||
-              typeof error.code !== "string" ||
-              typeof error.message !== "string" ||
-              typeof error.retryable !== "boolean"
-            )
-              throw new Error("bad error");
-            finish({
-              ok: false,
-              error: {
-                code: error.code,
-                message: error.message,
-                retryable: error.retryable,
-              },
-            });
-          }
-        } catch {
-          finish({
-            ok: false,
-            error: {
-              code: "internal_error",
-              message: "Session push response does not match the contract.",
-              retryable: false,
-            },
-          });
-        }
-      });
-    };
-    void start();
-  });
+  // The singleton state loop bypasses the output-hold cap (grandfathered
+  // at exactly one by the `active` guard in `startSessionStatePush`).
+  return callNativeHold(method, params, timeoutMs, false, requestId);
 }
 
 /**
@@ -178,7 +111,10 @@ export function callSessionDaemon(
  * (`agentStateAt` compare); this map only keeps the stream itself quiet.
  */
 type ForwardedSession = { state: string; at: string | null } &
-  Pick<PushedSessionEvent, "agentPromptPreview" | "cacheIdleAt">;
+  Pick<
+    PushedSessionEvent,
+    "agentStateAuthority" | "agentPromptPreview" | "cacheIdleAt"
+  >;
 
 export function shouldForwardSessionEvent(
   forwarded: ReadonlyMap<string, ForwardedSession>,
@@ -187,6 +123,7 @@ export function shouldForwardSessionEvent(
   const prev = forwarded.get(event.sessionId);
   if (!prev) return true;
   return prev.state !== event.agentState || prev.at !== event.agentStateAt ||
+    (prev.agentStateAuthority ?? null) !== (event.agentStateAuthority ?? null) ||
     prev.agentPromptPreview !== event.agentPromptPreview || prev.cacheIdleAt !== event.cacheIdleAt;
 }
 
@@ -280,10 +217,12 @@ export function startSessionStatePush(deps: SessionStatePushDeps): () => void {
           forwarded.set(event.sessionId, {
             state: event.agentState,
             at: event.agentStateAt,
+            agentStateAuthority: event.agentStateAuthority,
             agentPromptPreview: event.agentPromptPreview,
             cacheIdleAt: event.cacheIdleAt,
           });
           deps.onEvent?.(event);
+          fanOutPush(event);
           const window = deps.getWindow();
           if (window && !window.isDestroyed())
             window.webContents.send(notificationsIpcChannels.stateChanged, {
@@ -291,6 +230,7 @@ export function startSessionStatePush(deps: SessionStatePushDeps): () => void {
               workspaceId: event.workspaceId,
               agentState: event.agentState,
               agentStateAt: event.agentStateAt,
+              ...(event.agentStateAuthority !== undefined ? { agentStateAuthority: event.agentStateAuthority } : {}),
               ...(event.agentPromptPreview !== undefined ? { agentPromptPreview: event.agentPromptPreview } : {}),
               ...(event.cacheIdleAt !== undefined ? { cacheIdleAt: event.cacheIdleAt } : {}),
             });

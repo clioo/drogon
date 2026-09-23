@@ -22,7 +22,9 @@ import type { ILinkProvider, ILink } from "@xterm/xterm";
 import { TerminalInputQueue } from "./terminal-input-queue";
 import { preventTerminalBacktabNavigation } from "./terminal-backtab-navigation";
 import { createTerminalShiftEnterHandler } from "./terminal-shift-enter";
+import { createTerminalCommandEnterHandler } from "./terminal-command-enter";
 import { createTerminalGeometrySync } from "./terminal-geometry-sync";
+import { planGridCutWrites } from "./terminal-grid-cut";
 import { TerminalKittyKeyboardModeTracker } from "../../../../shared/terminal-kitty-keyboard-mode-tracker";
 import { attachTerminalMouseWheelMultiplier } from "./terminal-tui-wheel";
 import { resolveTerminalJisYenInput } from "./terminal-jis-yen-input";
@@ -138,6 +140,15 @@ import {
   type SessionSignal,
 } from "./terminal-read-pacing";
 import {
+  OUTPUT_PUSH_WAIT_MS,
+  createOrderedTerminalWriter,
+  decodeBase64ToBytes,
+  isOutputPushAvailable,
+  isTransientHoldRefusal,
+  resolveOutputChannel,
+  type OutputChannelKind,
+} from "./terminal-output-push";
+import {
   createTerminalPanePaste,
   registerTerminalPanePasteListeners,
 } from "./terminal-pane-paste";
@@ -148,11 +159,13 @@ import {
   readOpenLinksInApp,
 } from "../browser/browser-bridge";
 import {
+  getTerminalUrlOpenHint,
   terminalHttpLinkActionDestinationsFor,
   terminalHttpLinkClickDestination,
   terminalHttpLinkDestinationLabel,
   type TerminalHttpLinkDestination,
 } from "./terminal-http-link-destinations";
+import { createTerminalOscLinkHandler } from "./terminal-osc-link-handler";
 import type { Session } from "../../../../shared/session-contract";
 import type { TerminalPasteSource } from "./terminal-paste-model";
 
@@ -368,6 +381,7 @@ export function TerminalPane({
     input: TerminalInputQueue;
     focus: () => void;
     pasteFromClipboard: (source: TerminalPasteSource) => void;
+    claimCommandEnter: (event: KeyboardEvent) => boolean;
     /** Re-fit plus WebGL attach/DPR repair (every fit is a heal chance). */
     syncRenderer: () => void;
   } | null>(null);
@@ -654,16 +668,62 @@ export function TerminalPane({
     // explicitly — they are the only path that rebuilds a stale backing
     // store and glyph atlas.
     let geometrySync: ReturnType<typeof createTerminalGeometrySync> | null = null;
+    // Declared here, above the fit path that reads it: whether a live pty
+    // exists decides who owns xterm's grid.
+    let canWrite = session.verdict === "live";
+    // True only while a pty-reported grid is being applied, so xterm's own
+    // resize event cannot feed that grid back as a fresh request and undo a
+    // newer measurement the user has already made.
+    let applyingPtyGrid = false;
+    // The grid the terminal will hold once everything already queued on the
+    // write chain has run. Pages are planned while earlier pages are still
+    // being written, so `terminal.cols` at plan time can be a grid the chain
+    // has already left behind — and planning against it would skip a resize
+    // the stream still needs (a pty that goes A -> B -> A inside one page's
+    // flight) and misparse the bytes after it.
+    let queuedGrid = { cols: terminal.cols, rows: terminal.rows };
+    /**
+     * The one place xterm's grid changes (#605). Every caller is either the
+     * pty's report at its cut point or a pane with no live pty to follow.
+     */
+    const applyTerminalGrid = (grid: { cols: number; rows: number }) => {
+      if (disposed) return;
+      queuedGrid = grid;
+      if (terminal.cols === grid.cols && terminal.rows === grid.rows) return;
+      applyingPtyGrid = true;
+      try {
+        terminal.resize(grid.cols, grid.rows);
+      } catch {
+        // Pane may be mid-teardown; the next report retries.
+      } finally {
+        applyingPtyGrid = false;
+      }
+      repairTerminalWebglBackingStore(terminal);
+    };
+    /**
+     * Measures the container and asks the pty for that grid — it does NOT
+     * resize xterm. The pty owns the grid: an agent computes its
+     * cursor-relative redraws from the size it was told, so a terminal that
+     * re-wraps ahead of the SIGWINCH strands every frame in flight (#605).
+     * xterm follows the pty's report instead, at the byte the pty changed.
+     *
+     * A session with no live pty is the exception: nothing is drawing, so
+     * fitting locally costs nothing and keeps an exited or unverifiable pane
+     * matched to its container.
+     */
     const fitAndSyncTerminal = () => {
       if (disposed || !hasMeasurableTerminalBox(mount)) return;
+      let measured: { cols: number; rows: number } | undefined;
       try {
-        fit.fit();
+        measured = fit.proposeDimensions();
       } catch {
         return;
       }
+      if (!measured) return;
+      if (!canWrite) applyTerminalGrid(measured);
       if (webgl.addon === null) attachWebgl();
       repairTerminalWebglBackingStore(terminal);
-      geometrySync?.request({ cols: terminal.cols, rows: terminal.rows });
+      geometrySync?.request(measured);
     };
     const osc52Handler = createOsc52OscHandler({
       // OSC 52 clipboard defaults on (source gate); queries stay blocked.
@@ -742,45 +802,61 @@ export function TerminalPane({
       event?: Pick<MouseEvent, "shiftKey">,
     ): Promise<{ ok: true } | { ok: false; message: string }> =>
       openHttpUrlTo(terminalHttpLinkClickDestination(event?.shiftKey), url);
+    const requestHttpLinkAction = (mouse: MouseEvent, url: string): boolean => {
+      // The fork's popover (terminal-url-link-hit-testing.ts
+      // handleTerminalHttpLink): the primary action names the
+      // preference's destination, the alternate the other one.
+      const destinations =
+        terminalHttpLinkActionDestinationsFor(readOpenLinksInApp());
+      const runFor = (destination: TerminalHttpLinkDestination) => () => {
+        void openHttpUrlTo(destination, url).then((result) => {
+          if (!result.ok) report(result.message);
+        });
+      };
+      return requestTerminalLinkAction(mouse, linkActionContext.current, {
+        destination: url,
+        kind: "url",
+        primary: {
+          label: terminalHttpLinkDestinationLabel(destinations.primary),
+          external: destinations.primary === "system",
+          run: runFor(destinations.primary),
+        },
+        alternate: destinations.alternate
+          ? {
+              label: terminalHttpLinkDestinationLabel(destinations.alternate),
+              external: destinations.alternate === "system",
+              run: runFor(destinations.alternate),
+            }
+          : undefined,
+      });
+    };
     terminal.loadAddon(
       new WebLinksAddon((event, url) =>
         handleTerminalWebLinkClick(url, event, {
           openUrl: (linkUrl) => openHttpUrl(linkUrl, event ?? undefined),
-          requestAction: (mouse) => {
-            // The fork's popover (terminal-url-link-hit-testing.ts
-            // handleTerminalHttpLink): the primary action names the
-            // preference's destination, the alternate the other one.
-            const destinations =
-              terminalHttpLinkActionDestinationsFor(readOpenLinksInApp());
-            const runFor = (destination: TerminalHttpLinkDestination) => () => {
-              void openHttpUrlTo(destination, url).then((result) => {
-                if (!result.ok) report(result.message);
-              });
-            };
-            return requestTerminalLinkAction(mouse, linkActionContext.current, {
-              destination: url,
-              kind: "url",
-              primary: {
-                label: terminalHttpLinkDestinationLabel(destinations.primary),
-                external: destinations.primary === "system",
-                run: runFor(destinations.primary),
-              },
-              alternate: destinations.alternate
-                ? {
-                    label: terminalHttpLinkDestinationLabel(
-                      destinations.alternate,
-                    ),
-                    external: destinations.alternate === "system",
-                    run: runFor(destinations.alternate),
-                  }
-                : undefined,
-            });
-          },
+          requestAction: (mouse) => requestHttpLinkAction(mouse, url),
           clearSelection: () => terminal.clearSelection(),
           report,
         }),
       ),
     );
+    // #600: OSC 8 hyperlinks bypass the addon above — xterm resolves them
+    // itself and, with no linkHandler, raises its `confirm()` "could
+    // potentially be dangerous" dialog instead of opening anything.
+    // Must stay ahead of `terminal.open()` and the first write: the
+    // OscLinkProvider reads this option once per resolution and bakes it into
+    // each link, so a link resolved before the assignment keeps the dialog
+    // for as long as it lives (pinned by terminal-osc-link-handler.test.ts).
+    terminal.options.linkHandler = createTerminalOscLinkHandler({
+      openUrl: (linkUrl, event) => openHttpUrl(linkUrl, event),
+      requestAction: requestHttpLinkAction,
+      clearSelection: () => terminal.clearSelection(),
+      report,
+      // The link text is arbitrary for OSC 8, so name the real destination.
+      hover: (linkUrl) =>
+        setLinkTooltip(`${linkUrl} (${getTerminalUrlOpenHint({ isMac })})`),
+      leave: () => setLinkTooltip(null),
+    });
     const fileLinkProvider: ILinkProvider = {
       provideLinks: (bufferLineNumber, callback) => {
         // Why -1: xterm hands the provider a 1-based buffer line number;
@@ -884,9 +960,21 @@ export function TerminalPane({
     // Pi always needs CSI-u (its native Shift+Enter, valid with or without
     // kitty negotiation); shells keep negotiated encoding (source parity).
     const claimShiftEnter = createTerminalShiftEnterHandler(() => kittyModes.flags, (data) => terminal.input(data, true), { forceCsiU: session.harnessId === "pi" });
+    // xterm emits one plain CR for macOS Command+Enter but does not claim the
+    // DOM transaction; claim it here so a single submit gesture cannot be
+    // replayed by a later keypress/window path.
+    const claimCommandEnter = createTerminalCommandEnterHandler(isMac, (data) => terminal.input(data, true));
     let optionKeyLocations: TerminalOptionKeyLocation = 0;
+    const claimWindowCommandEnter = (event: KeyboardEvent) => {
+      if (!canWrite) return;
+      claimCommandEnter(event);
+    };
+    window.addEventListener("keydown", claimWindowCommandEnter, true);
+    window.addEventListener("keypress", claimWindowCommandEnter, true);
+    window.addEventListener("keyup", claimWindowCommandEnter, true);
     terminal.attachCustomKeyEventHandler((event) => {
       if (canWrite && claimShiftEnter(event)) return false;
+      if (canWrite && claimCommandEnter(event)) return false;
       if (canWrite) preventTerminalBacktabNavigation(event);
       optionKeyLocations = updateTerminalOptionKeyLocation(
         optionKeyLocations,
@@ -944,6 +1032,8 @@ export function TerminalPane({
       focus: () => terminal.focus(),
       pasteFromClipboard: (source: TerminalPasteSource) =>
         paste.pasteFromClipboard(source),
+      claimCommandEnter: (event: KeyboardEvent) =>
+        !disposed && canWrite && claimCommandEnter(event),
       syncRenderer: fitAndSyncTerminal,
     };
     // Paste policy target (R12-E): plan/execute writes bracketed or chunked
@@ -1042,7 +1132,6 @@ export function TerminalPane({
     });
     let cursor = 0;
     let timeout: ReturnType<typeof setTimeout>;
-    let canWrite = session.verdict === "live";
     let lastObserved = session;
     // R16-AT replay pacing: a fresh mount seeks to the live edge, discarding
     // older ring pages without parsing them, and renders only the retained
@@ -1055,6 +1144,60 @@ export function TerminalPane({
     let seeking = true;
     let seekPages = 0;
     let readInFlight = false;
+    // PERF-01 push negotiation: the daemon's status capabilities decide
+    // whether this pane holds one `session.output` long-poll per visible
+    // mount or keeps the 24/120 ms `session.read` poll. Unknown until the
+    // probe below answers — first paint never waits for it — and latched
+    // off permanently on a `method_not_found` (an older daemon keeps
+    // working unchanged on the old cadence).
+    let daemonCapabilities: readonly string[] | null = null;
+    let pushLatchedOff = false;
+    void window.drogon
+      .status()
+      .then((result) => {
+        if (disposed || !result.ok) return;
+        daemonCapabilities = result.result.capabilities;
+        // The probe may have resolved mid-poll: pull the next read forward
+        // so echo takes the push path at once instead of at the next tick.
+        if (
+          !seeking &&
+          !readInFlight &&
+          canWrite &&
+          paneVisible.current &&
+          !pushLatchedOff &&
+          typeof window.drogon.readOutput === "function" &&
+          isOutputPushAvailable(result.result.capabilities)
+        ) {
+          clearTimeout(timeout);
+          timeout = setTimeout(read, 0);
+        }
+      })
+      .catch(() => {});
+    // PERF-01b: xterm writes serialize through one chain per pane, so the
+    // read loop can schedule its next request before the previous write
+    // settles without ever reordering bytes on screen.
+    const orderedWrite = createOrderedTerminalWriter(
+      (chunk) =>
+        new Promise<void>((resolve) => terminal.write(chunk, resolve)),
+    );
+    // Arms the next read after an answered page. A push answer re-arms the
+    // hold at once (the daemon held the last one, so no cadence applies);
+    // a poll answer keeps the existing cadence — hot while input/output is
+    // fresh, quiet otherwise, hidden when the pane has no viewport — as
+    // the reconciliation fallback.
+    const scheduleNextRead = (channel: OutputChannelKind, fullPage: boolean) => {
+      if (disposed) return;
+      if (channel === "push" || fullPage) timeout = setTimeout(read, 0);
+      else timeout = setTimeout(read, livePollDelay());
+    };
+    const channelFor = (seekingNow: boolean): OutputChannelKind =>
+      resolveOutputChannel({
+        capabilities: daemonCapabilities ?? undefined,
+        pushLatchedOff,
+        readOutputAvailable: typeof window.drogon.readOutput === "function",
+        visible: paneVisible.current,
+        seeking: seekingNow,
+      });
     // Hot-window state for the echo path (TERMINAL_ACTIVE_* in
     // terminal-read-pacing): user input and fresh output arm a short
     // ~1-frame poll cadence so typing echo lands like the fork's push
@@ -1087,6 +1230,21 @@ export function TerminalPane({
       if (!sessionUpdates.shouldEmit(signal, Date.now())) return;
       lastObserved = value;
       callbacks.current.onSession(value);
+    };
+    // The daemon reports the pty's own grid on every read; it is the
+    // authority, and this pane's last accepted resize is only a cache of it.
+    // Anything else holding the session can resize the pty (a second
+    // surface, `drogon-cli terminal resize`, a bot, an orchestration
+    // worker), and nothing else ever told this pane. Left unreconciled, the
+    // agent keeps computing its cursor-relative redraws — how far up to move,
+    // where lines wrap, how far its erases reach — for a grid this terminal
+    // does not have, so the erases fall short and the redraw lands on top of
+    // transcript rows that were never cleared (#598). The corrective resize
+    // is the whole repair: its SIGWINCH is what makes the agent repaint, and
+    // repainting here would only redraw the wrong-grid frame that is already
+    // on screen, before the new size has even landed.
+    const reconcilePtyGeometry = (value: Session) => {
+      geometrySync?.observe({ cols: value.cols, rows: value.rows });
     };
     // Loss of contact is never proof of exit: a read failure or transport
     // error must not leave a stale "live" badge showing. Once exited is
@@ -1161,7 +1319,14 @@ export function TerminalPane({
         report(message);
       },
     });
-    const resize = terminal.onResize((grid) => geometrySync?.request(grid));
+    // Only a grid xterm reached on its own (a local fit with no live pty)
+    // is a request; echoing back the pty's own report would clobber a newer
+    // measurement the user has already made with a size the pty is about to
+    // leave.
+    const resize = terminal.onResize((grid) => {
+      if (applyingPtyGrid) return;
+      geometrySync?.request(grid);
+    });
     const observer = new ResizeObserver(fitTerminal);
     observer.observe(mount);
     // Reveal is a recovery boundary (fork terminal-visibility-resume): a pane
@@ -1233,11 +1398,10 @@ export function TerminalPane({
         disposeTerminalWebglAddon(webgl.addon);
         webgl.addon = null;
         if (!disposed && hasMeasurableTerminalBox(mount)) {
-          try {
-            fit.fit();
-          } catch {
-            // Container may not have dimensions yet.
-          }
+          // Re-measure through the same path: dropping the GPU renderer
+          // changes the measured cell size, and that is a resize the pty
+          // has to be told about, not one xterm may take by itself (#605).
+          fitAndSyncTerminal();
           refreshViewport();
         }
       },
@@ -1262,26 +1426,74 @@ export function TerminalPane({
     async function read() {
       if (disposed || readInFlight) return;
       readInFlight = true;
+      // PERF-01: one held `session.output` long-poll per visible pane when
+      // the daemon advertises push; the 24/120 ms `session.read` poll stays
+      // the path everywhere else (old daemon, hidden pane, seek phase).
+      let channel = channelFor(seeking);
+      const readOutput = window.drogon.readOutput;
       try {
-        const response = await window.drogon.read({
-          ...inputIdentity,
-          cursor,
-        });
+        let response =
+          channel === "push" && typeof readOutput === "function"
+            ? await readOutput({
+                ...inputIdentity,
+                cursor,
+                waitMs: OUTPUT_PUSH_WAIT_MS,
+              })
+            : await window.drogon.read({
+                ...inputIdentity,
+                cursor,
+              });
         if (disposed) return;
+        if (
+          channel === "push" &&
+          !response.ok &&
+          isTransientHoldRefusal(response.error.code)
+        ) {
+          // Main is at its simultaneous-hold cap: answer THIS round over
+          // the old poll (output keeps flowing at the old cadence) and
+          // keep push armed — capacity is transient, not a version gap,
+          // so nothing latches off.
+          response = await window.drogon.read({
+            ...inputIdentity,
+            cursor,
+          });
+          channel = "poll";
+          if (disposed) return;
+        }
         if (!response.ok) {
+          // An older daemon has no such method: latch the old poll and
+          // re-read at once instead of retry-looping the failure. Any
+          // other error keeps the existing retry (unverifiable + 2 s).
+          if (channel === "push" && response.error.code === "method_not_found") {
+            pushLatchedOff = true;
+            readInFlight = false;
+            if (!disposed) timeout = setTimeout(read, 0);
+            return;
+          }
           scheduleReadRetry();
           return;
         }
         const value = response.result;
-        const bytes = Uint8Array.from(atob(value.dataBase64), (char) =>
-          char.charCodeAt(0),
-        );
+        // PERF-01b: single-pass base64 straight into the final buffer — no
+        // intermediate string, no per-character callback.
+        const bytes = decodeBase64ToBytes(value.dataBase64);
         if (seeking) {
           // Seek phase: retain the newest tail of the ring without writing
           // anything, until a short page says the live edge is reached (or
           // the page guard trips on a session that out-writes the seek).
           seekPages += 1;
-          replayTail.push(bytes, value.truncated);
+          // The page keeps the grid report that answered it: a replay that
+          // spans a resize has to feed each page at its own cuts (#605).
+          replayTail.push({
+            bytes,
+            startCursor: value.startCursor,
+            nextCursor: value.nextCursor,
+            cols: value.session.cols,
+            rows: value.session.rows,
+            gridCursor: value.session.gridCursor,
+            gridChanges: value.gridChanges,
+            truncated: value.truncated,
+          });
           cursor = value.nextCursor;
           if (shouldKeepSeeking(bytes.length, seekPages)) {
             timeout = setTimeout(read, 0);
@@ -1289,29 +1501,75 @@ export function TerminalPane({
           }
           seeking = false;
           const dropped = replayTail.dropped;
-          const tailChunks = replayTail.drain();
+          const tailPages = replayTail.drain();
+          // The retained tail can span a grid change: a resize the agent
+          // painted through while this pane was unmounted, or between two
+          // runs of the desktop. Replaying all of it at the grid the daemon
+          // reports now re-wraps every byte composed at an older width — the
+          // agent's cursor-relative erase then lands short of the rows its
+          // previous frame really occupies on that width, and the superseded
+          // frame is stranded for the rest of the session, in the input zone
+          // where the reporter saw it. So a retained page that names its cuts
+          // is planned at each one, exactly like a live page.
+          //
+          // Nothing named inside the first retained page leaves no cut to plan
+          // against: either the daemon reports no `gridChanges` at all (one
+          // older than #605), or the ring's eviction already dropped every cut
+          // at or before that page. The fallback is the previous behavior —
+          // adopt the grid the daemon reports at the live edge, the one the
+          // newest bytes, including the agent's live input zone, were composed
+          // for. It is applied before anything is queued on the write chain,
+          // so it cannot jump a page.
+          const firstCutKnown = (tailPages[0]?.gridChanges?.length ?? 0) > 0;
+          if (!firstCutKnown) {
+            applyTerminalGrid({
+              cols: value.session.cols,
+              rows: value.session.rows,
+            });
+          }
           if (dropped)
             terminal.write("\r\n[Earlier output is no longer retained]\r\n");
-          for (const chunk of tailChunks) {
+          for (const page of tailPages) {
             // Track DECA 2004 (bracketed paste) transitions in the PTY
             // output so the paste policy brackets/decrypts exactly when the
             // app asked.
-            const decodedOutput = outputDecoder.decode(chunk, { stream: true });
+            const decodedOutput = outputDecoder.decode(page.bytes, {
+              stream: true,
+            });
             kittyModes.scanReplay(decodedOutput);
             observeTerminalBracketedPasteModeOutput(terminal, decodedOutput);
-            await new Promise<void>((resolve) =>
-              terminal.write(chunk, resolve),
-            );
+            // The page carries both halves of the plan: the ring range its
+            // bytes cover and the grid reported when it was answered. Feed it
+            // exactly the way a live page is fed — write up to each cut,
+            // change xterm's grid there, write the rest, on the ordered write
+            // chain, awaiting the last step so a rejected write surfaces once.
+            const steps = planGridCutWrites(page, page, queuedGrid);
+            for (let index = 0; index < steps.length; index += 1) {
+              const step = steps[index];
+              if (step.kind === "grid") {
+                queuedGrid = step.grid;
+                void orderedWrite
+                  .run(() => applyTerminalGrid(step.grid))
+                  .catch(() => {});
+              } else if (index === steps.length - 1) {
+                await orderedWrite(step.bytes);
+              } else {
+                void orderedWrite(step.bytes).catch(() => {});
+              }
+            }
             if (disposed) return;
           }
           caughtUp.current = bytes.length < TERMINAL_READ_PAGE_BYTES;
           canWrite = value.session.verdict === "live";
+          reconcilePtyGeometry(value.session);
           if (canWrite) geometrySync?.flush();
           else geometrySync?.invalidate();
           if (bytes.length > 0) lastActivityAt = Date.now();
           emitSessionUpdate(value.session);
           observeProcessExit(value.session);
-          timeout = setTimeout(read, livePollDelay());
+          // The seek just ended: recompute the channel without the seeking
+          // pin so a capable daemon takes the push path from here on.
+          scheduleNextRead(channelFor(false), false);
           return;
         }
         if (value.truncated)
@@ -1323,10 +1581,16 @@ export function TerminalPane({
         if (caughtUp.current && !value.truncated) kittyModes.scan(decodedOutput);
         else kittyModes.scanReplay(decodedOutput);
         observeTerminalBracketedPasteModeOutput(terminal, decodedOutput);
-        await new Promise<void>((resolve) => terminal.write(bytes, resolve));
-        if (disposed) return;
+        // PERF-01b: the cursor advances and the next read arms BEFORE the
+        // xterm write settles, so the next page's network wait overlaps
+        // xterm parsing instead of serializing behind it. Order stays
+        // exact: the cursor only moves forward from an answered page, the
+        // next request carries the advanced cursor (no overlap, no
+        // duplicate), and overlapping writes serialize through the
+        // pane's ordered chain.
         cursor = value.nextCursor;
         canWrite = value.session.verdict === "live";
+        reconcilePtyGeometry(value.session);
         if (canWrite) geometrySync?.flush();
         else geometrySync?.invalidate();
         if (bytes.length > 0) lastActivityAt = Date.now();
@@ -1334,10 +1598,42 @@ export function TerminalPane({
         if (bytes.length < TERMINAL_READ_PAGE_BYTES) caughtUp.current = true;
         observeProcessExit(value.session);
         if (value.session.verdict === "exited" && bytes.length === 0) return;
-        timeout = setTimeout(
-          read,
-          bytes.length === TERMINAL_READ_PAGE_BYTES ? 0 : livePollDelay(),
+        readInFlight = false;
+        // Recomputed — not the request's channel: a tab switch mid-hold
+        // must not re-arm a push hold for a now-hidden pane.
+        scheduleNextRead(channelFor(false), bytes.length === TERMINAL_READ_PAGE_BYTES);
+        // #605: the pty's grid changes at the offsets it reports, so
+        // xterm's changes there too — after the last byte composed for the
+        // old grid and before the first byte composed for the new one. A
+        // page can span more than one change when a drag outruns the read
+        // cadence, and each has to land at its own byte or the bytes
+        // composed at the middle grid are parsed at the wrong width.
+        // Queued through the ordered chain because the next page may
+        // already be arriving.
+        const steps = planGridCutWrites(
+          {
+            startCursor: value.startCursor,
+            nextCursor: value.nextCursor,
+            bytes,
+          },
+          { ...value.session, gridChanges: value.gridChanges },
+          queuedGrid,
         );
+        // A rejected write is reported by the awaited last step; the ones
+        // before it only have to stay in the chain, never unhandled.
+        for (let index = 0; index < steps.length; index += 1) {
+          const step = steps[index];
+          if (step.kind === "grid") {
+            const grid = step.grid;
+            queuedGrid = grid;
+            void orderedWrite.run(() => applyTerminalGrid(grid)).catch(() => {});
+          } else if (index === steps.length - 1) {
+            await orderedWrite(step.bytes);
+          } else {
+            void orderedWrite(step.bytes).catch(() => {});
+          }
+        }
+        if (disposed) return;
       } catch {
         scheduleReadRetry();
       } finally {
@@ -1363,6 +1659,9 @@ export function TerminalPane({
           onPageVisibilityChange,
         );
       }
+      window.removeEventListener("keydown", claimWindowCommandEnter, true);
+      window.removeEventListener("keypress", claimWindowCommandEnter, true);
+      window.removeEventListener("keyup", claimWindowCommandEnter, true);
       dprMedia?.removeEventListener("change", onDprChange);
       cancelPendingWebglRefit();
       unwatchWebglCanvasBackingStore();
@@ -1377,6 +1676,10 @@ export function TerminalPane({
       linkPointerGesture.current = null;
       linkActionContext.current = null;
       setLinkActionRequest(null);
+      // The tooltip is keyed to a pointer that no longer has a terminal
+      // under it; without this it survives the remount on a restart/resume
+      // and names a link from the previous incarnation.
+      setLinkTooltip(null);
       fileLinkDisposable.dispose();
       subscription.dispose();
       selection.dispose();
@@ -1586,8 +1889,27 @@ export function TerminalPane({
     <div
       ref={container}
       className="terminal-surface"
+      data-terminal-pane-id={session.id}
       style={{ position: "relative" }}
       aria-label="Session terminal"
+      onKeyDownCapture={(event) => {
+        if (live.current?.claimCommandEnter(event.nativeEvent)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onKeyPressCapture={(event) => {
+        if (live.current?.claimCommandEnter(event.nativeEvent)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onKeyUpCapture={(event) => {
+        if (live.current?.claimCommandEnter(event.nativeEvent)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
       onKeyDown={(event) => {
         onContainerKeyDown(event);
         // First interaction with a restored pane retires its banner, exactly

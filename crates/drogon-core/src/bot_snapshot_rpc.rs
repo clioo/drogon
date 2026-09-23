@@ -457,7 +457,9 @@ fn snapshot_too_large() -> RpcError {
 /// Host-wide preflight for the app-global scope (#348): the same
 /// COUNT/SUM probes as `preflight_snapshot_budget` with the folder
 /// predicate dropped, so the global read rejects an over-count/over-size
-/// store with the same `snapshot_too_large` before any row is parsed.
+/// store with the same `snapshot_too_large` before any row is parsed. See
+/// that function's doc for why the linked-record sums count each distinct
+/// id once rather than once per referencing history row.
 fn preflight_snapshot_budget_global(
     tx: &rusqlite::Transaction,
     host_id: &str,
@@ -491,32 +493,28 @@ fn preflight_snapshot_budget_global(
             |r| r.get(0),
         )
         .map_err(error::from_sqlite)?;
-    let repeated_responsibility_bytes: i64 = tx
-        .query_row(
-            "SELECT COALESCE(SUM(LENGTH(CAST(b.payload_json AS BLOB))), 0)
-             FROM bot_responsibility_runs brr
-             JOIN bots b ON b.id = brr.bot_id
-             WHERE b.host_id = ?1",
-            params![host_id],
-            |r| r.get(0),
-        )
-        .map_err(error::from_sqlite)?;
     let linked_automation_bytes: i64 = tx
         .query_row(
-            "SELECT COALESCE(SUM(LENGTH(CAST(a.payload_json AS BLOB))), 0)
-             FROM bot_responsibility_runs brr
-             JOIN automations a ON a.id = json_extract(brr.payload_json, '$.automationId')
-             WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1)",
+            "SELECT COALESCE(SUM(LENGTH(CAST(payload_json AS BLOB))), 0) FROM automations
+             WHERE id IN (
+                 SELECT DISTINCT json_extract(brr.payload_json, '$.automationId')
+                 FROM bot_responsibility_runs brr
+                 WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1)
+                   AND json_extract(brr.payload_json, '$.automationId') IS NOT NULL
+             )",
             params![host_id],
             |r| r.get(0),
         )
         .map_err(error::from_sqlite)?;
     let linked_automation_run_bytes: i64 = tx
         .query_row(
-            "SELECT COALESCE(SUM(LENGTH(CAST(ar.payload_json AS BLOB))), 0)
-             FROM bot_responsibility_runs brr
-             JOIN automation_runs ar ON ar.id = json_extract(brr.payload_json, '$.automationRunId')
-             WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1)",
+            "SELECT COALESCE(SUM(LENGTH(CAST(payload_json AS BLOB))), 0) FROM automation_runs
+             WHERE id IN (
+                 SELECT DISTINCT json_extract(brr.payload_json, '$.automationRunId')
+                 FROM bot_responsibility_runs brr
+                 WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1)
+                   AND json_extract(brr.payload_json, '$.automationRunId') IS NOT NULL
+             )",
             params![host_id],
             |r| r.get(0),
         )
@@ -524,7 +522,6 @@ fn preflight_snapshot_budget_global(
 
     let total = bots_bytes
         .saturating_add(runs_bytes)
-        .saturating_add(repeated_responsibility_bytes)
         .saturating_add(linked_automation_bytes)
         .saturating_add(linked_automation_run_bytes);
     if total > SNAPSHOT_BUDGET_BYTES {
@@ -536,10 +533,16 @@ fn preflight_snapshot_budget_global(
 /// Preflight bound for review P2-2: rejects an over-count/over-size scope with the same
 /// `snapshot_too_large` as the final materialized-size check, using cheap COUNT/SUM probes
 /// against the store tables -- never `list_bots`/`history_for_bot`, which parse every row.
-/// Sums charge each linked payload once per *referencing* history row (plain `JOIN`, never
-/// `DISTINCT`), because materialization cost scales with referencing rows, not distinct
-/// linked rows. `LENGTH(CAST(... AS BLOB))` counts UTF-8 bytes; bare TEXT `LENGTH` counts
-/// characters and would undercount multi-byte payloads against the real byte check.
+///
+/// The linked-record sums count each distinct `automations`/`automation_runs` row once,
+/// matching `history_for_bot`'s per-id memoization (a recurring automation's every run
+/// shares the same `automationId`, and materializing it costs one parse, not one per
+/// referencing history row -- see that function's doc). A Bot's own payload is never
+/// re-summed per history row either: `history_for_bot` fetches the Bot once and matches
+/// each row's `Responsibility` from that in-memory list, so `bots_bytes` below already
+/// covers that cost exactly once. `LENGTH(CAST(... AS BLOB))` counts UTF-8 bytes; bare TEXT
+/// `LENGTH` counts characters and would undercount multi-byte payloads against the real
+/// byte check.
 fn preflight_snapshot_budget(
     tx: &rusqlite::Transaction,
     host_id: &str,
@@ -574,32 +577,28 @@ fn preflight_snapshot_budget(
             |r| r.get(0),
         )
         .map_err(error::from_sqlite)?;
-    let repeated_responsibility_bytes: i64 = tx
-        .query_row(
-            "SELECT COALESCE(SUM(LENGTH(CAST(b.payload_json AS BLOB))), 0)
-             FROM bot_responsibility_runs brr
-             JOIN bots b ON b.id = brr.bot_id
-             WHERE b.host_id = ?1 AND b.folder = ?2",
-            params![host_id, folder],
-            |r| r.get(0),
-        )
-        .map_err(error::from_sqlite)?;
     let linked_automation_bytes: i64 = tx
         .query_row(
-            "SELECT COALESCE(SUM(LENGTH(CAST(a.payload_json AS BLOB))), 0)
-             FROM bot_responsibility_runs brr
-             JOIN automations a ON a.id = json_extract(brr.payload_json, '$.automationId')
-             WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1 AND folder = ?2)",
+            "SELECT COALESCE(SUM(LENGTH(CAST(payload_json AS BLOB))), 0) FROM automations
+             WHERE id IN (
+                 SELECT DISTINCT json_extract(brr.payload_json, '$.automationId')
+                 FROM bot_responsibility_runs brr
+                 WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1 AND folder = ?2)
+                   AND json_extract(brr.payload_json, '$.automationId') IS NOT NULL
+             )",
             params![host_id, folder],
             |r| r.get(0),
         )
         .map_err(error::from_sqlite)?;
     let linked_automation_run_bytes: i64 = tx
         .query_row(
-            "SELECT COALESCE(SUM(LENGTH(CAST(ar.payload_json AS BLOB))), 0)
-             FROM bot_responsibility_runs brr
-             JOIN automation_runs ar ON ar.id = json_extract(brr.payload_json, '$.automationRunId')
-             WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1 AND folder = ?2)",
+            "SELECT COALESCE(SUM(LENGTH(CAST(payload_json AS BLOB))), 0) FROM automation_runs
+             WHERE id IN (
+                 SELECT DISTINCT json_extract(brr.payload_json, '$.automationRunId')
+                 FROM bot_responsibility_runs brr
+                 WHERE brr.bot_id IN (SELECT id FROM bots WHERE host_id = ?1 AND folder = ?2)
+                   AND json_extract(brr.payload_json, '$.automationRunId') IS NOT NULL
+             )",
             params![host_id, folder],
             |r| r.get(0),
         )
@@ -607,7 +606,6 @@ fn preflight_snapshot_budget(
 
     let total = bots_bytes
         .saturating_add(runs_bytes)
-        .saturating_add(repeated_responsibility_bytes)
         .saturating_add(linked_automation_bytes)
         .saturating_add(linked_automation_run_bytes);
     if total > SNAPSHOT_BUDGET_BYTES {

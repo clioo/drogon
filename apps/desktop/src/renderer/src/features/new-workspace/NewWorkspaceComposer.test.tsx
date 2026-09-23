@@ -448,28 +448,40 @@ describe("NewWorkspaceComposer submit (#316 unchanged daemon payload)", () => {
     expect(onSubmitWorktree.mock.calls[0]?.[0].agent.harnessId).toBeNull();
   });
 
-  test("folder submit opens the implicit workspace and starts the agent", async () => {
-    const onLaunchAgent = vi.fn(async (_launch: unknown) => null);
-    const onSelectWorkspace = vi.fn();
+  test("folder submit creates a new folder Workspace section (#579)", async () => {
+    const onSubmitWorktree = vi.fn(
+      async (input: {
+        projectId: string;
+        name: string;
+        baseRef?: string;
+        branch?: string;
+        agent: ComposerAgentSelection;
+      }) => (void input, null),
+    );
     const onClose = vi.fn();
     mount({
       groups: [folderGroup()],
       workspaces: [workspace()],
       projectId: "folder:1",
       harnesses: [claudeHarness()],
-      onLaunchAgent,
-      onSelectWorkspace,
+      onSubmitWorktree,
       onClose,
     });
+    // A blank [Optional] name falls back to a generated section name.
     fireEvent.click(screen.getByRole("button", { name: /Create workspace/ }));
+    await vi.waitFor(() => {
+      expect(onSubmitWorktree).toHaveBeenCalledTimes(1);
+    });
+    const input = onSubmitWorktree.mock.calls[0]?.[0];
+    expect(input?.projectId).toBe("folder:1");
+    expect((input?.name ?? "").trim().length).toBeGreaterThan(0);
+    // A folder Workspace has no git branch/base ref.
+    expect(input?.baseRef).toBeUndefined();
+    expect(input?.branch).toBeUndefined();
+    expect(input?.agent.harnessId).toBe("claude");
     await vi.waitFor(() => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
-    expect(onSelectWorkspace).toHaveBeenCalledWith("ws-1");
-    expect(onLaunchAgent).toHaveBeenCalledTimes(1);
-    expect(
-      (onLaunchAgent.mock.calls[0]?.[0] as { harnessId: string }).harnessId,
-    ).toBe("claude");
   });
 
   test("a daemon error surfaces verbatim in the footer alert", async () => {

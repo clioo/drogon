@@ -119,7 +119,52 @@ listing with `drogon-cli terminal list --workspace <ID>` or list all with
 
 Write input with `drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT>`.
 To send Enter, end the value with a real newline (shell `$'...'` quoting),
-not the two characters backslash-n. Read bounded output with
+not the two characters backslash-n; a trailing carriage return or CRLF means
+the same thing. That trailing terminator is delivered as one carriage
+return — the byte a terminal puts on the wire when you press Enter, and the
+only byte a raw-mode TUI reads as submit. Every other byte is delivered
+unchanged, so a message whose lines end in LF lands in the composer whole
+and the one Return at the end submits it as a single turn.
+A carriage return INSIDE the value is Enter too, so convert CRLF line
+endings to LF before sending a multi-line message, or each CR will submit
+early.
+
+That Return goes out as its own keypress: the body is written and flushed
+first, and only then the Return — and when the far end reads a paste as
+text, the body is wrapped in paste markers so the Return lands *after*
+the marker that closes the paste. Without that, a long message and its
+Return arrive in one read on a session that is mid-turn, the TUI's paste
+heuristic takes the whole burst as pasted text, and the message sits in
+the composer unsubmitted.
+
+"Reads a paste as text" means the far end turned bracketed paste on and
+is either a harness Drogon launched (every one of them is an agent
+composer, whatever screen it paints on — Claude Code, Codex and Pi use
+the normal screen, Antigravity the alternate one) or, for a session you
+started yourself, a program on the normal screen. A full-screen
+application you launched in a plain session (vim, `less`, `nano`) is
+never framed for, because a paste there is text in a buffer rather than
+the keystrokes you meant — `:wq` would be typed, not run. Those far ends
+still get the paced Return; `bracketedPaste` in the result tells you
+which happened.
+
+Two things follow. A send costs about 40 ms more than it used to, so a
+relay nudging many sessions pays that per session. And because the body
+and the Return are separate writes, a session that dies between them
+fails with an error naming what got through — resend just a Return, not
+the whole message, or it is typed twice.
+
+The result reports `acceptedBytes` (what reached the PTY — a trailing
+CRLF is the one byte Return really is), `submittedEnter` (a Return
+reached the PTY) and `enterDelivery`, which is the one to check:
+`keypress` means it went out as a discrete keystroke, `inline` means it
+was fused into the body's burst and a paste-detecting TUI may not submit
+it, `none` means there was no Return to send. None of them is proof the
+agent actually started a turn — a send is delivery, not receipt. Confirm
+with `terminal read` (or `terminal wait --for output`) when it matters.
+Pass `--literal` to write the bytes verbatim instead, with no Return
+translation and no Enter, when you are piping data rather than typing a
+message. Read bounded output with
 `drogon-cli terminal read --session <ID> --incarnation <TOKEN> --cursor 0 --limit-bytes 4096`,
 then keep paging with the returned `nextCursor` while `truncated` is true.
 Resize with `drogon-cli terminal resize --session <ID> --incarnation <TOKEN> --cols 80 --rows 24`,
@@ -219,21 +264,52 @@ that home), and read everything the Bot owns with `drogon-cli bot list
 --bot <ID> --workspace <ID> --json` (automations, monitors with their
 health and revisions, home profile, audit count).
 
-### Pull-request watches (the headline case)
+`bot list` also reports `folder` (where the Bot's record actually lives)
+and `workspaceId` (the workspace that folder is registered under, which is
+NOT the home workspace `bot whoami` returns). A `workspaceId` of `null`
+with a `notice` means that folder has left the workspace registry — the
+project or worktree it was created in was removed. The read still answers
+in full, because the Bot's automations, monitors, home and audit trail are
+untouched, and `bot test-monitor` still dry-runs, since it commits nothing.
+Anything that must target a live workspace — creating or changing an
+automation or monitor, and `bot test-automation`, which really can dispatch
+— is refused with `workspace_deregistered` until the folder is registered
+again with `drogon-cli workspace add <FOLDER>`. That code means the Bot is
+intact; `unknown_workspace` means the id you passed names nothing on this
+host.
 
-`drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME>`
-watches a GitHub repository for the pull requests you name (`--filter`
-`opened` (default), `assigned` or `review_requested`; the last two need
-`--login <LOGIN>`) and releases the Bot's action once per NEW pull request.
-Unlike a file monitor this is the USER
-lane (`bot.monitor_create` can spell `kind: github_pr.v1`), so the rule's
-project is the project workspace the Bot lives in and the released session
-opens a WORKTREE OF THAT PROJECT — not of the Bot's home.
+### GitHub watches: pull requests and issues
+
+Two verbs, one machinery:
+
+- `drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME>`
+  watches a repository's PULL REQUESTS (`--filter` `opened` (default),
+  `assigned` or `review_requested`; the last two need `--login <LOGIN>`).
+- `drogon-cli bot watch-issue --bot <ID> --workspace <ID> --repo
+  <OWNER/NAME>` watches its ISSUES (`--filter` `opened` (default) or
+  `assigned`; `assigned` needs `--login <LOGIN>`). An issue cannot request
+  a review, so `review_requested` is refused here.
+
+Each releases the Bot's action once per NEW pull request (or issue). Unlike
+a file monitor these are the USER lane (`bot.monitor_create` spells
+`kind: github_pr.v1` / `kind: github_issue.v1`), so the rule's project is
+the project workspace the Bot lives in and the released session opens a
+WORKTREE OF THAT PROJECT — not of the Bot's home.
+
+GitHub's issue list also returns pull requests; an issue watch drops them,
+so a PR never releases an issue action.
+
+**Never hand-roll either of these with `bot create-automation`.** An
+automation that lists issues and keeps its own JSON "already seen" file has
+no baseline step, so its FIRST run treats every currently-open issue as new
+and fires one session per issue at once, with no cap — and its dedupe is
+only as reliable as a model remembering to write the file. `watch-pr` and
+`watch-issue` get both guarantees from the daemon.
 
 Two optional flags are the case's dispatch choices, and both ride inside
 the approval hash:
 
-- `--harness <ID>` — the harness the dispatched review session must use
+- `--harness <ID>` — the harness the dispatched session must use
   (`codex`, `claude`, `pi`, `opencode`). Without it the Bot's own harness
   policy decides.
 - `--skill <NAME>` (repeatable) — the skills the dispatched session must
@@ -248,19 +324,23 @@ and without it the watch stays parked at needs-approval and releases
 nothing. `--api-base <URL>` points at a GitHub Enterprise host (defaults to
 `https://api.github.com`).
 
-The same pull request never fires twice — dedupe is per pull NUMBER, not a
-digest of the response, so a comment on an already-reviewed PR is quiet —
-and a watch that was not running (its first check ever, or a gap wider than
-the greater of thirty minutes and twice its own cron interval) SEEDS its
-baseline instead of replaying the backlog. Manual-trigger watches use the
-thirty-minute grace.
+The same pull request (or issue) never fires twice — dedupe is per NUMBER,
+not a digest of the response, so a comment on an already-handled one is
+quiet — and a watch that was not running (its first check ever, or a gap
+wider than the greater of thirty minutes and twice its own cron interval)
+SEEDS its baseline instead of replaying the backlog. Manual-trigger watches
+use the thirty-minute grace. A burst drains one case per tick, oldest
+first, and the per-Bot daily delegation cap still applies.
 
 When it fires, the prompt it releases tells the Bot to open a worktree
-named after the pull request, start the session with `--harness
-<your choice>` and `--caused-by-event <event id>`, and use the skills the
-watch names. The session that appears therefore carries the event id, so
-"why did this session appear?" has an answer in Session details and in the
-monitor's own firing history.
+named after the case (`review-pr-<n>-<repo>` or `issue-<n>-<repo>`), start
+the session with `--harness <your choice>` and `--caused-by-event <event
+id>`, and use the skills the watch names. It also names the case in the
+right words and hands over the right command — `gh pr checkout <n>` /
+`gh pr diff <n>` for a pull request, `gh issue view <n>` for an issue. The
+session that appears therefore carries the event id, so "why did this
+session appear?" has an answer in Session details and in the monitor's own
+firing history.
 
 ### Bot automations
 
@@ -509,59 +589,100 @@ Read the graph with `drogon-cli graph read --workspace <ID> --json` —
 each node's status is projected from real observation (`running` requires
 a confirmed live process; loss of contact is `unverifiable`, never
 failed), or inspect one node with
-`drogon-cli graph node-state --workspace <ID> --node <ID>`. Write your
-graph INTENT with
-`drogon-cli graph write-intent --workspace <ID> --file graph-intent.json`
-(intent only: a payload carrying `state` is refused, and a newer file
-version is refused rather than rewritten).
+`drogon-cli graph node-state --workspace <ID> --node <ID>`. Write only the
+human-owned intent with
+`drogon-cli graph write-intent --workspace <ID> --file graph-intent.json`.
+For example, `graph-intent.json` can contain:
+
+```json
+{
+  "nodes": [],
+  "policy": {
+    "approvedRuntimes": [
+      {
+        "harness": "pi",
+        "provider": "openai-codex",
+        "model": "gpt-5.6-luna"
+      }
+    ],
+    "fallbackRuntime": {
+      "harness": "claude",
+      "model": "claude-sonnet-5"
+    },
+    "adversarial": {
+      "enabled": true,
+      "maxIterations": 3
+    },
+    "delegate": false
+  }
+}
+```
+
+A payload carrying `state` is refused, and a newer file version is refused
+rather than rewritten. In this example `delegate` is false because the two
+stored selectors are mutually exclusive; Adversarial itself already implies
+delegation.
 
 ### Subagent Policy And The Adversarial Loop
 
-A graph's intent can carry a Subagent policy at `intent.policy` (visible in
+The canonical mode definitions and the leader-driven adversarial procedure live
+in `drogon-cli skills get --topic orchestration`; read its **Read The Workspace
+Policy Before Delegating** section before acting on a policy. Do not reinterpret
+the mutual-exclusion rule as an instruction to implement directly:
+Adversarial means Delegate plus the critique/correction loop. The leader does
+not implement in either delegated mode. The adversarial loop exits as soon as a
+round finds nothing adversarial and otherwise stops at `maxIterations`.
+
+A graph's intent carries its Subagent policy at `intent.policy` (visible in
 `drogon-cli graph read --workspace <ID> --json`). The main agent MUST read that
 result and `drogon-cli graph observability --workspace <ID> --json` before it
 plans or delegates. These are the native `.drogon` policy, evidence, and usage
 records: use them to avoid duplicating completed work and to choose the configured
-runtime order without guessing. A workspace with no configured
-policy has no Drogon-managed policy block in `AGENTS.md`: no policy block in
-`AGENTS.md` means Delegate OFF, Adversarial OFF, and no approved runtimes. Read
-`.drogon/graph.json` via the `drogon-cli graph read --workspace <ID> --json` command
-to confirm before deciding how to act. A configured policy is delivered into the
-next session's managed block; returning to the default removes that block
-without touching owner content:
+runtime order without guessing. A simple lookup, repository discovery, or
+ordinary `gh` command remains direct coordination work and does not require a
+worker.
 
-- `policy.delegate: true` and adversarial OFF makes delegation available, not
-  mandatory. The main agent handles simple lookups, repository discovery, `gh`
-  commands, and bounded edits directly, and may always make changes the user
-  explicitly requests. Use native depth-one workers only when independent work
-  benefits from parallelism or specialization. Every child must be told not to
-  delegate. No automatic tester is added in this mode.
-- `policy.adversarial.enabled: true` is mutually exclusive with Delegate. The
-  main agent implements directly unless a genuinely independent subtask benefits
-  from a native depth-one worker. It never delegates a simple lookup, repository
-  discovery, one `gh` command, or a small bounded edit. Drogon runs the final
-  bounded whole-workflow Adversarial-test / Code-review sessions after the main
-  work settles, so the main agent does not dispatch duplicate testers. Findings
-  are successful evaluations, not failed runtime launches.
-- When both flags are false, the main agent works directly and does not
-  proactively dispatch subagents; an explicit user request may authorize
-  delegation. A policy with both flags true is invalid and is refused.
-- `policy.approvedRuntimes` (an ordered list) and `policy.fallbackRuntime`
-  are the runtimes a native worker session may run under, in priority order.
-  Each runtime stores `harness`, `provider`, and `model` together. Provider and
-  model are an inseparable selection; a worker must never guess a provider for
-  an ambiguous model id. `drogon-cli orchestration worker-start --run <ID>
-  --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID>`
-  applies that order and records the actual pair. An explicit
-  `--harness --provider --model` is an intentional override; omitting those
-  fresh flags lets the daemon select from policy.
+A workspace with no configured policy has no Drogon-managed policy block in
+`AGENTS.md`: no policy block means Delegate OFF, Adversarial OFF, and no
+approved runtimes. Read the graph to confirm before deciding how to act. A
+configured policy is delivered into the next session's managed block; returning
+to the default removes that block without touching owner content. A policy with
+both stored selectors true is invalid and is refused.
 
-The Orchestrator uses a main-task node (the normal `GraphNodeIntent` JSON
-shape: id, title, harness, model, prompt, enabled, and no dependencies).
-The desktop saves that task and the policy automatically. Run captures their
-configuration, executes the main task even with adversarial testing off,
-and schedules the optional test/review roles in the daemon. Closing a view
-does not stop its scheduling. The same workflow is available to agents:
+`policy.approvedRuntimes` is ordered, and `policy.fallbackRuntime` is tried only
+after the approved entries fail to execute. Each runtime entry stores only
+`harness`, `provider`, and `model`; provider and model are an inseparable
+selection, and a worker must never guess a provider for an ambiguous model id.
+There is currently no effort field in a policy runtime, so an effort level shown
+by a runtime picker is not persisted in `approvedRuntimes` and cannot be passed
+to policy-selected workers from that entry. Adding policy-runtime effort is a
+follow-up, not part of this schema.
+
+After `run-create`, use the returned `consumerGeneration` in
+`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --task <ID> --workspace <ID>`.
+That command applies the policy order and records the actual pair. An explicit
+`--harness --provider --model` is an intentional override; omitting those fresh
+flags lets the daemon select from policy.
+
+The Orchestrator accepts one main-task node: the normal `GraphNodeIntent` JSON
+shape with an enabled node and no dependencies. For example,
+`main-task.json` can contain:
+
+```json
+{
+  "id": "main",
+  "title": "Implement the requested change",
+  "harness": "claude",
+  "model": "claude-sonnet-5",
+  "prompt": "Implement the requested change, validate it, and report the evidence.",
+  "enabled": true,
+  "dependsOn": []
+}
+```
+
+The desktop saves the task and policy automatically. A run captures their
+configuration, and closing a view does not stop it. The same admission and
+control surface is available to agents:
 
 ```sh
 drogon-cli graph orchestrator-start --workspace <ID> --file main-task.json
@@ -573,10 +694,9 @@ drogon-cli graph orchestrator-resume --workspace <ID> --run <RUN_ID>
 Status includes the captured policy, iterations, evaluations and actual
 runtime attempts. Policy edits apply to the next run. Stop requests
 cancellation: wait for `stopped` before treating work as stopped. Resume
-retains completed roles and refuses an unverifiable run. The scheduler
-creates only depth-one roles; their briefs prohibit further delegation. The
-main agent must enforce the same limit in every authored child brief. This is
-not a sandbox restriction on arbitrary commands an agent can run.
+retains completed roles and refuses an unverifiable run. Every authored child
+brief must prohibit further delegation so all workers remain at depth one.
+This is not a sandbox restriction on arbitrary commands an agent can run.
 
 ### Native Evidence And Usage
 

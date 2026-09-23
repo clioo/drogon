@@ -117,6 +117,42 @@ impl FileRenameParams {
     }
 }
 
+/// Two-path scope for `files.duplicate`: `from` is the existing entry,
+/// `to` is the copy destination. Both are workspace-relative, like
+/// `FileScope::path`. The daemon copies bytes server-side (never through
+/// the capped text `files.read`/`files.write` round trip) and refuses to
+/// overwrite an existing destination.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDuplicateParams {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub from: String,
+    pub to: String,
+}
+
+impl FileDuplicateParams {
+    pub fn validate_target(&self, host_id: &str) -> Result<(), RpcError> {
+        validate_opaque_token(&self.host_id, 128, "Invalid file execution host.")?;
+        validate_opaque_token(&self.workspace_id, 128, "Invalid file workspace identity.")?;
+        if self.host_id != host_id {
+            return Err(RpcError::new(
+                "unsupported_host",
+                "The file execution host is not served by this endpoint.",
+            ));
+        }
+        for path in [&self.from, &self.to] {
+            if path.len() > MAX_FILE_PATH_BYTES || path.contains('\0') {
+                return Err(RpcError::new(
+                    "invalid_argument",
+                    "Invalid workspace-relative file path.",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Bounded multi-path scope for `files.delete`. The daemon deletes
 /// permanently (no OS-trash dependency); the renderer owns the source's
 /// confirmation copy before calling.
@@ -357,6 +393,47 @@ mod tests {
         );
         assert_eq!(
             FileRenameParams {
+                from: "x".repeat(MAX_FILE_PATH_BYTES + 1),
+                ..params
+            }
+            .validate_target("host")
+            .unwrap_err()
+            .code,
+            "invalid_argument"
+        );
+    }
+
+    #[test]
+    fn duplicate_validates_both_paths_and_the_serving_host() {
+        let params = FileDuplicateParams {
+            host_id: "host".into(),
+            workspace_id: "workspace".into(),
+            from: "a.txt".into(),
+            to: "a copy.txt".into(),
+        };
+        params.validate_target("host").unwrap();
+        assert_eq!(
+            FileDuplicateParams {
+                host_id: "other".into(),
+                ..params.clone()
+            }
+            .validate_target("host")
+            .unwrap_err()
+            .code,
+            "unsupported_host"
+        );
+        assert_eq!(
+            FileDuplicateParams {
+                to: "x\0y".into(),
+                ..params.clone()
+            }
+            .validate_target("host")
+            .unwrap_err()
+            .code,
+            "invalid_argument"
+        );
+        assert_eq!(
+            FileDuplicateParams {
                 from: "x".repeat(MAX_FILE_PATH_BYTES + 1),
                 ..params
             }

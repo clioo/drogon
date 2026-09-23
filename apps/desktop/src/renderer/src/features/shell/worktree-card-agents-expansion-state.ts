@@ -12,6 +12,13 @@ import { useCallback, useState } from "react";
 export type WorktreeAgentExpansionState = {
   collapsedLineageParents: ReadonlySet<string>;
   compactRootListExpanded: boolean;
+  /**
+   * Owner's design (2026-09-21): the card's own chevron folds the whole
+   * agent list, so a long card is one click away from a one-line summary.
+   * Persisted like the lineage folds — a fold the user chose must survive a
+   * reload, exactly as the project sections' collapse does.
+   */
+  cardFolded: boolean;
 };
 
 const EMPTY_COLLAPSED_PARENTS: ReadonlySet<string> = new Set();
@@ -19,16 +26,38 @@ const EMPTY_COLLAPSED_PARENTS: ReadonlySet<string> = new Set();
 const DEFAULT_EXPANSION_STATE: WorktreeAgentExpansionState = {
   collapsedLineageParents: EMPTY_COLLAPSED_PARENTS,
   compactRootListExpanded: false,
+  cardFolded: false,
 };
 
 // Why: the inline agent list's expand/collapse must outlive the WorktreeCard
 // remount that fires when the sidebar rebuilds (project collapse, options
 // change). Holding this in plain local useState reset it on every such
 // remount, so folding one section visibly re-expanded the other.
-// Renderer-only and LRU-bounded: it resets on reload, matching the ephemeral
-// live-agent lineage it tracks, and never grows without bound.
+// Renderer-only and LRU-bounded: the compact panel resets on reload (it
+// tracks the ephemeral live-agent list), while the lineage fold persists
+// (see below); neither ever grows without bound.
 export const MAX_PERSISTED_WORKTREE_AGENT_EXPANSIONS = 512;
 const expansionByWorktreeId = new Map<string, WorktreeAgentExpansionState>();
+
+/**
+ * Persisted lineage folds (issue #622): the fold survives a renderer reload
+ * and a workspace switch at every depth, following
+ * sidebar-collapsed-projects.ts (a `drogon:shell:` localStorage key,
+ * try/catch on every read and write, a shape check that drops anything that
+ * is not a string id). Bounded worktrees, bounded ids per worktree; the
+ * in-memory LRU above still covers the remount case.
+ */
+export const MAX_PERSISTED_LINEAGE_WORKTREES = 128;
+export const MAX_COLLAPSED_LINEAGE_IDS_PER_WORKTREE = 256;
+const LINEAGE_COLLAPSE_STORAGE_KEY = "drogon:shell:collapsed-lineage-parents";
+
+/** Folded cards: a plain list of worktree ids, bounded like the collapsed
+ *  project sections (`sidebar-collapsed-projects.ts`) and sanitized the same
+ *  way — a cosmetic view preference never throws and never grows. */
+export const MAX_PERSISTED_FOLDED_CARDS = 256;
+export const FOLDED_CARDS_STORAGE_KEY = "drogon:shell:folded-worktree-cards";
+
+type LineageCollapseStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 function trimPersistedExpansions(): void {
   while (expansionByWorktreeId.size > MAX_PERSISTED_WORKTREE_AGENT_EXPANSIONS) {
@@ -40,8 +69,192 @@ function trimPersistedExpansions(): void {
   }
 }
 
+/**
+ * Sanitized read of the persisted lineage folds: a plain object of
+ * worktree id to string-id arrays. Anything else (corrupt JSON, wrong
+ * shape, non-string ids) degrades to "nothing collapsed" instead of
+ * throwing — collapse state is cosmetic.
+ */
+export function loadPersistedLineageCollapse(
+  storage: Pick<Storage, "getItem">,
+): Map<string, string[]> {
+  const folds = new Map<string, string[]>();
+  let raw: string | null = null;
+  try {
+    raw = storage.getItem(LINEAGE_COLLAPSE_STORAGE_KEY);
+  } catch {
+    return folds;
+  }
+  if (!raw) return folds;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return folds;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return folds;
+  }
+  for (const [worktreeId, ids] of Object.entries(parsed)) {
+    if (typeof worktreeId !== "string" || worktreeId === "") continue;
+    if (!Array.isArray(ids)) continue;
+    const clean = [
+      ...new Set(
+        ids.filter(
+          (id): id is string => typeof id === "string" && id !== "",
+        ),
+      ),
+    ].slice(0, MAX_COLLAPSED_LINEAGE_IDS_PER_WORKTREE);
+    if (clean.length === 0) continue;
+    if (folds.size >= MAX_PERSISTED_LINEAGE_WORKTREES) break;
+    folds.set(worktreeId, clean);
+  }
+  return folds;
+}
+
+/** Bounded write of the persisted lineage folds; a failed write just means
+ *  the fold resets on reload (same cosmetic-only contract as the collapsed
+ *  projects precedent). */
+export function savePersistedLineageCollapse(
+  storage: Pick<Storage, "setItem" | "removeItem">,
+  folds: ReadonlyMap<string, readonly string[]>,
+): void {
+  try {
+    const payload: Record<string, string[]> = {};
+    let count = 0;
+    for (const [worktreeId, ids] of folds) {
+      if (typeof worktreeId !== "string" || worktreeId === "") continue;
+      const clean = [
+        ...new Set(
+          ids.filter(
+            (id): id is string => typeof id === "string" && id !== "",
+          ),
+        ),
+      ].slice(0, MAX_COLLAPSED_LINEAGE_IDS_PER_WORKTREE);
+      if (clean.length === 0) continue;
+      if (count >= MAX_PERSISTED_LINEAGE_WORKTREES) break;
+      payload[worktreeId] = clean;
+      count += 1;
+    }
+    if (count === 0) {
+      try {
+        storage.removeItem(LINEAGE_COLLAPSE_STORAGE_KEY);
+      } catch {
+        // Already covered below: storage is best-effort.
+      }
+      return;
+    }
+    storage.setItem(LINEAGE_COLLAPSE_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Storage may be unavailable (quota, privacy mode); collapse state is
+    // cosmetic, so a failed write just means it resets on reload.
+  }
+}
+
+/** Sanitized read of the folded cards: anything that is not a string-array
+ *  degrades to "nothing folded" instead of throwing. */
+export function loadPersistedFoldedCards(
+  storage: Pick<Storage, "getItem">,
+): Set<string> {
+  let raw: string | null = null;
+  try {
+    raw = storage.getItem(FOLDED_CARDS_STORAGE_KEY);
+  } catch {
+    return new Set();
+  }
+  if (!raw) return new Set();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return new Set();
+  }
+  if (!Array.isArray(parsed)) return new Set();
+  return new Set(
+    parsed
+      .filter((id): id is string => typeof id === "string" && id !== "")
+      .slice(0, MAX_PERSISTED_FOLDED_CARDS),
+  );
+}
+
+/** Bounded write of the folded cards; a failed write just means the fold
+ *  resets on reload (same cosmetic-only contract as the lineage folds). */
+export function savePersistedFoldedCards(
+  storage: Pick<Storage, "setItem" | "removeItem">,
+  folded: ReadonlySet<string>,
+): void {
+  try {
+    const ids = [...folded].slice(-MAX_PERSISTED_FOLDED_CARDS);
+    if (ids.length === 0) {
+      storage.removeItem(FOLDED_CARDS_STORAGE_KEY);
+      return;
+    }
+    storage.setItem(FOLDED_CARDS_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    // Storage may be unavailable (quota, privacy mode).
+  }
+}
+
+function defaultStorage(): LineageCollapseStorage | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    return localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Worktrees already hydrated from storage this renderer lifetime (even
+ *  when storage held nothing), so a render never re-parses on every pass. */
+const hydratedWorktreeIds = new Set<string>();
+
+function persistLineageCollapseThrough(): void {
+  const storage = defaultStorage();
+  if (!storage) return;
+  // The module map is LRU-ordered (recently touched last); persist the most
+  // recent worktrees that actually carry a fold.
+  const entries = [...expansionByWorktreeId.entries()].reverse();
+  const folds = new Map<string, readonly string[]>();
+  const foldedCards = new Set<string>();
+  for (const [worktreeId, state] of entries) {
+    if (state.cardFolded) foldedCards.add(worktreeId);
+    if (state.collapsedLineageParents.size === 0) continue;
+    folds.set(worktreeId, [...state.collapsedLineageParents]);
+    if (folds.size >= MAX_PERSISTED_LINEAGE_WORKTREES) break;
+  }
+  savePersistedLineageCollapse(storage, folds);
+  savePersistedFoldedCards(storage, foldedCards);
+}
+
 function readExpansionState(worktreeId: string): WorktreeAgentExpansionState {
-  return expansionByWorktreeId.get(worktreeId) ?? DEFAULT_EXPANSION_STATE;
+  const live = expansionByWorktreeId.get(worktreeId);
+  if (live) return live;
+  if (hydratedWorktreeIds.has(worktreeId)) {
+    return DEFAULT_EXPANSION_STATE;
+  }
+  hydratedWorktreeIds.add(worktreeId);
+  // Lazy hydration: the fold survives a renderer reload (empty module map)
+  // and a workspace switch (a worktree id never touched this lifetime).
+  // Only the lineage fold hydrates — the compact panel stays ephemeral.
+  // Never pruned here: a collapsed parent whose children merely exited
+  // keeps its fold; dead ids are pruned on the next toggle, not on read.
+  const storage = defaultStorage();
+  if (!storage) return DEFAULT_EXPANSION_STATE;
+  const folds = loadPersistedLineageCollapse(storage);
+  const foldedCards = loadPersistedFoldedCards(storage);
+  const ids = folds.get(worktreeId);
+  const cardFolded = foldedCards.has(worktreeId);
+  if ((!ids || ids.length === 0) && !cardFolded) {
+    return DEFAULT_EXPANSION_STATE;
+  }
+  const state: WorktreeAgentExpansionState = {
+    collapsedLineageParents: new Set(ids ?? []),
+    compactRootListExpanded: false,
+    cardFolded,
+  };
+  expansionByWorktreeId.set(worktreeId, state);
+  trimPersistedExpansions();
+  return state;
 }
 
 function persistExpansionState(
@@ -51,19 +264,36 @@ function persistExpansionState(
   // Re-insert to refresh LRU order; drop entries that carry no non-default
   // state so idle worktrees never occupy a slot.
   expansionByWorktreeId.delete(worktreeId);
-  if (state.compactRootListExpanded || state.collapsedLineageParents.size > 0) {
+  if (
+    state.compactRootListExpanded ||
+    state.collapsedLineageParents.size > 0 ||
+    state.cardFolded
+  ) {
     expansionByWorktreeId.set(worktreeId, state);
     trimPersistedExpansions();
   }
+  persistLineageCollapseThrough();
 }
 
 export type WorktreeAgentExpansionControls = {
   collapsedLineageParents: ReadonlySet<string>;
   compactRootListExpanded: boolean;
-  /** Fold/unfold a single agent-lineage parent by its session id. */
-  toggleLineageParent: (sessionId: string) => void;
+  /** Owner's design: the card's own fold (the whole agent list). */
+  cardFolded: boolean;
+  /**
+   * Fold/unfold a single agent-lineage parent by its session id. Ids of
+   * sessions that no longer exist are pruned when the caller passes the
+   * live session ids — the fold itself is never dropped on read, so a
+   * collapsed parent whose children merely exited stays folded.
+   */
+  toggleLineageParent: (
+    sessionId: string,
+    liveSessionIds?: readonly string[],
+  ) => void;
   /** Open/close the compact multi-agent summary panel. */
   toggleCompactRootList: () => void;
+  /** Fold/unfold the card's whole agent list (the card chevron). */
+  toggleCardFolded: () => void;
 };
 
 /**
@@ -95,9 +325,15 @@ export function useWorktreeAgentExpansionState(
   );
 
   const toggleLineageParent = useCallback(
-    (sessionId: string) => {
+    (sessionId: string, liveSessionIds?: readonly string[]) => {
       const base = readExpansionState(worktreeId);
       const nextParents = new Set(base.collapsedLineageParents);
+      if (liveSessionIds) {
+        const live = new Set(liveSessionIds);
+        for (const id of nextParents) {
+          if (!live.has(id)) nextParents.delete(id);
+        }
+      }
       if (nextParents.has(sessionId)) {
         nextParents.delete(sessionId);
       } else {
@@ -113,16 +349,43 @@ export function useWorktreeAgentExpansionState(
     commit({ ...base, compactRootListExpanded: !base.compactRootListExpanded });
   }, [commit, worktreeId]);
 
+  const toggleCardFolded = useCallback(() => {
+    const base = readExpansionState(worktreeId);
+    commit({ ...base, cardFolded: !base.cardFolded });
+  }, [commit, worktreeId]);
+
   return {
     collapsedLineageParents: current.collapsedLineageParents,
     compactRootListExpanded: current.compactRootListExpanded,
+    cardFolded: current.cardFolded,
     toggleLineageParent,
     toggleCompactRootList,
+    toggleCardFolded,
   };
 }
 
 export function clearWorktreeAgentExpansionStateForTests(): void {
   expansionByWorktreeId.clear();
+  hydratedWorktreeIds.clear();
+  const storage = defaultStorage();
+  if (storage) {
+    try {
+      storage.removeItem(LINEAGE_COLLAPSE_STORAGE_KEY);
+      storage.removeItem(FOLDED_CARDS_STORAGE_KEY);
+    } catch {
+      // Test isolation is best-effort against a hostile storage double.
+    }
+  }
+}
+
+/**
+ * Drops only the in-memory cache (keeps persisted folds): simulates a
+ * renderer reload, where the module map is empty but localStorage holds
+ * the user's folds.
+ */
+export function resetWorktreeAgentExpansionMemoryForTests(): void {
+  expansionByWorktreeId.clear();
+  hydratedWorktreeIds.clear();
 }
 
 export function getWorktreeAgentExpansionCountForTests(): number {

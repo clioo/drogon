@@ -11,6 +11,9 @@ import { worktreeIssueLinkSchema, type WorktreeIssueLink } from "../../../../sha
 afterEach(() => {
   cleanup();
   clearWorktreeAgentExpansionStateForTests();
+  // The suite shares one jsdom window across files: a bridge left here
+  // becomes another file's environment.
+  delete (window as { drogon?: unknown }).drogon;
 });
 const worktree: Worktree = { id: "wt", projectId: "p", workspaceId: "ws", path: "/tmp/card", branch: "feature", head: "", baseRef: null, createdAt: "2026-09-01T00:00:00Z", note: "A real saved note" };
 const session: Session = { id: "s", workspaceId: "ws", hostId: "h", incarnation: "1", command: "sh", args: [], cols: 80, rows: 24, verdict: "live", exitCode: null, createdAt: "2026-09-01T00:00:00Z", harnessId: null };
@@ -57,29 +60,49 @@ test("issue actions are independent controls, not nested inside the workspace se
   expect(openExternal).toHaveBeenCalledWith(link.url);
   expect(onSelect).not.toHaveBeenCalled();
 });
+test("a small tree stays inline: the owner's design shows the rows, not the pill", () => {
+  const child = { ...session, id: "child", parentSessionId: session.id };
+  const view = card({}, {}, { agentActivityDisplayMode: "compact", sessions: [session, child, { ...session, id: "s2" }] });
+  // Two roots are a tree to read, not a count to expand (2026-09-21 design):
+  // the pill only takes over a genuinely long fan-out.
+  expect(screen.queryByRole("button", { name: /^Expand \d+ agents/ })).toBeNull();
+  expect(view.container.querySelector(".worktree-agent-lineage-children [data-worktree-agent-row=\"child\"]")).not.toBeNull();
+  expect(view.container.querySelector('[data-worktree-agent-row="s2"]')).not.toBeNull();
+});
+test("a long fan-out folds into the compact pill, which expands the real selectable rows", () => {
+  const child = { ...session, id: "child", parentSessionId: session.id };
+  const roots = Array.from({ length: 6 }, (_, index) => ({ ...session, id: `root-${index}` }));
+  const view = card({}, {}, { agentActivityDisplayMode: "compact", sessions: [...roots, { ...child, parentSessionId: "root-0" }] });
+  expect(view.container.querySelector('[data-worktree-agent-row="root-0"]')).toBeNull();
+  const toggle = screen.getByRole("button", { name: /^Expand 6 agents/ });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  // Six roots plus the one child of the first root, all real rows.
+  expect(view.container.querySelectorAll('[data-worktree-agent-row]')).toHaveLength(7);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+});
 test("Compact activity counts roots, preserves child lineage and selects the child's actual session", () => {
   const child = { ...session, id: "child", parentSessionId: session.id };
   const first = card({}, {}, { agentActivityDisplayMode: "compact", sessions: [session, child, { ...session, id: "foreign", workspaceId: "elsewhere" }] });
-  expect(screen.queryByRole("button", { name: /^Expand 2 agents/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Expand \d+ agents/ })).toBeNull();
   expect(first.container.querySelector('.worktree-agent-lineage-children [data-worktree-agent-row="child"]')).not.toBeNull();
   expect(first.container.querySelector('[data-worktree-agent-row="foreign"]')).toBeNull();
   first.unmount();
   const selected: string[] = [];
-  const view = card({}, {}, { agentActivityDisplayMode: "compact", sessions: [session, child, { ...session, id: "s2" }],
+  const roots = Array.from({ length: 6 }, (_, index) => ({ ...session, id: `root-${index}` }));
+  const view = card({}, {}, { agentActivityDisplayMode: "compact", sessions: [...roots, { ...child, parentSessionId: "root-0" }],
     onSelect: (id) => selected.push(`workspace:${id}`), onSelectSession: (id) => selected.push(`session:${id}`) });
+  // Collapsed pill: no row is reachable until the pill is expanded.
   expect(view.container.querySelector('[data-worktree-agent-row="child"]')).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /^Expand 2 agents/ }));
-  expect(view.container.querySelectorAll('[data-worktree-agent-row]')).toHaveLength(3);
+  fireEvent.click(screen.getByRole("button", { name: /^Expand 6 agents/ }));
+  expect(view.container.querySelectorAll('[data-worktree-agent-row]')).toHaveLength(7);
   const childRow = view.container.querySelector('.worktree-agent-lineage-children [data-worktree-agent-row="child"]')!;
   fireEvent.click(childRow);
   expect(selected).toEqual(["workspace:ws", "session:child"]);
 });
-test("Compact activity summarizes multiple roots and expands the actual selectable rows", () => {
-  const view = card({}, {}, { agentActivityDisplayMode: "compact", sessions: [session, { ...session, id: "s2" }] });
-  expect(view.container.querySelector('[data-worktree-agent-row="s"]')).toBeNull();
-  const toggle = screen.getByRole("button", { name: /^Expand 2 agents/ });
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  fireEvent.click(toggle);
-  expect(view.container.querySelectorAll('[data-worktree-agent-row]')).toHaveLength(2);
-  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+test("the full display mode never folds, however many roots the card has", () => {
+  const roots = Array.from({ length: 8 }, (_, index) => ({ ...session, id: `root-${index}` }));
+  const view = card({}, {}, { agentActivityDisplayMode: "full", sessions: roots });
+  expect(screen.queryByRole("button", { name: /^Expand \d+ agents/ })).toBeNull();
+  expect(view.container.querySelectorAll("[data-worktree-agent-row]")).toHaveLength(8);
 });

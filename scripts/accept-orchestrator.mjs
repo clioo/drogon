@@ -17,16 +17,14 @@
 //   4. screenshots of BOTH designs (adversarial off / on) in light AND
 //      dark at 1440/1100/900/760, no horizontal overflow, plus the
 //      no-session disabled state;
-//   5. "Run workflow" DISPATCHES the base task to the Main agent's own
-//      live session first (a real, visible prompt through the same seam
-//      the Mentu Run Recipe dispatch uses) and only then goes through the
-//      real `graph.run_node_failover` path once that session's turn
-//      settles — this dev daemon has no real provider configured, so the
-//      honest, deterministic outcome is a launch refusal (proving the
+//   5. "Run workflow" starts a REAL durable run through the daemon (the
+//      receipt goes never-run -> in-progress while the daemon reports the
+//      run running), and Stop settles it as stopped — proving the
 //      "designed but never run" -> real-attempt distinction, not a
-//      fabricated success). The canvas never invents a developer-only
-//      runtime when the workspace policy is empty.
-//   6. the top Graph / Evidence / Usage tabs read Drogon's native `.drogon`
+//      fabricated success. An empty main task cannot dispatch at all: the
+//      button stays disabled with its reason. The canvas never invents a
+//      developer-only runtime when the workspace policy is empty.
+//   6. the top Graph / Agent telemetry / Usage tabs read Drogon's native `.drogon`
 //      ledgers; recorded token totals come from exact CLI measurements and
 //      missing fields stay visibly not reported.
 //
@@ -45,11 +43,16 @@ import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import {
   runAcceptanceProcess,
+  scrubInheritedDispatchBindings,
   startAcceptanceProcess,
   stopAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { selectSettingsTheme } from "./acceptance-theme.mjs";
 import { writeAgentSettingsFixtures } from "./probe-agent-settings.mjs";
+
+// This journey owns a disposable daemon: drop the parent dispatch context so
+// its CLI never presents a foreign credential to its own daemon.
+scrubInheritedDispatchBindings();
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const appDir = path.join(root, "apps", "desktop");
@@ -401,7 +404,8 @@ async function main() {
     "--model",
     "fixture",
   ]);
-  await panel.getByRole("tab", { name: /Evidence/ }).click();
+  // The evidence tab ships as "Agent telemetry" (with a live entry count).
+  await panel.getByRole("tab", { name: /Agent telemetry/ }).click();
   try {
     await panel
       .getByText("Native checkpoint visible")
@@ -503,11 +507,14 @@ async function main() {
   );
   assert.match(agentsWithDelegateOn, /Mode: DELEGATE/, agentsWithDelegateOn);
   assert.match(claudeWithDelegateOn, /Mode: DELEGATE/, claudeWithDelegateOn);
+  // The brief teaches the workspace-scoped read verb (it changed from
+  // write-intent to graph read upstream); the pinned behaviour is that the
+  // verb is real and carries this workspace's id, never a placeholder.
   assert.ok(
     agentsWithDelegateOn.includes(
-      `drogon-cli graph write-intent --workspace ${workspaceRecord.id} --file graph-intent.json`,
+      `drogon-cli graph read --workspace ${workspaceRecord.id} --json`,
     ),
-    `the Delegate brief must name the real, workspace-scoped write-intent verb: ${agentsWithDelegateOn}`,
+    `the Delegate brief must name the real, workspace-scoped read verb: ${agentsWithDelegateOn}`,
   );
   assert.match(
     agentsWithDelegateOn,
@@ -748,97 +755,89 @@ async function main() {
   assert.equal(await panel.getByTestId("orchestrator-runtime-disclosure").count(), 0);
   report.checks.push("runtime-policy-does-not-add-a-cost-banner");
 
-  // 9. "Run workflow" (DISHONEST-1): dispatches the base task to the Main
-  //    agent's OWN session first — the terminal must show it genuinely
-  //    waiting on that dispatch, never firing the review within the same
-  //    instant as the click. Only once the fixture session's turn settles
-  //    (its own generic agent-state heuristic sees a real busy quiet-again
-  //    transition from the dispatched write) does the real, BROKEN-2-fixed
-  //    `graph.run_node_failover` episode proceed. This dev daemon has no
-  //    real provider configured, so the honest, deterministic outcome is
-  //    still a launch refusal once the episode is genuinely exhausted —
-  //    never a fabricated "ready".
-  const repeatCaption = panel.locator(
-    '[data-testid="orchestrator-repeat-caption"]',
+  // 9. "Run workflow" starts a real durable run through the daemon: the
+  //    receipt leaves never-run for in-progress (a genuine dispatch, never
+  //    an instant fabricated "ready"), and stopping the run settles it as
+  //    stopped. The old session-dispatch-then-review loop this step once
+  //    drove is gone from the product — the canvas starts durable runs now,
+  //    so the journey proves the run lifecycle instead.
+  // An empty main task cannot dispatch: the button stays disabled with
+  // its reason instead of firing an empty run.
+  const runButton = panel.locator('[data-testid="orchestrator-run-workflow"]');
+  // Wait past the graph load: the guard reason settles on the empty task.
+  await page.waitForFunction(
+    () => {
+      const node = document.querySelector(
+        '[data-testid="orchestrator-run-workflow"]',
+      );
+      return node?.getAttribute("title") === "Describe the main task first.";
+    },
+    undefined,
+    { timeout: 15000 },
   );
-  const boundBeforeRun =
-    (await repeatCaption.innerText().catch(() => "")) ?? "";
-  await panel.locator('[data-testid="orchestrator-run-workflow"]').click();
-  // DISHONEST-2, exercised live and best-effort: bump the policy DOWN
-  // immediately after the click, while the loop may still be in flight.
-  // The exact in-flight WINDOW is timing-dependent on this unconfigured
-  // dev daemon (a launch refusal can resolve within ~1 cycle) — the
-  // deterministic proof of this fix lives in OrchestratorCanvas.test.tsx;
-  // this only records corroborating live evidence when the race
-  // cooperates, and never fails the run when it does not.
-  await policyPanel
-    .locator('[data-testid="adversarial-max-iterations-decrease"]')
-    .click();
-  const boundRightAfterBump =
-    (await repeatCaption.innerText().catch(() => "")) ?? "";
-  if (boundBeforeRun && boundRightAfterBump === boundBeforeRun) {
-    report.checks.push(
-      "dishonest2-in-flight-caption-held-the-running-bound-live",
-    );
-  } else {
-    report.dishonest2LiveRaceInconclusive = {
-      boundBeforeRun,
-      boundRightAfterBump,
-    };
-  }
+  assert.equal(await runButton.isDisabled(), true);
+  report.checks.push("empty-main-task-cannot-dispatch");
+  await panel.getByRole("textbox", { name: "Main task", exact: true }).fill(
+    "Dispatch the fixture base task through the main agent session",
+  );
+  await page.waitForFunction(
+    () => {
+      const node = document.querySelector(
+        '[data-testid="orchestrator-run-workflow"]',
+      );
+      return node && !node.disabled;
+    },
+    undefined,
+    { timeout: 15000 },
+  );
+  await runButton.click();
   const terminal = panel.locator('[data-testid="orchestrator-terminal"]');
+  // The receipt must leave never-run for in-progress: a genuine dispatch
+  // through the daemon, never an instant fabricated "ready".
   await page.waitForFunction(
     () => {
       const node = document.querySelector(
         '[data-testid="orchestrator-terminal"]',
       );
-      return node?.getAttribute("data-state") !== "never-run";
+      return node?.getAttribute("data-state") === "in-progress";
     },
     undefined,
-    { timeout: 30000 },
+    { timeout: 60000 },
   );
-  // Immediately after the click, the ledger must be waiting on the main
-  // agent's session — never already past "awaiting_base" (that would mean
-  // the review fired without the dispatch ever settling).
-  assert.match(
-    (await terminal.innerText()) ?? "",
-    /Waiting for the main agent's delegated turn to finish/,
-    "Run workflow must not launch a review before dispatching to the main agent",
+  report.checks.push("run-workflow-dispatches-a-real-durable-run");
+  // The daemon owns a live run for this workspace while the receipt spins.
+  const liveRun = await cliJson(dataDir, [
+    "graph",
+    "orchestrator-status",
+    "--workspace",
+    workspaceRecord.id,
+  ]);
+  assert.equal(liveRun.run?.status, "running", JSON.stringify(liveRun.run));
+  report.checks.push("daemon-reports-the-run-running-while-the-receipt-spins");
+  // Stop it through the real control: the receipt settles as stopped, and
+  // at no point did the canvas fabricate a pass.
+  await panel.getByRole("button", { name: "Stop", exact: true }).click();
+  await page.waitForFunction(
+    () => {
+      const node = document.querySelector(
+        '[data-testid="orchestrator-terminal"]',
+      );
+      return node?.getAttribute("data-state") === "stopped";
+    },
+    undefined,
+    { timeout: 60000 },
   );
-  report.checks.push(
-    "run-workflow-waits-on-the-dispatched-session-before-reviewing",
-  );
-  // Let the dispatch settle and the loop's own poll (every 2s) actually
-  // attempt the launch, so the recorded evidence is the REAL attempt
-  // outcome, not just "a ledger now exists".
-  await page
-    .waitForFunction(
-      () => {
-        const node = document.querySelector(
-          '[data-testid="orchestrator-terminal"]',
-        );
-        return (
-          (node?.textContent ?? "").length > 0 &&
-          !/Waiting for the main agent's delegated turn to finish/.test(
-            node.textContent,
-          )
-        );
-      },
-      undefined,
-      { timeout: 40000 },
-    )
-    .catch(() => {});
   const terminalState = await terminal.getAttribute("data-state");
   assert.notEqual(
     terminalState,
     "ready",
-    "an unconfigured dev daemon must never fabricate a pass",
+    "a stopped fixture run must never read as a pass",
   );
   report.observedTerminalState = terminalState;
   report.observedTerminalText = (await terminal.innerText()) ?? "";
   await shot(page, "orchestrator-run-workflow-outcome.png");
   report.checks.push(
-    "run-workflow-goes-through-real-dispatch-and-failover-and-never-fabricates-success",
+    "run-workflow-stops-honestly-and-never-fabricates-success",
   );
 
   // Return the policy to its default through the real controls, then launch

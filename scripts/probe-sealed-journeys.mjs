@@ -1,5 +1,6 @@
 // Sealed acceptance for the MVP journeys that only manual QA walked before
-// (R16-BB): J1 agent state (Pi local-model session working → idle), J5 jump
+// (R16-BB): J1 agent state (Pi local-model session: pre-prompt Unknown with
+// no hook proof, then a real turn working → idle), J5 jump
 // palette workspace switch, J6 Tasks start-from-issue, J7 Automations Run
 // now with a real agent run + detail snapshot, J8 Bots preset create +
 // manual responsibility run on the owned provider fixture, and J10 Settings
@@ -431,7 +432,8 @@ export async function probeJumpPaletteSwitch({ page, root, output }) {
 }
 
 // ---------------------------------------------------------------------------
-// J1: Pi local-model session reaches working → idle in tab badge and card row
+// J1: Pi local-model session proves pre-prompt Unknown, then reaches
+// working → idle in tab badge and card row over one real turn
 // ---------------------------------------------------------------------------
 
 async function openAgentsSettings(page) {
@@ -573,6 +575,97 @@ async function waitForTabAgentStateOutcome(page, sessionId, timeoutMs) {
 }
 
 /**
+ * Reads the rendered agent badge on the session's own strip tab and worktree
+ * card row: one of "Working" | "Idle" | "Waiting for input" | "Exited" |
+ * "No recent update" (the Unknown label), or null when the surface carries
+ * no known badge. Both surfaces read `sessionAgentState`, so this is the
+ * rendered counterpart to the native DTO row below.
+ */
+export async function readRenderedAgentLabels(page, sessionId) {
+  return page.evaluate((id) => {
+    const tab = document.querySelector(
+      `[role="tablist"][aria-label="Sessions"] [role="tab"][data-tab-id="${CSS.escape(id)}"]`,
+    );
+    const cardRow = document.querySelector(
+      `[data-worktree-agent-row="${CSS.escape(id)}"]`,
+    );
+    const labelOf = (node) => {
+      if (!node) return null;
+      for (const wanted of ["Working", "Idle", "Waiting for input", "Exited", "No recent update"]) {
+        if (node.querySelector(`[aria-label="${wanted}"]`)) return wanted;
+      }
+      return null;
+    };
+    return { tab: labelOf(tab), cardRow: labelOf(cardRow) };
+  }, sessionId);
+}
+
+/**
+ * R3 Pi pre-prompt baseline: hook proof, not PTY silence.
+ *
+ * A freshly launched Pi session truthfully renders Unknown ("No recent
+ * update") on both surfaces until a hook turn proves otherwise: Pi admits
+ * with `initial_hook_turn_ended: false` (crates/drogon-core/src/harness.rs),
+ * the generated extension wires no startup SessionStart event -- only
+ * AgentStart/End, tool and usage hooks (harness_hooks/pi.rs) -- and the
+ * renderer maps working/idle without hook authority to unknown
+ * (sessionAgentState in
+ * apps/desktop/src/renderer/src/features/shell/agent-state.ts). The old
+ * baseline waited for PTY banner noise to decay to Idle; that assumption is
+ * obsolete -- silence past the activity window is activity authority, never
+ * turn proof, and the product renders it as Unknown.
+ *
+ * Proves, boundedly: the tab badge and card row both read "No recent
+ * update", and the native DTO row is live with NO hook turn proof
+ * (`agentStateAuthority` null or "activity" -- never "hook" before any
+ * prompt is sent). Returns the native row's turn-proof identity for the
+ * run log. Never fabricates a turn end to reach a settled state.
+ */
+export async function waitForPrePromptBaselineUnknown(
+  page,
+  sessionId,
+  workspaceId,
+  timeouts = {},
+) {
+  const { renderedTimeoutMs = 30000, nativeTimeoutMs = 15000 } = timeouts;
+  await waitForTabAgentState(page, sessionId, "No recent update", renderedTimeoutMs);
+  await waitForCardRowAgentState(page, sessionId, "No recent update", renderedTimeoutMs);
+  const deadline = Date.now() + nativeTimeoutMs;
+  let row = null;
+  for (;;) {
+    const reply = await page.evaluate(async ({ id, workspace }) => {
+      const response = await window.drogon.sessions(workspace);
+      if (!response.ok) throw new Error(response.error.message);
+      return response.result.sessions.find((session) => session.id === id) ?? null;
+    }, { id: sessionId, workspace: workspaceId });
+    if (reply && reply.verdict === "live") {
+      row = reply;
+      break;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Pi pre-prompt baseline: no live native row for session ${sessionId} in workspace ${workspaceId}`,
+      );
+    }
+    await delay(250);
+  }
+  const native = {
+    id: row.id,
+    incarnation: row.incarnation ?? null,
+    harnessId: row.harnessId ?? null,
+    verdict: row.verdict,
+    agentState: row.agentState ?? "unknown",
+    agentStateAuthority: row.agentStateAuthority ?? null,
+  };
+  assert.notEqual(
+    native.agentStateAuthority,
+    "hook",
+    `Pi pre-prompt baseline claims hook turn proof before any prompt was sent: ${JSON.stringify(native)}`,
+  );
+  return native;
+}
+
+/**
  * One turn on the free local model, retried boundedly: the shared model
  * server answers 429 (concurrency_limit) under load, which Pi surfaces as
  * "Retry failed after 3 attempts" in the terminal. Returns once the tab
@@ -633,7 +726,9 @@ async function terminalLineCount(page, sessionId) {
 
 /** Diagnostic dump for the J1 state waits: strip tabs, live sessions and
  *  registry tails, so a failed run shows whether the tab vanished, the
- *  state never propagated, or the prompt went to another terminal. */
+ *  state never propagated, or the prompt went to another terminal. Session
+ *  rows carry only turn-proof identity (ids, incarnation, harness, verdict,
+ *  state, authority) -- never PTY text, provider transcripts or secrets. */
 async function j1Diagnostics(page, workspaceId) {
   return page.evaluate(async (id) => {
     const tabs = [
@@ -651,10 +746,11 @@ async function j1Diagnostics(page, workspaceId) {
       if (response.ok)
         sessions = response.result.sessions.map((session) => ({
           id: session.id,
-          command: session.command,
+          incarnation: session.incarnation ?? null,
+          harnessId: session.harnessId ?? null,
           verdict: session.verdict,
-          agentState: session.agentState,
-          agentStateAt: session.agentStateAt,
+          agentState: session.agentState ?? "unknown",
+          agentStateAuthority: session.agentStateAuthority ?? null,
         }));
     } catch {
       sessions = "sessions rpc failed";
@@ -674,9 +770,40 @@ async function j1Diagnostics(page, workspaceId) {
   }, workspaceId);
 }
 
-export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, getFixtureReceipt }) {
-  // The packaged-surfaces prelude ends on Tasks; return through the real
+/**
+ * Reselect the workspace a journey addresses by id through the real sidebar
+ * card control, then prove the selection landed (`aria-current="page"`).
+ * The tab-strip "New tab" menu launches into the SELECTED workspace while
+ * journey assertions poll the `workspaceId` argument: without this, whichever
+ * card an earlier probe left selected receives the launch and the status
+ * poll reads the wrong workspace (observed: Pi booted live in the implicit
+ * folder card while the live-row poll on the composer's workspace found
+ * nothing). A click on the already-selected card is a no-op. The name is
+ * resolved from the real workspaces list, never guessed.
+ */
+export async function selectWorkspaceCardById(page, workspaceId) {
+  const name = await page.evaluate(async (id) => {
+    const response = await window.drogon.workspaces();
+    if (!response.ok) throw new Error(response.error.message);
+    const match = response.result.workspaces.find((item) => item.id === id);
+    if (!match) throw new Error(`workspace ${id} is not registered`);
+    return match.name;
+  }, workspaceId);
+  await page.getByRole("button", { name: `Select ${name}`, exact: true }).click();
+  await page.waitForFunction(
+    (label) =>
+      document.querySelector(`[aria-label="${label}"]`)?.getAttribute("aria-current") ===
+      "page",
+    `Select ${name}`,
+    { timeout: 15000 },
+  );
+}
+
+export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, getFixtureReceipt, prePromptBaseline = waitForPrePromptBaselineUnknown }) {
+  // The packaged-surfaces prelude ends on Tasks; reselect the addressed
+  // workspace through its real card first, then return through the real
   // Sessions nav before using the session header to set Pi defaults.
+  await selectWorkspaceCardById(page, workspaceId);
   await page
     .getByRole("button", { name: "Sessions", exact: true })
     .first()
@@ -725,20 +852,41 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, 
   // The Pi banner ("pi vX.Y.Z" + clear/exit hint) proves the TUI booted.
   await page.waitForFunction(renderedPiIsReady, launched.id, { timeout: 30000 });
   try {
-      // Establish the pre-prompt baseline first. The Pi startup banner also
-      // produces PTY activity; without proving that it decayed to Idle, the
-      // Working wait below can pass on launch activity before the submitted
-      // model turn has started.
-      await waitForTabAgentState(page, launched.id, "Idle", 30000);
-      await waitForCardRowAgentState(page, launched.id, "Idle", 30000);
-      // PTY activity within the 3s window is `Working`, silence past it is
-      // `Idle`. A long counting reply is deliberate: the badge's Working
+      // Establish the pre-prompt baseline first: the session must render
+      // Unknown with no hook turn proof (see
+      // waitForPrePromptBaselineUnknown). The Pi startup banner also
+      // produces PTY activity; without proving the pre-prompt state carries
+      // no turn proof, the Working wait below could pass on launch activity
+      // before the submitted model turn has started. A baseline failure is
+      // diagnosed from the native DTO and the rendered state BEFORE the
+      // finally below stops the session, so a startup failure can never be
+      // confused with cleanup (whose stop would otherwise rewrite the
+      // verdict this evidence reads).
+      let baseline;
+      try {
+        baseline = await prePromptBaseline(page, launched.id, workspaceId);
+      } catch (error) {
+        const diag = await j1Diagnostics(page, workspaceId).catch(
+          () => "diagnostics unavailable",
+        );
+        const rendered = await readRenderedAgentLabels(page, launched.id).catch(
+          () => "rendered labels unavailable",
+        );
+        await shot(page, output, "agent-state-baseline.png");
+        throw new Error(
+          `Pi pre-prompt baseline is not Unknown without hook proof: ${error.message}\n` +
+            `rendered=${JSON.stringify(rendered)}\n` +
+            JSON.stringify(diag, null, 2),
+        );
+      }
+      console.log(`[j1] pre-prompt baseline: ${JSON.stringify(baseline)}`);
+      // A long counting reply is deliberate: the badge's Working
       // state is sampled by a 2s poll, and a short reply can stream to
       // completion between two samples (observed: ~150 tokens done inside
       // one window). ~800 tokens keeps the stream above the sampling
       // interval. The waits arm BEFORE the keystrokes: pre-prompt the
-      // session already reads Idle, and an already-true waitForFunction
-      // would return immediately.
+      // session already reads Unknown with no hook proof, and an
+      // already-true waitForFunction would return immediately.
       const prompt =
         "Count from 1 to 200 separated by commas. Reply with only the numbers.";
       let armLines = await terminalLineCount(page, launched.id);
@@ -773,7 +921,7 @@ export async function probePiAgentStateWorkingIdle({ page, workspaceId, output, 
       await waitForCardRowAgentState(page, launched.id, "Working", 10000);
       await shot(page, output, "agent-state-working.png");
       // A settled state registers only after Working: arming this wait
-      // earlier would pass instantly on the pre-prompt Idle state. Also
+      // earlier would pass instantly on the pre-prompt Unknown state. Also
       // surface the other terminal states instead of hiding a hook/error
       // outcome behind a long timeout; a successful journey must render the
       // same settled state in both places.

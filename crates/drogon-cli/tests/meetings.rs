@@ -172,6 +172,12 @@ impl Fixture {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        // The daemon hands its own environment to the sessions it spawns, so
+        // a binding inherited from the Drogon session running this suite must
+        // not reach them either.
+        for name in common::INHERITED_BINDINGS {
+            command.env_remove(name);
+        }
         for (key, value) in extra_env {
             command.env(key, value);
         }
@@ -190,7 +196,8 @@ impl Fixture {
 
     fn cli(&self, args: &[&str]) -> Result<Value, (i32, String, String)> {
         let mut command = Command::new(env!("CARGO_BIN_EXE_drogon-cli"));
-        command.args(args).env("DROGON_DATA_DIR", &self.data_dir);
+        command.args(args);
+        common::scrub_environment(&mut command, &self.data_dir);
         let home = self.home_str();
         command.env("HOME", &home);
         let output = command.output().expect("spawn drogon-cli");

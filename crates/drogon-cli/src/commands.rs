@@ -34,6 +34,7 @@ use crate::error::{CliError, mentu_approval_required, method_not_found, timeout}
 use crate::output;
 use crate::paths;
 use crate::skills;
+use crate::terminal_send::plan_terminal_send;
 use crate::transport::{ANALYSIS_TIMEOUT, DEFAULT_TIMEOUT};
 use drogon_protocol::graph::{
     GraphNodeStateResult, GraphResult, GraphResumeResult, GraphRunNodeFailoverResult,
@@ -129,11 +130,11 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
             | BotAction::ListGrants { .. } => {
                 bot_secret_grants(&client, &request_id, json, action).await
             }
-            // The pull-request watch is a USER-lane monitor (the case names
-            // the project workspace the Bot lives in), so it does not go
+            // The GitHub watches are USER-lane monitors (the case names
+            // the project workspace the Bot lives in), so they do not go
             // through the `bot.self_*` home-scoped surface.
-            BotAction::WatchPullRequest { .. } => {
-                bot_watch_pull_request(&client, &request_id, json, action).await
+            BotAction::WatchPullRequest { .. } | BotAction::WatchIssue { .. } => {
+                bot_watch_github(&client, &request_id, json, action).await
             }
             other => bot(&client, &request_id, json, other).await,
         },
@@ -264,28 +265,18 @@ async fn terminal(
             session,
             incarnation,
             text,
+            literal,
         } => {
-            let sent_bytes = text.len() as u64;
-            let params = json!({
-                "sessionId": session,
-                "incarnation": incarnation,
-                // UTF-8 encoded once, here; never shell-interpolated anywhere.
-                "dataBase64": STANDARD.encode(text.as_bytes()),
-            });
-            let call = client
-                .call("session.write", params, request_id, DEFAULT_TIMEOUT)
-                .await?;
-            let write: WriteResult = Client::decode_checked(&call, "session.write", |result| {
-                check_write(result, sent_bytes)
-            })?;
-            let session_id = session.clone();
-            emit(
-                call,
+            terminal_send(
+                client,
+                request_id,
                 json,
-                || output::session_wrote(&write, &session_id),
-                0,
-                None,
+                session,
+                incarnation,
+                text,
+                *literal,
             )
+            .await
         }
         TerminalAction::Resize {
             session,
@@ -357,6 +348,85 @@ async fn terminal(
                 None,
             )
         }
+    }
+}
+
+/// `terminal send`: delivers `--text` the way a terminal delivers typed
+/// input (issues #599, #625). `crate::terminal_send` owns the why; this
+/// function owns the round trip — exactly one, so two agents nudging the
+/// same session cannot interleave inside a single message.
+///
+/// `submitEnter` asks the service to deliver that trailing Return as a
+/// discrete keypress rather than fused into the body's burst. The payload
+/// on the wire is unchanged either way, so a service that predates the
+/// flag writes exactly what it used to; the reply says which happened and
+/// `enterDelivery` reports it rather than the CLI assuming the better one.
+///
+/// The envelope's `submittedEnter` says a Return reached the PTY;
+/// `enterDelivery` says whether it got there as a keystroke a
+/// paste-detecting TUI can act on. Neither is a claim that the far end
+/// submitted a turn — only reading the session proves that.
+async fn terminal_send(
+    client: &Client,
+    request_id: &str,
+    json: bool,
+    session: &str,
+    incarnation: &str,
+    text: &str,
+    literal: bool,
+) -> Result<RunOutcome, CliError> {
+    let plan = plan_terminal_send(text, literal);
+    let params = json!({
+        "sessionId": session,
+        "incarnation": incarnation,
+        // UTF-8 encoded once, here; never shell-interpolated anywhere.
+        "dataBase64": STANDARD.encode(plan.text.as_bytes()),
+        "submitEnter": plan.submitted_enter,
+    });
+    let expected = plan.byte_len();
+    let call = client
+        .call("session.write", params, request_id, DEFAULT_TIMEOUT)
+        .await?;
+    let write: WriteResult = Client::decode_checked(&call, "session.write", |result| {
+        check_write(result, expected)
+    })?;
+    let delivery = enter_delivery(plan.submitted_enter, write.enter_delivery.as_deref());
+    let bracketed = write.bracketed_paste.unwrap_or(false);
+    let mut call = call;
+    call.raw["result"] = json!({
+        "acceptedBytes": write.accepted_bytes,
+        "submittedEnter": plan.submitted_enter,
+        "enterDelivery": delivery,
+        "bracketedPaste": bracketed,
+    });
+    call.result = call.raw["result"].clone();
+    let session_id = session.to_string();
+    let accepted = write.accepted_bytes;
+    emit(
+        call,
+        json,
+        || output::session_wrote_bytes(accepted, &session_id, delivery, bracketed),
+        0,
+        None,
+    )
+}
+
+/// What the envelope reports for `enterDelivery`, from what was asked for
+/// and what the service said it did.
+///
+/// A service that answers `keypress` did the #625 delivery. One that
+/// answers `raw`, or that is too old to answer at all, wrote the payload
+/// verbatim — the Return went out fused with the body, which is the shape
+/// a mid-turn paste-detecting TUI swallows. That is `inline`, and saying
+/// so is the point: the caller learns the weaker delivery happened instead
+/// of being told what the CLI hoped for.
+fn enter_delivery(submitted_enter: bool, reported: Option<&str>) -> &'static str {
+    if !submitted_enter {
+        return "none";
+    }
+    match reported {
+        Some("keypress") => "keypress",
+        _ => "inline",
     }
 }
 
@@ -2421,8 +2491,10 @@ async fn bot(
     };
     match action {
         // Routed to its own user-lane flow before this function is reached.
-        BotAction::Whoami | BotAction::WatchPullRequest { .. } => {
-            unreachable!("identity discovery and watch-pr have their own routes")
+        BotAction::Whoami
+        | BotAction::WatchPullRequest { .. }
+        | BotAction::WatchIssue { .. } => {
+            unreachable!("identity discovery and the GitHub watches have their own routes")
         }
         BotAction::Provision { bot, workspace } => {
             let call = client
@@ -2445,6 +2517,14 @@ async fn bot(
                 )
                 .await?;
             let result = call.result.clone();
+            // The read answers in full even when the Bot's folder has left
+            // the workspace registry (#609); the service says so in
+            // `notice`, and that belongs on stderr in both output modes
+            // rather than only inside the JSON a human may not read.
+            let notice = result
+                .get("notice")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             emit(
                 call,
                 json,
@@ -2468,7 +2548,7 @@ async fn bot(
                     )
                 },
                 0,
-                None,
+                notice,
             )
         }
         BotAction::CreateAutomation {
@@ -2903,19 +2983,30 @@ async fn bot(
 /// call preflights the `bot.secrets.v1` capability. Grant and revoke are
 /// audited server-side with the granting user named; revocation takes
 /// effect on the Bot's NEXT monitor tick.
-/// `bot watch-pr`: stage a `github_pr.v1` watch on the USER lane
-/// (`bot.monitor_create`), where the rule's project is the project
-/// workspace the Bot lives in — so the session this watch releases opens a
-/// worktree of that project, not of the Bot's home. `--approve` arms the
-/// exact rule hash in the same command; without it the watch stays parked.
-async fn bot_watch_pull_request(
+/// `bot watch-pr` / `bot watch-issue`: stage a `github_pr.v1` or
+/// `github_issue.v1` watch on the USER lane (`bot.monitor_create`), where
+/// the rule's project is the project workspace the Bot lives in — so the
+/// session the watch releases opens a worktree of that project, not of the
+/// Bot's home. `--approve` arms the exact rule hash in the same command;
+/// without it the watch stays parked.
+///
+/// The two verbs share this one body deliberately: the seeding and dedupe
+/// guarantees a watch carries must not depend on which verb spelled it.
+async fn bot_watch_github(
     client: &Client,
     request_id: &str,
     json: bool,
     action: &BotAction,
 ) -> Result<RunOutcome, CliError> {
     let status = capability_preflight(client, request_id, "bot.self.v1", "bot").await?;
-    let BotAction::WatchPullRequest {
+    // Same wire tags as `drogon_core::bots::monitors::rule::RULE_KIND_*`
+    // (the CLI has no drogon-core dependency; the daemon re-validates the
+    // kind and refuses an unknown tag).
+    let (kind, case_word) = match action {
+        BotAction::WatchIssue { .. } => ("github_issue.v1", "issue"),
+        _ => ("github_pr.v1", "pull-request"),
+    };
+    let (BotAction::WatchPullRequest {
         bot,
         workspace,
         repo,
@@ -2932,18 +3023,33 @@ async fn bot_watch_pull_request(
         responsibility_id,
         responsibility_name,
         instructions,
-    } = action
+    }
+    | BotAction::WatchIssue {
+        bot,
+        workspace,
+        repo,
+        filter,
+        login,
+        harness,
+        skills,
+        secret_ref,
+        api_base,
+        cron,
+        manual,
+        disabled,
+        approve,
+        responsibility_id,
+        responsibility_name,
+        instructions,
+    }) = action
     else {
-        unreachable!("bot_watch_pull_request is only called for WatchPullRequest")
+        unreachable!("bot_watch_github is only called for the GitHub watch verbs")
     };
     let mut params = json!({
         "botId": bot,
         "workspaceId": workspace,
         "hostId": status.host_id,
-        // Same wire tag as `drogon_core::bots::monitors::rule::RULE_KIND_GITHUB_PR`
-        // (the CLI has no drogon-core dependency; the daemon re-validates the
-        // kind and refuses an unknown tag).
-        "kind": "github_pr.v1",
+        "kind": kind,
         "repo": repo,
         "filter": filter.as_deref().unwrap_or("opened"),
     });
@@ -3006,7 +3112,7 @@ async fn bot_watch_pull_request(
             json,
             || {
                 format!(
-                    "staged pull-request watch {monitor_id} (parked at needs-approval); \
+                    "staged {case_word} watch {monitor_id} (parked at needs-approval); \
                      approve it from the Bots page in the app (the parked card's Approve \
                      control arms this exact rule text) or with `drogon-cli rpc \
                      bot.monitor_approve --params \
@@ -3040,7 +3146,7 @@ async fn bot_watch_pull_request(
     emit(
         approval,
         json,
-        || format!("pull-request watch {monitor_id} armed (approval {approval_hash})"),
+        || format!("{case_word} watch {monitor_id} armed (approval {approval_hash})"),
         0,
         None,
     )

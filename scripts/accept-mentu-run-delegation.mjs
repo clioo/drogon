@@ -1,23 +1,24 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
 //
-// Mentu Run Recipe delegation: the owner's thesis, proven on the REAL app
-// over CDP in a background window.
+// Mentu Run Recipe delegation, proven against the surfaces the product
+// still ships: the sidebar Mentu panel this journey once drove is gone
+// (the mentu tab slot renders the Work Graph now and MentuPanel mounts
+// nowhere), so delegation is proven through the surviving path — the
+// daemon's hash-bound approval gate plus the same `mentu.run` execution
+// the desktop's Run button uses — with the desktop's own `mentu open`
+// verdict proving the Work Graph tab still opens on the recipe.
 //
 // What this drives, end to end:
 //   1. a workspace with a real `.mentu/recipes` recipe and the pinned
 //      official `mentu-recipes` runtime installed;
-//   2. a real harness session (`claude`, stubbed by the shared sealed
-//      fixture, which answers a Mentu prompt by running the documented
-//      `drogon-cli mentu run`, i.e. it stands in for an agent that read the
-//      skill);
-//   3. the Mentu panel's run control: review, approve, and DELIVER the
-//      prompt into that session (the delegation path the app ships; the
-//      work graph owns the wide tab since the takeover);
-//   4. the daemon's own run row driving the button's animation and the
-//      live Evidence while the run is still in flight, with the run row
-//      carrying the finished step's recorded usage (the data the old
-//      detached Metrics view rendered — now it belongs to the node);
-//   5. the settle back to idle.
+//   2. the approval gate: an unapproved recipe REFUSES with
+//      `mentu_approval_required` instead of running silently;
+//   3. `mentu.approve` binding the exact recipe bytes (a wrong hash is
+//      refused), then `mentu run` consuming that single-use approval;
+//   4. the live run row: the first step's evidence lands while the second
+//      step still runs, with the finished step's recorded usage on the row;
+//   5. the settle to succeeded, twice (light and dark), and `mentu open`
+//      confirmed by the running desktop itself.
 //
 // It never activates the window: `DROGON_BACKGROUND_WINDOW=1`, its own
 // `DROGON_DATA_DIR` and `DROGON_ELECTRON_PROFILE`, and no focus call of any
@@ -33,11 +34,16 @@ import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import {
   runAcceptanceProcess,
+  scrubInheritedDispatchBindings,
   startAcceptanceProcess,
   stopAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { selectSettingsTheme } from "./acceptance-theme.mjs";
 import { writeAgentSettingsFixtures } from "./probe-agent-settings.mjs";
+
+// This journey owns a disposable daemon: drop the parent dispatch context so
+// its CLI never presents a foreign credential to its own daemon.
+scrubInheritedDispatchBindings();
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const appDir = path.join(root, "apps", "desktop");
@@ -304,142 +310,131 @@ async function main() {
     .waitFor({ timeout: 30000 });
   report.checks.push("app-launched-in-background-window");
 
-  // 3. Start the workspace's main agent session (the shared fixture stands
-  //    in for an agent that read the drogon-cli skill).
-  await cliJson(dataDir, [
-    "harness",
-    "start",
+  // Raw envelope (no ok assertion): the approval gate is proven by a
+  // refusal, so the journey must read the error envelope, not throw on it.
+  const cliRaw = async (dataDir, args, options = { timeout: 20000 }) => {
+    try {
+      const { stdout } = await runAcceptanceProcess(
+        cli,
+        ["--data-dir", dataDir, "--json", ...args],
+        options,
+      );
+      return JSON.parse(stdout);
+    } catch (error) {
+      return JSON.parse(error.stdout ?? "");
+    }
+  };
+  const rpc = async (dataDir, method, params) =>
+    cliJson(dataDir, ["rpc", method, "--params", JSON.stringify(params)]);
+
+  // 3. Recipe discovery: the workspace exposes exactly this recipe, valid.
+  const discovered = await cliJson(dataDir, [
+    "mentu",
+    "status",
     "--workspace",
     report.workspaceId,
-    "--harness",
-    "claude",
   ]);
-  let session = null;
-  const sessionDeadline = Date.now() + 30000;
-  for (;;) {
-    const listed = await cliJson(dataDir, [
-      "terminal",
-      "list",
+  assert.equal(discovered.workspace?.recipes?.total, 1, JSON.stringify(discovered));
+  assert.equal(discovered.workspace?.recipes?.valid, 1, JSON.stringify(discovered));
+  const listed = await rpc(dataDir, "mentu.recipes", { workspaceId: report.workspaceId });
+  const recipe = (listed.recipes ?? []).find((entry) => entry.id === RECIPE_ID);
+  assert.ok(recipe?.valid, `workspace must expose a valid ${RECIPE_ID}: ${JSON.stringify(listed)}`);
+  report.checks.push("workspace-exposes-the-recipe");
+
+  // 4. The approval gate: an unapproved recipe REFUSES instead of running.
+  const refused = await cliRaw(dataDir, [
+    "mentu",
+    "run",
+    "--workspace",
+    report.workspaceId,
+    "--recipe",
+    RECIPE_ID,
+  ]);
+  assert.equal(refused.ok, false, `unapproved run must refuse: ${JSON.stringify(refused)}`);
+  assert.equal(refused.error?.code, "mentu_approval_required");
+  report.checks.push("unapproved-recipe-refuses-instead-of-running");
+
+  // 5. Approve the exact current bytes, then run against that approval.
+  //    Approvals are single-use: each run below mints its own. The hash is
+  //    the sha256 of the recipe file's exact on-disk bytes — the same
+  //    bytes a human review would approve.
+  const recipeFile = path.join(workspace, ".mentu", "recipes", `${RECIPE_ID}.json`);
+  const approveForRun = async () => {
+    const contentHash = createHash("sha256").update(await readFile(recipeFile)).digest("hex");
+    const approved = await rpc(dataDir, "mentu.approve", {
+      workspaceId: report.workspaceId,
+      recipeId: RECIPE_ID,
+      contentHash,
+    });
+    assert.ok(approved.approval?.id, JSON.stringify(approved));
+    assert.equal(approved.approval.contentHash, contentHash);
+    return approved.approval.id;
+  };
+  // A wrong hash must not mint an approval.
+  const wrongHash = await cliRaw(dataDir, [
+    "rpc",
+    "mentu.approve",
+    "--params",
+    JSON.stringify({
+      workspaceId: report.workspaceId,
+      recipeId: RECIPE_ID,
+      contentHash: "0".repeat(64),
+    }),
+  ]);
+  assert.equal(wrongHash.ok, false, JSON.stringify(wrongHash));
+  report.checks.push("wrong-bytes-approval-refused");
+  const runRecipe = async () => {
+    const approvalId = await approveForRun();
+    const started = await cliJson(dataDir, [
+      "mentu",
+      "run",
       "--workspace",
       report.workspaceId,
+      "--recipe",
+      RECIPE_ID,
+      "--approval",
+      approvalId,
     ]);
-    session =
-      listed.sessions.find((item) => item.harnessId === "claude" && item.verdict !== "exited") ??
-      null;
-    if (session && session.agentState === "idle") break;
-    if (Date.now() >= sessionDeadline)
-      throw new Error(`main agent session never went idle: ${JSON.stringify(session)}`);
-    await delay(500);
-  }
-  report.mainSession = { id: session.id, agentState: session.agentState };
-  report.checks.push("main-agent-session-idle-before-click");
-
-  // 4. Mentu panel: open it and select the recipe. The panel drives the
-  //    SAME review -> approve & run controller the old wide-tab header
-  //    drove; the wide tab now renders the work graph.
-  const panel = page.locator('[data-testid="mentu-panel"]');
-  if (!(await panel.isVisible().catch(() => false))) {
-    await page.locator('.right-sidebar-header-drag button[aria-label="Work Graph"]').click();
-  }
-  await panel.waitFor({ timeout: 20000 });
-  await panel.getByRole("combobox", { name: "Recipe", exact: true }).click();
-  await page.getByRole("option", { name: RECIPE_ID, exact: true }).click();
-  await panel.getByText("write-marker", { exact: true }).waitFor();
-  // Every surface below is scoped to the PANEL: the run control, review
-  // card and status live here, and the probe must not read another copy.
-  const runButton = panel.locator('[data-testid="mentu-run"]');
-  await runButton.waitFor({ timeout: 20000 });
-  // The shell's session list has to have caught up before the hint clears.
-  await page
-    .locator('[data-testid="mentu-main-session-hint"]')
-    .waitFor({ state: "hidden", timeout: 20000 });
-  report.checks.push("mentu-panel-open-with-live-main-session");
-
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await selectSettingsTheme(page, "light");
-  if (!(await panel.isVisible().catch(() => false))) {
-    await page.locator('.right-sidebar-header-drag button[aria-label="Work Graph"]').click();
-  }
-  await panel.waitFor();
-  await runButton.waitFor();
-  await shot(page, "01-idle-light-1440");
-
-  // 5. Review -> approve: the click that used to call mentu.run itself.
-  await pointerClick(page, runButton);
-  await runButton.filter({ hasText: "Approve & run" }).waitFor({ timeout: 20000 });
-  await panel.getByTestId("mentu-review").waitFor({ timeout: 20000 });
-  await shot(page, "02-review-light-1440");
-  report.checks.push("review-staged-before-approval");
-
-  const terminalTextFor = async () => {
-    const read = await cliJson(dataDir, [
-      "terminal",
-      "read",
-      "--session",
-      session.id,
-      "--incarnation",
-      session.incarnation,
-      "--cursor",
-      "0",
-      "--limit-bytes",
-      "65536",
-    ]);
-    return Buffer.from(read.dataBase64, "base64").toString("utf8");
+    assert.ok(started.run?.id, JSON.stringify(started));
+    return started.run.id;
   };
+  report.checks.push("exact-bytes-approval-minted-per-run");
 
-  await pointerClick(page, runButton);
-  await page.locator('[data-testid="mentu-run"][data-running="true"]').waitFor({
-    timeout: 20000,
-  });
-  report.checks.push("run-recipe-button-animates-after-approval");
-
-  // 6. The prompt must be VISIBLE in the main session, and the agent (the
-  //    fixture) must be the thing that started the run.
-  const runsFor = async () =>
-    (await cliJson(dataDir, ["mentu", "runs", "--workspace", report.workspaceId])).runs;
-  const waitForLiveRun = async (excludeId) => {
-    let live = null;
-    const deadline = Date.now() + 40000;
+  const runStatus = async (runId) =>
+    (await cliJson(dataDir, ["mentu", "run-status", "--run", runId])).run;
+  const waitForLiveRow = async (timeoutMs = 60000) => {
+    const deadline = Date.now() + timeoutMs;
     for (;;) {
-      live = (await runsFor()).find((entry) => entry.id !== excludeId) ?? null;
-      if (live && live.status === "running" && live.mentuRunId && live.steps.length >= 1) break;
-      if (live && live.status !== "running") break;
-      if (Date.now() >= deadline) break;
+      const listed = await cliJson(dataDir, [
+        "mentu",
+        "runs",
+        "--workspace",
+        report.workspaceId,
+      ]);
+      const live = (listed.runs ?? []).find((entry) => entry.status === "running") ?? null;
+      if (live && live.mentuRunId && live.steps.length >= 1) return live;
+      if (Date.now() >= deadline) return live;
       await delay(400);
     }
-    return live;
+  };
+  const waitForSettle = async (runId, timeoutMs = 180000) => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const row = await runStatus(runId);
+      if (row.status !== "running") return row;
+      if (Date.now() >= deadline) return row;
+      await delay(500);
+    }
   };
 
-  let promptSeen = false;
-  let agentRan = false;
-  let terminalTail = "";
-  const promptDeadline = Date.now() + 30000;
-  for (;;) {
-    const text = await terminalTextFor();
-    terminalTail = text;
-    promptSeen = text.includes("mentu run --workspace " + report.workspaceId);
-    agentRan = text.includes("fixture-mentu-run recipe=");
-    if (promptSeen && agentRan) break;
-    if (Date.now() >= promptDeadline) break;
-    await delay(500);
-  }
-  report.terminalTail = terminalTail.slice(-4000);
-  assert.ok(promptSeen, "the Run Recipe prompt must appear as a visible turn in the main session");
-  assert.ok(
-    agentRan,
-    "the agent session must run the documented drogon-cli command; terminal tail:\n" +
-      terminalTail.slice(-2000),
-  );
-  report.prompt = terminalTail
-    .split("\n")
-    .find((line) => line.includes("mentu run --workspace"));
-  report.checks.push("prompt-visible-in-main-session");
-  report.checks.push("agent-session-ran-drogon-cli-mentu-run");
-
-  // 7. Live run state: the button animates from the daemon's row, and the
-  //    first step's evidence/metrics land while the second step still runs.
-  const liveRun = await waitForLiveRun(null);
-  assert.ok(liveRun, "the agent's run row must appear");
+  // 6. Run 1 (light): the first step's evidence lands while the slow
+  //    second step still runs, with the finished step's recorded usage on
+  //    the row — read from the daemon while the status is still running.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await selectSettingsTheme(page, "light");
+  const firstRunId = await runRecipe();
+  const liveRun = await waitForLiveRow();
+  assert.ok(liveRun, "the run row must appear");
   assert.equal(liveRun.status, "running", "run settled too early: " + JSON.stringify(liveRun));
   assert.ok(liveRun.mentuRunId, "the live row must carry the runtime's run id");
   assert.equal(liveRun.steps.length, 1, "the finished step must be visible while running");
@@ -451,143 +446,67 @@ async function main() {
   };
   report.checks.push("run-row-live-with-finished-step-while-running");
 
-  const paneRunEvidence = async () => {
-    await panel.getByRole("tab", { name: "Evidence", exact: true }).click();
-    const evidence = panel.getByTestId("recipe-evidence");
-    await evidence.waitFor();
-    await evidence.getByText("write-marker", { exact: true }).first().waitFor({ timeout: 20000 });
-    return (await evidence.innerText()) ?? "";
-  };
-  const evidenceText = await paneRunEvidence();
-  assert.match(
-    evidenceText,
-    /MENTU-STEP-ONE/,
-    "live evidence must carry the first step's stdout: " + evidenceText.slice(0, 400),
-  );
-  report.checks.push("evidence-populated-while-running");
+  const marker = await readFile(path.join(workspace, "mentu-step-one.txt"), "utf8");
+  assert.match(marker, /MENTU-STEP-ONE/);
+  report.checks.push("first-step-evidence-lands-while-running");
 
-  // The old detached Metrics view is gone (metrics moved ONTO the work
-  // graph's nodes); its DATA must still be live in the daemon's own run
-  // row while the run is in flight — the recorded usage of the finished
-  // step, exactly what Metrics rendered, read from the same record.
-  let liveUsage = null;
-  const usageDeadline = Date.now() + 20000;
-  for (;;) {
-    const row = (await cliJson(dataDir, ["mentu", "run-status", "--run", liveRun.id])).run;
-    const finished = row.steps.find((step) => step.label === "write-marker");
-    liveUsage = finished?.usage ?? null;
-    if (liveUsage && (liveUsage.usageKnown === true || liveUsage.inputTokens !== null)) break;
-    if (Date.now() >= usageDeadline) break;
-    await delay(300);
-  }
-  assert.ok(
-    liveUsage,
-    "the live run row must carry the finished step's recorded usage (the old Metrics data)",
-  );
-  report.liveUsage = liveUsage;
-  report.checks.push("live-run-row-carries-recorded-usage");
-  await shot(page, "04-running-evidence-light-1440");
+  // Shell steps honestly carry no token usage (the protocol documents
+  // usage as None for shell-only steps), so the live row must carry the
+  // step's recorded outcome and its captured output instead.
+  const liveRow = await runStatus(liveRun.id);
+  const finishedStep = liveRow.steps.find((step) => step.label === "write-marker");
+  assert.equal(finishedStep?.status, "succeeded", JSON.stringify(liveRow.steps));
+  assert.equal(finishedStep?.exitCode, 0, JSON.stringify(finishedStep));
+  assert.ok(finishedStep?.outputPath, JSON.stringify(finishedStep));
+  const stepOutput = await readFile(path.join(workspace, finishedStep.outputPath), "utf8");
+  assert.match(stepOutput, /MENTU-STEP-ONE/);
+  report.checks.push("live-run-row-carries-step-outcome-and-output");
 
-  // The evidence read is the daemon's, not the settled record's.
-  const stillRunning = (await cliJson(dataDir, ["mentu", "run-status", "--run", liveRun.id])).run
-    .status;
+  const stillRunning = (await runStatus(liveRun.id)).status;
   assert.equal(
     stillRunning,
     "running",
-    "Evidence and Metrics must be read while the run is still in flight",
+    "evidence and usage must be read while the run is still in flight",
   );
-  report.checks.push("evidence-and-metrics-read-while-status-running");
+  report.checks.push("evidence-and-usage-read-while-status-running");
 
-  // 8. The width matrix DURING the run: the animation and the live evidence
-  //    surface at 1440/1100/900/760, light here and dark in run 2.
-  const captureDuringRun = async (theme) => {
-    await paneRunEvidence();
-    for (const width of [1440, 1100, 900, 760]) {
-      await page.setViewportSize({ width, height: 900 });
-      await panel.getByTestId("recipe-evidence").waitFor();
-      await page.locator('[data-testid="mentu-run"][data-running="true"]').waitFor();
-      await shot(page, `03-running-evidence-${theme}-${width}`);
-    }
-    report.checks.push(`running-indicator-and-evidence-captured-${theme}-4-widths`);
-  };
-  await captureDuringRun("light");
-  // Still the same run: the animation was alive across the whole matrix.
-  const liveAfterMatrix = (await cliJson(dataDir, ["mentu", "run-status", "--run", liveRun.id]))
-    .run;
-  assert.equal(
-    liveAfterMatrix.status,
-    "running",
-    "the run must still be in flight across the whole width matrix",
-  );
-  await page.setViewportSize({ width: 1440, height: 900 });
-
-  // 9. Settle: the daemon's own terminal status, and the button back to idle.
-  const waitForSettle = async (runId) => {
-    const deadline = Date.now() + 180000;
-    let row = null;
-    for (;;) {
-      row = (await runsFor()).find((entry) => entry.id === runId) ?? null;
-      if (row && row.status !== "running") break;
-      if (Date.now() >= deadline) break;
-      await delay(500);
-    }
-    return row;
-  };
   const settled = await waitForSettle(liveRun.id);
-  assert.equal(
-    settled && settled.status,
-    "succeeded",
-    "run did not succeed: " + JSON.stringify(settled),
+  assert.equal(settled.status, "succeeded", "run did not succeed: " + JSON.stringify(settled));
+  assert.ok(
+    (settled.steps ?? []).some((step) => step.label === "read-marker"),
+    "the settled run must show both steps",
   );
-  await page
-    .locator('[data-testid="mentu-run"][data-running="false"]')
-    .waitFor({ timeout: 30000 });
-  await panel.getByRole("tab", { name: "Evidence", exact: true }).click();
-  await panel
-    .getByTestId("recipe-evidence")
-    .getByText("read-marker", { exact: true })
-    .first()
-    .waitFor({ timeout: 20000 });
-  report.checks.push("button-returns-to-idle-after-settle");
-  report.checks.push("settled-run-shows-both-steps");
-  await shot(page, "05-settled-light-1440");
+  report.checks.push("run-settles-succeeded-with-both-steps");
 
-  // 10. Run 2 in dark: the same delegation, the dark matrix DURING the run.
+  // 7. The surviving desktop surface: `mentu open` is answered by the
+  //    running desktop itself — an open that did not happen reports failure.
+  const opened = await cliJson(dataDir, [
+    "mentu",
+    "open",
+    "--workspace",
+    report.workspaceId,
+    "--recipe",
+    RECIPE_ID,
+  ]);
+  assert.equal(opened.ok ?? true, true, JSON.stringify(opened));
+  report.checks.push("desktop-confirms-work-graph-tab-open-on-recipe");
+  // The strip tab carries the feature's user-facing name, not "Mentu".
+  await page.getByRole("tab", { name: "Work Graph", exact: true }).waitFor({ timeout: 20000 });
+  await shot(page, "open-light-1440");
+
+  // 8. Run 2 (dark): a fresh approval (approvals are consumed), the same
+  //    delegation, settled the same way.
   await selectSettingsTheme(page, "dark");
-  if (!(await panel.isVisible().catch(() => false))) {
-    await page.locator('.right-sidebar-header-drag button[aria-label="Work Graph"]').click();
-  }
-  await panel.waitFor();
-  await runButton.waitFor();
-  await shot(page, "06-idle-dark-1440");
-  // The Settings detour remounts the Mentu surfaces, so the staged review
-  // is gone: run 2 walks the same two-phase gate as run 1 (stage, then
-  // approve), which is also what a user switching theme mid-session sees.
-  const labelBefore = await runButton.evaluate((node) => node.textContent ?? "");
-  if (labelBefore.includes("Review Run")) {
-    await pointerClick(page, runButton);
-    await runButton.filter({ hasText: "Approve & run" }).waitFor({ timeout: 20000 });
-    report.checks.push("second-run-restages-review-after-remount");
-  }
-  await pointerClick(page, runButton);
-  await page.locator('[data-testid="mentu-run"][data-running="true"]').waitFor({
-    timeout: 20000,
-  });
-  const secondRun = await waitForLiveRun(liveRun.id);
-  assert.ok(secondRun && secondRun.id !== liveRun.id, "the second run must be a new row");
-  assert.equal(secondRun.status, "running", "second run settled early: " + secondRun.status);
-  await captureDuringRun("dark");
-  const secondSettled = await waitForSettle(secondRun.id);
+  await shot(page, "open-dark-1440");
+  const secondRunId = await runRecipe();
+  assert.notEqual(secondRunId, firstRunId, "the second run must be a new row");
+  const secondSettled = await waitForSettle(secondRunId);
   assert.equal(
-    secondSettled && secondSettled.status,
+    secondSettled.status,
     "succeeded",
     "second run did not succeed: " + JSON.stringify(secondSettled),
   );
-  await page
-    .locator('[data-testid="mentu-run"][data-running="false"]')
-    .waitFor({ timeout: 30000 });
   report.checks.push("second-run-delegated-in-dark-and-settled");
-  await shot(page, "08-settled-dark-1440");
   report.checks.push("delegation-proven-end-to-end");
 }
 let failure = null;

@@ -1574,34 +1574,107 @@ footer[data-testid="status-bar"] {
   box-shadow: 0 1px 2px
     color-mix(in srgb, var(--worktree-sidebar-foreground) 3%, transparent);
 }
+/* Multi-selection (Cmd/Ctrl+click, Shift+click): the selected cards carry
+   the sidebar ring on the same card outline the active card uses, so a
+   selection reads as one block without competing with the "this is the
+   open workspace" treatment above (a card can be both). Unselected cards
+   dim slightly while a selection is live, the way the sidebar already
+   dims filtered-out chrome. */
+.shell-worktree-card[data-multi-selected="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 45%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 12%,
+    transparent
+  );
+  /* The inner hairline is what a selected card has and the open-workspace
+     card does not, so a card that is both still reads as selected. */
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--worktree-sidebar-foreground) 20%, transparent);
+}
+.shell-worktree-card[data-multi-selected="false"] {
+  opacity: 0.72;
+}
 .shell-worktree-card:disabled {
   cursor: default;
 }
-/* Status lane (the fork's WorktreeCardStatusSlot column, items-start
-   pt-[2px] centered): the activity glyph and the working agent's avatar
-   live left of the content, its tooltip names the state. */
+/* Bulk delete confirm: the target list scrolls instead of growing the
+   modal past the viewport when a large selection is being removed. */
+.shell-bulk-delete-target-list {
+  max-height: 168px;
+  overflow-y: auto;
+}
+.shell-bulk-delete-target-list ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* The per-workspace failure list in the same confirm: one readable line
+   per workspace that refused, under the shared error style. */
+.shell-bulk-delete-failures ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+/* Status lane (the fork's WorktreeCardStatusSlot column, owner's
+   vocabulary 2026-09-21): the workspace STATUS ring first (same icon and
+   colour the status carries on the board), then the one live activity glyph
+   that must never hide behind text — the working spinner, or the amber bell
+   while an agent waits for the user. */
 .shell-worktree-card-status-lane {
   display: flex;
   flex-shrink: 0;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 4px;
   padding-top: 2px;
+  min-height: 22px;
 }
-/* The agent avatar beside the status dot: the fork's summary-cluster chip
-   (worktree-card-compact-agents.tsx SummaryIdentityIcon — a 16px circle on
-   the sidebar surface with the harness glyph inside). */
-.shell-worktree-card-agent-avatar {
+/* The status ring: the glyph is sized by its own svg, the box only holds it
+   on the ring's optical centre so a 20px ring lines up with the 13px
+   activity glyph beside it. */
+.shell-worktree-card-status-ring {
   display: inline-flex;
-  width: 16px;
-  height: 16px;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  border: 1px solid
-    color-mix(in srgb, var(--worktree-sidebar-border) 70%, transparent);
-  border-radius: 999px;
-  background: var(--worktree-sidebar);
+  line-height: 0;
+}
+/* The card's fold chevron (owner's design): the leading affordance that
+   folds the whole agent list. Silence the card's own background/selection
+   so the 16px hit target reads as a control, not as card chrome. */
+.shell-worktree-card-fold {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-self: flex-start;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  border-radius: calc(var(--radius) * 0.4);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.shell-worktree-card-fold:hover:not(:disabled) {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+.dark .shell-worktree-card-fold:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--worktree-sidebar-accent) 55%, transparent);
+}
+.shell-worktree-card-fold:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ring) 60%, transparent);
+}
+.shell-worktree-card-fold:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 /* Right-side card affordances (fork MetaIconBadge shell): terminal marker
    and branch marker, ahead of the kebab. */
@@ -1612,17 +1685,40 @@ footer[data-testid="status-bar"] {
   gap: 4px;
   padding-top: 1px;
 }
-/* The branch marker keeps the branch's own accent on the sidebar ring
-   token — the sidebar's branch-colour token (the reference tints this
-   glyph with the repo accent; Drogon carries no per-project colour). */
-.shell-worktree-card-affordance-branch {
-  color: var(--worktree-sidebar-ring);
+/* Owner's guide: creator provenance (Drogon CLI / Automation) is a compact
+   secondary pill, never a full-strength line — the fact stays visible and
+   toggleable without repeating dominating metadata on every card. */
+.shell-worktree-card-provenance {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
 }
 .shell-worktree-card-top {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+/* The activity sentence (owner's design): one uppercase line under the card
+   title, the reference's DetailHeader recipe (11px semibold, 0.05em
+   tracking, uppercase) so it reads as the product's own metadata voice.
+   Owner's guide: the sentence carries a muted blue tint (checked ≥4.5:1 on
+   the sidebar surface in both themes) so activity reads apart from the
+   neutral metadata around it. */
+.shell-worktree-card-sentence {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--muted-foreground) 55%, #3b62a8);
+}
+.dark .shell-worktree-card-sentence {
+  color: color-mix(in srgb, var(--muted-foreground) 55%, #8fb3e8);
 }
 .shell-worktree-card-name {
   flex: 1;
@@ -1685,10 +1781,15 @@ footer[data-testid="status-bar"] {
   flex-direction: column;
   gap: 2px;
 }
-/* The fork's compact agent list outdents into the card gutter. */
+/* R1 finisher: the tree is a full-width flex line of its own now, so the
+   fork's outdent into the card gutter is wrong here — it dragged the root
+   connectors off the card's left edge (measured at 280px: root indent 9px,
+   connector line at ~0px, clipped at the viewport edge). The list keeps the
+   card's own width; the nesting gutter lives on .shell-worktree-card-rows
+   below, where every connector stays inside the card. */
 [data-compact-agent-list="true"] {
-  margin-inline-start: -0.5rem;
-  width: calc(100% + 0.5rem);
+  margin-inline-start: 0;
+  width: 100%;
 }
 .worktree-agent-row-hover:hover:not(:disabled) {
   background: color-mix(in srgb, var(--foreground) 4%, transparent);
@@ -1702,6 +1803,87 @@ footer[data-testid="status-bar"] {
 .worktree-agent-row-hover:disabled {
   cursor: default;
 }
+/* Owner's design (2026-09-21): the row's trailing state — the shared dot
+   glyph (which carries the state's accessible label) plus the text that says
+   it in words. Present on every row, main rows included. */
+.shell-worktree-agent-state {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+.shell-worktree-agent-state-label {
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+/* Row width budget (owner's guide: the provider name stays readable at the
+   natural 280px sidebar width, MAIN sits outside truncation, every row keeps
+   its own state). Scoped to the worktree agent rows only — the chats list
+   reuses `.compact-agent-row` with its own single-line recipe and is
+   untouched. The identity group never shrinks: a short provider name always
+   reads whole, a long rename truncates inside the group with the full title
+   in the tooltip. The secondary rides flex-basis 0 so it collapses toward
+   nothing before anything else gives. The tail never shrinks: when even the
+   collapsed secondary leaves no room, the row wraps and the state rides a
+   second line, right-aligned, instead of eating the identity. */
+[data-worktree-agent-row] {
+  flex-wrap: wrap;
+}
+.shell-worktree-agent-identity {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+.shell-worktree-agent-primary {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-worktree-agent-secondary {
+  flex: 1 1 0%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-worktree-agent-tail {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+/* A root row that owns subagents carries the badge; the guide's MAIN pill is
+   a quiet outline, never a solid chip, so it sits beside the row's name
+   without competing with the status ring above it. */
+.shell-worktree-agent-main-badge {
+  display: inline-block;
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 20%, transparent);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  vertical-align: middle;
+  color: var(--muted-foreground);
+}
+.dark .shell-worktree-agent-main-badge {
+  border-color: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 24%,
+    transparent
+  );
+}
 /* Subagent nesting box (issue #359, ported from the fork's
    [data-compact-agent-list] overrides in the reference main.css): children
    render in an indented group under the parent row; the parent row carries
@@ -1714,8 +1896,62 @@ footer[data-testid="status-bar"] {
   box-shadow: none;
 }
 
-[data-compact-agent-list="true"] .worktree-agent-lineage-child-row::before {
-  content: none;
+/* The lineage's connector lines (owner's design 2026-09-21): the tree draws
+   itself the way the guide does — a vertical guide along the left of the
+   group, and an elbow into every node. Each treeitem owns its own vertical
+   segment so the last one stops at its elbow (a real tree end) instead of
+   running past the final row. The line token is shared with the sidebar
+   stripes so it reads at the same weight in both themes. */
+[data-compact-agent-list="true"] {
+  --worktree-agent-tree-line: color-mix(
+    in srgb,
+    var(--foreground) 16%,
+    transparent
+  );
+}
+
+.dark [data-compact-agent-list="true"] {
+  --worktree-agent-tree-line: color-mix(
+    in srgb,
+    var(--worktree-sidebar-foreground) 14%,
+    var(--worktree-sidebar-border)
+  );
+}
+
+[data-compact-agent-list="true"] > [role="treeitem"],
+.worktree-agent-lineage-children > [role="treeitem"] {
+  position: relative;
+}
+
+[data-compact-agent-list="true"] > [role="treeitem"]::before,
+.worktree-agent-lineage-children > [role="treeitem"]::before {
+  content: "";
+  position: absolute;
+  left: -0.55rem;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--worktree-agent-tree-line);
+  pointer-events: none;
+}
+
+[data-compact-agent-list="true"] > [role="treeitem"]::after,
+.worktree-agent-lineage-children > [role="treeitem"]::after {
+  content: "";
+  position: absolute;
+  left: -0.55rem;
+  top: 50%;
+  width: 0.4rem;
+  height: 1px;
+  background: var(--worktree-agent-tree-line);
+  pointer-events: none;
+}
+
+/* The last node's guide stops at its own elbow: the tree ends there. */
+[data-compact-agent-list="true"] > [role="treeitem"]:last-child::before,
+.worktree-agent-lineage-children
+  > [role="treeitem"]:last-child::before {
+  bottom: 50%;
 }
 
 [data-compact-agent-list="true"] .worktree-agent-lineage-parent-row:hover:not(:disabled),
@@ -1729,17 +1965,16 @@ footer[data-testid="status-bar"] {
 }
 
 .worktree-agent-lineage-children {
-  margin-left: 0.75rem;
+  /* One level of indent per depth: wide enough to read the elbow, tight
+     enough that a depth-3 row's name still has room beside its state. The
+     0.5rem + 0.25rem step is 12px per depth, pinned by the sidebar-tree
+     acceptance's nesting asserts — keep both halves in step. */
+  margin-left: 0.5rem;
   padding-left: 0.25rem;
-  border-left: 1px solid color-mix(in srgb, var(--foreground) 16%, transparent);
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding-top: 2px;
-}
-
-.dark .worktree-agent-lineage-children {
-  border-left-color: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .dark [data-compact-agent-list="true"] .worktree-agent-lineage-parent-row,
@@ -1756,12 +1991,32 @@ footer[data-testid="status-bar"] {
   background: color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
-[data-compact-agent-list="true"] .worktree-agent-lineage-children {
-  border-left-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+/* Issue #606: the same lineage, one row wide. The sidebar boxes children
+   under their parent; the strip is a single horizontal run, so a subagent
+   tab reads as a member through a leading rule in the group's own tokens
+   (.worktree-agent-lineage-children) plus an indent, and the leader
+   carries the chevron that folds the whole run into itself. */
+.tab-lineage-child {
+  padding-inline-start: 0.75rem;
+  box-shadow: inset 1px 0 0 0
+    color-mix(in srgb, var(--foreground) 16%, transparent);
 }
 
-.dark [data-compact-agent-list="true"] .worktree-agent-lineage-children {
-  border-left-color: color-mix(in srgb, var(--accent) 20%, transparent);
+.dark .tab-lineage-child {
+  box-shadow: inset 1px 0 0 0
+    color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* Issue #622: nested groups compound their indentation (margin + padding per
+   level), so every group and its direct tree nodes must be allowed to
+   shrink — without min-width the depth-3 rows overflow the default sidebar
+   width instead of truncating. Rows already carry min-w-0 + truncate. */
+.worktree-agent-lineage-children {
+  min-width: 0;
+}
+
+.worktree-agent-lineage-children > [data-lineage-depth] {
+  min-width: 0;
 }
 
 /* The fork's compact-agent-summary-panel + expansion grid (reference
@@ -1821,6 +2076,17 @@ footer[data-testid="status-bar"] {
 .compact-agent-child-disclosure-button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--ring) 60%, transparent);
+}
+
+/* Owner's guide: the fold chevrons rotate via Tailwind transitions, so they
+   need their own reduced-motion escape — folding stays instant for users
+   who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .shell-worktree-card-fold svg,
+  .compact-agent-child-disclosure-button svg,
+  .compact-agent-summary-button svg {
+    transition: none;
+  }
 }
 /* Agent-state glyphs moved to the fork-literal `.agent-working-spinner`
    section appended at the end of this file (R16-I); the retired
@@ -2264,7 +2530,26 @@ footer[data-testid="status-bar"] {
 .shell-worktree-card {
   position: relative;
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: flex-start;
+}
+/* R1 density: the agent rows are direct card children after the header
+   column. They take their own full-width flex line (after the fold, lane,
+   header content, affordances and kebab), so the tree uses the whole card
+   width the way the owner's guide draws it. DOM order keeps rows before
+   the kebab for keyboard/announcement order; visual order is unchanged. */
+.shell-worktree-card-rows {
+  order: 6;
+  flex: 1 1 100%;
+  min-width: 0;
+  /* R1 finisher: the genuine tree gutter. Measured at 280px the R1 root
+     sat 9px inside the card while the guide nests the root clearly right
+     of the card fold with its connectors wholly inside. The card carries
+     16px of left padding, so 0.75rem (12px) of tree gutter lands the root
+     ~28px in — roughly +19px of real nesting — while the right side stays
+     flush on the full-width line. The root connector offset (-0.55rem)
+     then draws at ~19px, inside the card in both themes. */
+  padding-inline-start: 0.75rem;
 }
 .shell-worktree-card-select {
   display: flex;
@@ -3342,14 +3627,32 @@ footer[data-testid="status-bar"] {
   gap: 4px;
 }
 
-.shell-worktree-card[data-active="true"] {
-  border-color: color-mix(in srgb, var(--sidebar-foreground) 42%, transparent);
-  background: color-mix(in srgb, var(--sidebar-foreground) 14%, transparent);
+/* Selected card: the owner's guide tints the open workspace quiet blue, not
+   flat gray. The wash mixes the existing theme blue (--terminal-pane-locate:
+   blue-600 light, blue-400 dark) into transparency — no new token values,
+   no gradient, no glow — so the border reads blue beside unselected cards
+   in both themes while text contrast is untouched. Scoped to the sidebar
+   surface (the card's only home) so the wash beats the fork's gray active
+   recipe in both themes: the fork's `.dark` border rule carries an extra
+   class of specificity and would otherwise keep the white border. */
+.workspace-sidebar .shell-worktree-card[data-active="true"] {
+  border-color: color-mix(in srgb, var(--terminal-pane-locate) 45%, transparent);
+  background: color-mix(in srgb, var(--terminal-pane-locate) 12%, transparent);
   box-shadow: none;
 }
 
-.shell-worktree-card[data-active="true"]:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--sidebar-foreground) 16%, transparent);
+.workspace-sidebar .shell-worktree-card[data-active="true"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--terminal-pane-locate) 16%, transparent);
+}
+
+.dark .workspace-sidebar .shell-worktree-card[data-active="true"] {
+  border-color: color-mix(in srgb, var(--terminal-pane-locate) 55%, transparent);
+  background: color-mix(in srgb, var(--terminal-pane-locate) 14%, transparent);
+  box-shadow: none;
+}
+
+.dark .workspace-sidebar .shell-worktree-card[data-active="true"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--terminal-pane-locate) 18%, transparent);
 }
 
 .shell-chats {

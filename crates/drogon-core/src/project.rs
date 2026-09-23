@@ -20,7 +20,7 @@ pub(crate) const QUICK_SESSION_MARKER_OWNER: &str = "drogon";
 pub(crate) const QUICK_SESSION_DEFAULT_NAME: &str = "Quick Session";
 
 pub(crate) const PROJECTS_SCHEMA_COMPONENT: &str = "projects";
-pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 5;
+pub(crate) const PROJECTS_SCHEMA_VERSION: i64 = 6;
 
 fn create_v1_tables(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
@@ -130,6 +130,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_relax_worktree_path_unique(tx)?;
             tx.execute(
                 "INSERT INTO schema_versions(component, version) VALUES (?1, ?2)",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -152,6 +153,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_relax_worktree_path_unique(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -161,6 +163,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             apply_v3_composer_columns(tx)?;
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_relax_worktree_path_unique(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -182,6 +185,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         Some(3) => {
             backfill_projects_from_pre_existing_workspaces(tx)?;
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_relax_worktree_path_unique(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -195,6 +199,19 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         // this fix landed still picks it up on its next open.
         Some(4) => {
             apply_v5_workspace_options_columns(tx)?;
+            apply_v6_relax_worktree_path_unique(tx)?;
+            tx.execute(
+                "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
+                params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
+            )?;
+        }
+        // v6: drop the legacy `UNIQUE(path)` on `worktrees`. A folder
+        // Project can now own several named Workspaces sharing its folder
+        // path (issue #579), each a distinct `worktrees` row with its own
+        // `workspace_id` (still UNIQUE). Same "run on the way to current"
+        // shape as the arms above; idempotent via the DDL check inside.
+        Some(5) => {
+            apply_v6_relax_worktree_path_unique(tx)?;
             tx.execute(
                 "UPDATE schema_versions SET version = ?2 WHERE component = ?1",
                 params![PROJECTS_SCHEMA_COMPONENT, PROJECTS_SCHEMA_VERSION],
@@ -202,6 +219,63 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         }
         _ => {}
     }
+    Ok(())
+}
+
+/// v6: rebuilds `worktrees` without the legacy `UNIQUE(path)` constraint,
+/// so a folder Project can own several Workspaces that share its folder
+/// path (issue #579) — each its own sidebar section. `workspace_id` stays
+/// UNIQUE (every worktree still registers exactly one Workspace). SQLite
+/// cannot drop a column constraint in place, so the table is rebuilt with
+/// every current column preserved. Idempotent: it inspects the stored DDL
+/// and returns early once the `path` column is no longer declared UNIQUE.
+fn apply_v6_relax_worktree_path_unique(tx: &Transaction) -> rusqlite::Result<()> {
+    let ddl: Option<String> = tx
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='worktrees'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(ddl) = ddl else { return Ok(()) };
+    // The v1 DDL declared `path TEXT NOT NULL UNIQUE`; the rebuilt table
+    // drops the keyword from that column, so its absence is the done marker
+    // (the `workspace_id` UNIQUE the same table also carries is unaffected).
+    if !ddl.contains("path TEXT NOT NULL UNIQUE") {
+        return Ok(());
+    }
+    tx.execute_batch(
+        "CREATE TABLE worktrees_migrated (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL UNIQUE,
+            path TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            head TEXT NOT NULL,
+            base_ref TEXT,
+            created_at TEXT NOT NULL,
+            title TEXT,
+            note TEXT,
+            parent_worktree_id TEXT,
+            workspace_status TEXT,
+            is_pinned INTEGER NOT NULL DEFAULT 0,
+            is_archived INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            manual_order INTEGER,
+            last_activity_at TEXT,
+            linked_pr INTEGER,
+            creator TEXT
+        );
+        INSERT INTO worktrees_migrated (id, project_id, workspace_id, path, branch, head, base_ref, created_at, \
+            title, note, parent_worktree_id, workspace_status, is_pinned, is_archived, sort_order, manual_order, \
+            last_activity_at, linked_pr, creator)
+            SELECT id, project_id, workspace_id, path, branch, head, base_ref, created_at, \
+            title, note, parent_worktree_id, workspace_status, is_pinned, is_archived, sort_order, manual_order, \
+            last_activity_at, linked_pr, creator FROM worktrees;
+        DROP TABLE worktrees;
+        ALTER TABLE worktrees_migrated RENAME TO worktrees;
+        CREATE INDEX IF NOT EXISTS worktrees_project ON worktrees(project_id);",
+    )?;
     Ok(())
 }
 
@@ -688,8 +762,9 @@ pub(crate) fn list(conn: &Connection) -> Result<Value, drogon_protocol::RpcError
 
 /// Removes the Project row (never the files on disk — except a Quick
 /// Session's app-owned scratch folder, which `do_project_remove` deletes
-/// after this row delete, matching the fork's on-explicit-delete scratch
-/// cleanup). Its Worktree rows are removed too (registration bookkeeping
+/// before this row delete, matching the fork's on-explicit-delete scratch
+/// cleanup while keeping a failed cleanup retryable). Its Worktree rows are
+/// removed too (registration bookkeeping
 /// only — their git worktrees and branches are untouched on disk, exactly
 /// like the underlying `worktrees` checkouts becoming unmanaged rather
 /// than deleted), and the worktrees' Workspace rows go with them, exactly
@@ -911,6 +986,45 @@ pub(crate) fn sparse_presets_save(
     }
 }
 
+/// `deleteFiles` reaches only folders `project.create` made under the
+/// daemon's own projects home; everything else is the owner's.
+fn refuse_foreign_project_folder() -> drogon_protocol::RpcError {
+    error::invalid_argument(
+        "Drogon deletes only the folders it created under its own projects home; this project's files stay where they are.",
+    )
+}
+
+/// What a Quick Session removal still has to unlink.
+enum ScratchCleanup {
+    /// Nothing is left on disk, so the removal proceeds to the rows.
+    Done,
+    /// The app-owned scratch directory, ownership just re-verified.
+    Directory(std::path::PathBuf),
+    /// A dangling symlink standing where the scratch was. The link itself
+    /// sits in the app's own quick-sessions root, so leaving it behind would
+    /// strand app-owned litter the way #623 stranded whole folders.
+    DanglingLink(std::path::PathBuf),
+}
+
+/// A scratch path that no longer resolves: gone, or a link to something gone.
+fn vanished_scratch(canonical_root: &std::path::Path, path: &str) -> ScratchCleanup {
+    let link = std::path::Path::new(path);
+    let (Some(parent), Some(name)) = (link.parent(), link.file_name()) else {
+        return ScratchCleanup::Done;
+    };
+    if !std::fs::symlink_metadata(link).is_ok_and(|m| m.is_symlink()) {
+        return ScratchCleanup::Done;
+    }
+    // Resolve the directory holding the link, never the link: a link planted
+    // outside the quick-sessions root is not this daemon's to unlink.
+    match std::fs::canonicalize(parent) {
+        Ok(parent) if parent.starts_with(canonical_root) => {
+            ScratchCleanup::DanglingLink(parent.join(name))
+        }
+        _ => ScratchCleanup::Done,
+    }
+}
+
 impl Engine {
     pub(super) fn do_project_add(
         &self,
@@ -939,7 +1053,9 @@ impl Engine {
             .map_err(error::from_sqlite)?
         };
         if let Some(path) = &scratch {
-            self.validate_quick_session_scratch(id, path)?;
+            // Refuse a scratch this daemon cannot prove it owns before
+            // stopping anything; the decision itself is remade at the unlink.
+            let _ = self.validate_quick_session_scratch(id, path)?;
             self.settle_quick_session_members(path)?;
         }
         // `deleteFiles` asks for the folder to go with the registration. Only
@@ -960,37 +1076,70 @@ impl Engine {
                 .map_err(error::from_sqlite)?
             };
             let path = path.ok_or_else(|| error::not_found("project not found"))?;
-            let home = std::fs::canonicalize(self.data_dir.join(PROJECTS_HOME))
-                .map_err(|e| error::io_error(format!("cannot resolve the projects home: {e}")))?;
-            let candidate = std::fs::canonicalize(&path)
-                .map_err(|e| error::io_error(format!("cannot resolve the project folder: {e}")))?;
-            if candidate == home || !candidate.starts_with(&home) {
-                return Err(error::invalid_argument(
-                    "Drogon deletes only the folders it created under its own projects home; this project's files stay where they are.",
-                ));
-            }
+            // The guard decides this branch, so it has to answer even when a
+            // path will not resolve: a projects home this daemon never
+            // created holds nothing, and a folder that is already gone may
+            // skip the delete only if the registration pointed inside that
+            // home. `add` stores canonical paths, so comparing a vanished one
+            // by prefix is exact enough for a branch that deletes nothing.
+            let home = match std::fs::canonicalize(self.data_dir.join(PROJECTS_HOME)) {
+                Ok(home) => Some(home),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => {
+                    return Err(error::io_error(format!(
+                        "cannot resolve the projects home: {e}"
+                    )));
+                }
+            };
+            let candidate = match std::fs::canonicalize(&path) {
+                Ok(candidate) => {
+                    let home = home.ok_or_else(refuse_foreign_project_folder)?;
+                    if candidate == home || !candidate.starts_with(&home) {
+                        return Err(refuse_foreign_project_folder());
+                    }
+                    Some(candidate)
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let home = home.ok_or_else(refuse_foreign_project_folder)?;
+                    if !std::path::Path::new(&path).starts_with(&home) {
+                        return Err(refuse_foreign_project_folder());
+                    }
+                    None
+                }
+                Err(e) => {
+                    return Err(error::io_error(format!(
+                        "cannot resolve the project folder: {e}"
+                    )));
+                }
+            };
             self.settle_quick_session_members(&path)?;
-            Some(candidate)
+            candidate
         } else {
             None
         };
-        let conn = self.db.lock().unwrap();
-        let removed = remove(&conn, id)?;
-        drop(conn);
+        // Why the files go before the rows (#623): a delete that fails here
+        // must leave the project registered, so the reported error and the
+        // database agree and the user can retry. Committing the row delete
+        // first turns any cleanup failure into an error over work that
+        // already happened, stranding app-owned files nothing points at.
+        //
         // Quick Session cleanup (the fork's on-explicit-delete scratch
         // removal): the directory is app-owned, but only delete it when it
         // is still the scratch this daemon created — inside the data dir's
         // quick-sessions root with a matching ownership marker.
-        if let Some(path) = scratch {
-            self.cleanup_quick_session_scratch(id, &path)?;
+        if let Some(path) = &scratch {
+            self.cleanup_quick_session_scratch(id, path)?;
         }
-        if let Some(folder) = managed {
-            std::fs::remove_dir_all(&folder).map_err(|e| {
+        if let Some(folder) = &managed {
+            std::fs::remove_dir_all(folder).map_err(|e| {
                 error::io_error(format!(
-                    "project unregistered, but its folder was not deleted: {e}"
+                    "the project folder was not deleted, so the project stays registered: {e}"
                 ))
             })?;
         }
+        let conn = self.db.lock().unwrap();
+        let removed = remove(&conn, id)?;
+        drop(conn);
         Ok(removed)
     }
 
@@ -999,9 +1148,15 @@ impl Engine {
         project_id: &str,
         path: &str,
     ) -> Result<(), drogon_protocol::RpcError> {
-        let candidate = self.validate_quick_session_scratch(project_id, path)?;
-        std::fs::remove_dir_all(&candidate)
-            .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}")))
+        match self.validate_quick_session_scratch(project_id, path)? {
+            ScratchCleanup::Done => Ok(()),
+            ScratchCleanup::Directory(scratch) => std::fs::remove_dir_all(&scratch)
+                .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}"))),
+            // Unlinked, never followed: the target is unknown and not this
+            // daemon's to delete.
+            ScratchCleanup::DanglingLink(link) => std::fs::remove_file(&link)
+                .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}"))),
+        }
     }
 
     /// Check before any destructive action and again immediately before unlink.
@@ -1009,11 +1164,20 @@ impl Engine {
         &self,
         project_id: &str,
         path: &str,
-    ) -> Result<std::path::PathBuf, drogon_protocol::RpcError> {
+    ) -> Result<ScratchCleanup, drogon_protocol::RpcError> {
         let root = self.data_dir.join(QUICK_SESSION_ROOT);
         let canonical_root = std::fs::canonicalize(&root).unwrap_or(root);
-        let candidate = std::fs::canonicalize(path)
-            .map_err(|e| error::io_error(format!("quick session scratch cleanup failed: {e}")))?;
+        let candidate = match std::fs::canonicalize(path) {
+            Ok(candidate) => candidate,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(vanished_scratch(&canonical_root, path));
+            }
+            Err(e) => {
+                return Err(error::io_error(format!(
+                    "quick session scratch cleanup failed: {e}"
+                )));
+            }
+        };
         if !candidate.starts_with(&canonical_root) {
             return Err(error::io_error(format!(
                 "quick session scratch \"{}\" is outside the quick-sessions root; not deleting",
@@ -1033,7 +1197,7 @@ impl Engine {
                 "quick session scratch marker ownership mismatch; not deleting",
             ));
         }
-        Ok(candidate)
+        Ok(ScratchCleanup::Directory(candidate))
     }
 
     /// Quick Session (`project.quickSessionCreate`): the fork's composer

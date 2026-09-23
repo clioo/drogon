@@ -376,24 +376,36 @@ fn scheduled_responsibility_trigger_in_bots_array_has_camel_case_automation_id()
     assert_eq!(trigger["automation_id"], json!("auto-1"), "{trigger:?}");
 }
 
-/// P2-2 correction: mirrors the per-reference budget test
-/// `snapshot_budget_counts_linked_payload_for_each_materialized_history_entry` in
-/// ROOT-owned `native_bot_wire.rs`, against `automation_runs` (via `automationRunId`).
-/// One 200KB linked record referenced by 4 rows is under budget once but 4x over; the
-/// stored payload is deliberately invalid `AutomationRun` JSON, so `storage_error` would
-/// expose a preflight under-count that let materialization run first.
+/// Regression mirroring
+/// `snapshot_budget_charges_linked_automation_once_per_distinct_reference_not_per_row` in
+/// ROOT-owned `native_bot_wire.rs`, against `automation_runs` (via `automationRunId`): the
+/// SAME `automation_runs` row referenced by 4 history rows must be materialized (and
+/// budgeted) once, not once per reference -- `history_for_bot` memoizes
+/// `get_automation_run` by id. `linked_payload` alone sits comfortably under budget; naive
+/// per-reference charging (the pre-fix behavior) would multiply it past budget at 4
+/// references.
 #[test]
-fn snapshot_budget_counts_linked_automation_run_payload_for_each_referencing_row() {
+fn snapshot_budget_charges_linked_automation_run_once_per_distinct_reference_not_per_row() {
     let fx = Fixture::new();
     let host = fx.workspace["hostId"].as_str().unwrap();
     let folder = fx.workspace["path"].as_str().unwrap();
     fx.seed("b1", host, folder);
 
     let conn = fx.conn();
-    let linked_payload = json!("x".repeat(200_000)).to_string();
+    // A real, materializable AutomationRun (not the deliberately-malformed payload the old
+    // per-reference test used): the fix lets this reach real materialization, so the
+    // fixture must survive it end to end, not just dodge the early budget check.
+    let padding = "x".repeat(200_000);
+    let automation_run = json!({
+        "id":"linked-run", "automationId":"some-auto", "title":padding,
+        "scheduledFor":1.0, "status":"pending", "trigger":"manual",
+        "sessionKind":"terminal", "createdAt":1.0,
+    })
+    .to_string();
+    assert!(automation_run.len() < drogon_protocol::MAX_FRAME_BYTES / 2);
     conn.execute(
         "INSERT INTO automation_runs (id, automation_id, payload_json) VALUES ('linked-run', 'some-auto', ?1)",
-        rusqlite::params![linked_payload],
+        rusqlite::params![automation_run],
     )
     .unwrap();
     for index in 0..4 {
@@ -411,14 +423,74 @@ fn snapshot_budget_counts_linked_automation_run_payload_for_each_referencing_row
         )
         .unwrap();
     }
-    assert!(linked_payload.len() < drogon_protocol::MAX_FRAME_BYTES / 2);
-    assert!(linked_payload.len() * 4 > drogon_protocol::MAX_FRAME_BYTES / 2);
+    // Naive per-reference charging would have summed this 4x -- comfortably over budget.
+    assert!(automation_run.len() * 4 > drogon_protocol::MAX_FRAME_BYTES / 2);
 
     let result = call(&fx.engine, "bot.snapshot", fx.scope());
+    assert!(result.ok, "{result:?}");
+    let history = result.result.unwrap()["history"].as_array().unwrap().len();
     assert_eq!(
-        result.error.as_ref().map(|e| e.code.as_str()),
-        Some("snapshot_too_large"),
-        "Budget each reference before loading malformed linked records: {result:?}",
+        history, 4,
+        "every referencing history row must still materialize"
+    );
+}
+
+/// End-to-end regression for the production incident this fix addresses: one Bot whose
+/// single small scheduled automation has run hundreds of times (a normal recurring
+/// automation, not a pathological fixture) must still load on the app-global Bots page
+/// (`workspaceId: ""`). Before the fix, the preflight charged the automation's ~1.5KB
+/// payload once per referencing history row, so 400 runs alone (600KB) blew the 512KB
+/// budget even though the real response is a few KB.
+#[test]
+fn many_runs_of_one_small_recurring_automation_still_load_on_the_global_scope() {
+    let fx = Fixture::new();
+    let host = fx.workspace["hostId"].as_str().unwrap();
+    let folder = fx.workspace["path"].as_str().unwrap();
+    fx.seed("b1", host, folder);
+
+    let conn = fx.conn();
+    let automation = sample_automation("auto-1", "b1");
+    conn.execute(
+        "INSERT INTO automations (id, bot_id, payload_json) VALUES (?1, ?2, ?3)",
+        rusqlite::params![
+            automation.id,
+            automation.bot_id,
+            serde_json::to_string(&automation).unwrap()
+        ],
+    )
+    .unwrap();
+
+    const RUNS: usize = 400;
+    for index in 0..RUNS {
+        let id = format!("run-{index}");
+        let run = json!({
+            "id":id, "botId":"b1", "responsibilityId":"duty",
+            "automationId":"auto-1", "automationRunId":null,
+            "startedAt": index as f64, "endedAt":null, "recipe":null, "hostObservation":null,
+        });
+        conn.execute(
+            "INSERT INTO bot_responsibility_runs
+             (id, bot_id, automation_run_id, started_at, payload_json)
+             VALUES (?1, 'b1', NULL, ?2, ?3)",
+            rusqlite::params![id, index as f64, run.to_string()],
+        )
+        .unwrap();
+    }
+
+    // Global scope: the exact request the desktop Bots page issues.
+    let global_scope = json!({"hostId":host, "workspaceId":"", "locale":"en-US"});
+    let result = call(&fx.engine, "bot.snapshot", global_scope);
+    assert!(result.ok, "{result:?}");
+    let data = result.result.unwrap();
+    assert_eq!(data["bots"].as_array().unwrap().len(), 1);
+    assert_eq!(data["history"].as_array().unwrap().len(), RUNS);
+
+    // Folder-scoped read must also succeed for the same data.
+    let result = call(&fx.engine, "bot.snapshot", fx.scope());
+    assert!(result.ok, "{result:?}");
+    assert_eq!(
+        result.result.unwrap()["history"].as_array().unwrap().len(),
+        RUNS
     );
 }
 

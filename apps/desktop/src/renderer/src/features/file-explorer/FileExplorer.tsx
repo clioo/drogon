@@ -45,6 +45,7 @@ import {
 import { applyNavigation, type SelectionMode } from "./keyboard-navigation";
 import {
   deleteConfirmationFor,
+  duplicateNameFor,
   validateInlineName,
   type ExplorerCapabilities,
   type RowMenuItemId,
@@ -68,6 +69,12 @@ export interface FileExplorerDataSource {
     kind: "file" | "directory",
   ): Promise<Result<null>>;
   rename?(from: string, to: string): Promise<Result<null>>;
+  /**
+   * Server-side duplicate (issue #334 `files.duplicate`): byte-preserving
+   * daemon copy, one entry per call. OPTIONAL like the other mutations: an
+   * absent method fails closed with an explicit error, never a crash.
+   */
+  duplicate?(from: string, to: string): Promise<Result<null>>;
   remove?(paths: string[]): Promise<Result<null>>;
   /**
    * Git-ignored classification for visible rows (R16-AM, fork
@@ -818,6 +825,50 @@ export function FileExplorer({
     [],
   );
 
+  // Duplicate (issue #334): one entry per call, like the daemon. The
+  // destination name is a best-effort `<stem> copy<ext>` over the known
+  // siblings; the daemon still refuses overwrites, and that refusal (or a
+  // symlink source, which the daemon never copies) surfaces as an inline
+  // error. On success the parent reload reconciles and the copy selects
+  // (files open, mirroring the create flow).
+  const duplicateNode = useCallback(
+    (node: ExplorerNode) => {
+      if (!source) return;
+      if (!source.duplicate) {
+        setActionError("Duplicating needs a newer daemon with files.duplicate support.");
+        return;
+      }
+      const parent = parentDirOf(node.path);
+      const name = duplicateNameFor(node.name, siblingNames(parent));
+      const to = parent === "" ? name : `${parent}/${name}`;
+      const gen = generation.current;
+      void source.duplicate(node.path, to).then(
+        (result) => {
+          if (generation.current !== gen) return;
+          if (!result.ok) {
+            setActionError(result.error.message);
+            return;
+          }
+          loadDir(parent, gen, showDotfilesRef.current);
+          selectReplace(to);
+          if (!node.isDirectory) {
+            onSelectRef.current?.({
+              name,
+              path: to,
+              isDirectory: false,
+              depth: node.depth,
+            });
+          }
+        },
+        (failure: unknown) => {
+          if (generation.current !== gen) return;
+          setActionError(failure instanceof Error ? failure.message : "The duplicate could not be completed.");
+        },
+      );
+    },
+    [source, siblingNames, loadDir, selectReplace],
+  );
+
   const confirmDeleteNow = useCallback(() => {
     const nodes = confirmDelete;
     if (!nodes || !source?.remove) return;
@@ -1074,6 +1125,9 @@ export function FileExplorer({
           });
           break;
         }
+        case "duplicate":
+          duplicateNode(primary);
+          break;
         case "rename":
           startRename(primary);
           break;
@@ -1082,7 +1136,7 @@ export function FileExplorer({
           break;
       }
     },
-    [nodesForPaths, rowsByPath, startNew, copyPaths, onOpenTerminal, collapseSubtree, startRename, requestDelete],
+    [nodesForPaths, rowsByPath, startNew, copyPaths, onOpenTerminal, collapseSubtree, duplicateNode, startRename, requestDelete],
   );
 
   const findFocusedIndex = useCallback((): number | null => {

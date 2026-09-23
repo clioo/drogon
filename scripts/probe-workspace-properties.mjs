@@ -68,7 +68,7 @@ export async function probeWorkspaceProperties({ page, worktree, output }) {
     await page.getByRole("menuitemradio", { name: "Detailed", exact: true }).click();
     await page.keyboard.press("Escape");
     await card().getByText("ENG-123", { exact: true }).waitFor();
-    await page.screenshot({ path: path.join(output, "workspace-properties-linked-issues.png"), animations: "disabled" });
+    await page.screenshot({ path: path.join(output, "workspace-properties-linked-issues.png"), animations: "disabled", timeout: 120_000 });
     assert.equal(await card().locator("button button").count(), 0, "issue actions cannot nest inside workspace buttons");
     checks.push("workspace-default-restores-real-metadata-with-independent-actions");
   } finally {

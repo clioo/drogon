@@ -23,13 +23,16 @@ import {
   recoveryActionFor,
   recoveryTabLabel,
 } from "../../session-recovery";
-import { sessionDotState } from "./agent-state";
+import { sessionAgentState } from "./agent-state";
 import { AgentStateIcon } from "./AgentStateIcon";
 import type { EditorTabState } from "./editor-tab";
 import { ShellIconButton } from "./ShellIconButton";
 import { SortableTab, TAB_STRIP_DRAG_ACTIVATION_PX } from "./SortableTab";
 import { HarnessMenuIcon } from "./TabCreateMenuIcons";
-import { formatRowHarnessLabel } from "./worktree-agent-rows";
+import {
+  formatRowHarnessLabel,
+  resolveRowHarnessId,
+} from "./worktree-agent-rows";
 import {
   hydrateTerminalSplits,
   splitForTab,
@@ -55,6 +58,7 @@ import {
   tabStripFadeClass,
   type TabStripOverflowState,
 } from "./tab-strip/tab-strip-overflow";
+import { buildTabStripLineage } from "./tab-strip/tab-lineage";
 
 type StripEntry =
   | { kind: "session"; id: string }
@@ -90,6 +94,8 @@ export function TabBar({
   stripOrder,
   pinnedIds,
   customTitles,
+  collapsedLineageIds = [],
+  onToggleLineage,
   onOrderChange,
   onTogglePin,
   onCloseOthers,
@@ -104,6 +110,7 @@ export function TabBar({
   onSelectSession,
   onSelectBrowserTab,
   onSelectEditorTab,
+  onRenameEditorFile,
   mentuOpen,
   mentuActive,
   onSelectMentu,
@@ -158,6 +165,20 @@ export function TabBar({
   onSelectSession: (id: string) => void;
   onSelectBrowserTab: (tabId: string) => void;
   onSelectEditorTab: (tabId: string) => void;
+  /**
+   * Editor file rename (#335): commits an inline rename as (tabId, new base
+   * name); App runs files.rename and retargets the tab. Absent hides every
+   * editor Rename row.
+   */
+  onRenameEditorFile?: (tabId: string, newName: string) => void;
+  /**
+   * Issue #606: leader session ids whose subagent group is folded shut.
+   * Their descendants keep their sessions but lose their strip tabs, so
+   * the prompt cannot land on one while it is hidden.
+   */
+  collapsedLineageIds?: readonly string[];
+  /** Fold/unfold one leader's subagent group; absent hides the chevron. */
+  onToggleLineage?: (sessionId: string) => void;
   /** True while this workspace's Mentu tab is open in the strip. It stands
    *  in the strip like any other tab; App owns the membership. */
   mentuOpen: boolean;
@@ -187,7 +208,7 @@ export function TabBar({
   const sessionById = new Map(sessions.map((item) => [item.id, item]));
   const browserById = new Map(browserTabs.map((tab) => [tab.tabId, tab]));
   const editorById = new Map(editorTabs.map((tab) => [tab.tabId, tab]));
-  const ordered = partitionPinnedOrder(
+  const reconciled = partitionPinnedOrder(
     reconcileTabOrder(
       stripOrder,
       sessions.map((item) => item.id),
@@ -197,26 +218,45 @@ export function TabBar({
     ),
     pinnedIds,
   );
-  const entries: StripEntry[] = ordered.flatMap((id): StripEntry[] => {
-    if (sessionById.has(id)) return [{ kind: "session", id }];
-    if (browserById.has(id)) return [{ kind: "browser", id }];
-    if (editorById.has(id)) return [{ kind: "editor", id }];
-    if (mentuOpen && id === MENTU_TAB_ID) return [{ kind: "mentu", id }];
-    return [];
+  // Issue #606: a leader keeps its subagents beside it (the worktree
+  // card's parentSessionId tree, reused) and a folded group drops its
+  // descendants' tabs. `ordered` stays the strip's own working order, so
+  // drag, pin and keyboard reorder all operate on the grouped positions
+  // the user can actually see.
+  const lineage = buildTabStripLineage({
+    order: reconciled,
+    sessions,
+    collapsedLeaderIds: onToggleLineage ? collapsedLineageIds : [],
+    // Pinning is re-partitioned at group granularity: a pinned leader takes
+    // its subagents to the front with it, so an unpinned child never lands
+    // inside the pinned run.
+    pinnedIds,
   });
+  const ordered = lineage.order;
+  const collapsedLeaders = new Set(
+    onToggleLineage ? collapsedLineageIds : [],
+  );
+  const entries: StripEntry[] = lineage.visibleOrder.flatMap(
+    (id): StripEntry[] => {
+      if (sessionById.has(id)) return [{ kind: "session", id }];
+      if (browserById.has(id)) return [{ kind: "browser", id }];
+      if (editorById.has(id)) return [{ kind: "editor", id }];
+      if (mentuOpen && id === MENTU_TAB_ID) return [{ kind: "mentu", id }];
+      return [];
+    },
+  );
   const pinned = new Set(pinnedIds);
   // Why: fork tabs read "Terminal N" until renamed (tabs-create-actions
   // `Terminal ${n}`); the shell process name never becomes the tab label.
-  // Numbering follows strip position so labels stay dense after closes.
+  // Numbering follows strip position so labels stay dense after closes, and
+  // counts every session in the strip — folded ones included — so a
+  // collapsed group never renumbers the tabs that stayed on screen (#606).
   const defaultTitleBySessionId = new Map<string, string>();
   let sessionPosition = 0;
-  for (const entry of entries) {
-    if (entry.kind === "session") {
+  for (const id of ordered) {
+    if (sessionById.has(id)) {
       sessionPosition += 1;
-      defaultTitleBySessionId.set(
-        entry.id,
-        defaultTerminalTabTitle(sessionPosition),
-      );
+      defaultTitleBySessionId.set(id, defaultTerminalTabTitle(sessionPosition));
     }
   }
   const [dropIndicatorById, setDropIndicatorById] = useState<
@@ -403,7 +443,7 @@ export function TabBar({
         onDragCancel={() => setDropIndicatorById(new Map())}
       >
         {/* Why: no-drag lets tab interactions work inside the titlebar's drag region (outer container stays window-draggable). */}
-        <SortableContext items={ordered}>
+        <SortableContext items={lineage.visibleOrder}>
           <div className="group/tab-strip relative flex min-h-0 min-w-0 max-w-full flex-[0_1_auto]">
             <div
               ref={tabStripRef}
@@ -474,6 +514,13 @@ export function TabBar({
                 if (entry.kind === "editor") {
                   const tab = editorById.get(entry.id);
                   if (!tab) return null;
+                  // Rename needs a clean on-disk file: diff tabs read git,
+                  // missing tabs have no path to rename, and dirty tabs
+                  // hold drafts keyed by path that a rename would orphan.
+                  const canRenameFile =
+                    tab.diff === undefined &&
+                    tab.missing === undefined &&
+                    !tab.dirty;
                   return (
                     <SortableEditorTab
                       key={tab.tabId}
@@ -490,6 +537,7 @@ export function TabBar({
                       onCloseToRight={() => onCloseToRight(tab.tabId)}
                       onCloseToLeft={() => onCloseToLeft(tab.tabId)}
                       onTogglePin={() => onTogglePin(tab.tabId)}
+                      onRenameFile={canRenameFile ? (onRenameEditorFile ?? null) : null}
                       onCopyPath={() => onCopyText(tab.path)}
                       onCopyRelativePath={() =>
                         onCopyText(
@@ -535,6 +583,16 @@ export function TabBar({
                     // exited session is one the user did not request.
                     exitExpected: false,
                   }).kind === "retry-connection";
+                // Issue #606: the whole subtree counts, so the chevron's
+                // "+3" is how many tabs folding this leader takes away.
+                const groupSize = (
+                  lineage.descendantsByLeaderId.get(item.id) ?? []
+                ).length;
+                const groupExpanded = !collapsedLeaders.has(item.id);
+                // The resolved harness (launch or observed, issue #622), so
+                // an agent started inside a shell tab gets its badge too.
+                // Tab titles and numbering are unchanged.
+                const badgeHarnessId = resolveRowHarnessId(item);
                 return (
                   <SortableTab
                     key={item.id}
@@ -549,15 +607,15 @@ export function TabBar({
                             agent logo beside the state glyph so parallel
                             tabs stay scannable; the state indicator here is
                             unchanged, this only adds the harness identity. */}
-                        <AgentStateIcon state={sessionDotState(item)} size={13} />
-                        {item.harnessId && (
+                        <AgentStateIcon state={sessionAgentState(item)} size={13} />
+                        {badgeHarnessId && (
                           <span
                             className="inline-flex shrink-0"
-                            title={formatRowHarnessLabel(item.harnessId)}
+                            title={formatRowHarnessLabel(badgeHarnessId)}
                           >
                             <HarnessMenuIcon
-                              harnessId={item.harnessId}
-                              displayName={formatRowHarnessLabel(item.harnessId)}
+                              harnessId={badgeHarnessId}
+                              displayName={formatRowHarnessLabel(badgeHarnessId)}
                               size={12}
                             />
                           </span>
@@ -577,6 +635,16 @@ export function TabBar({
                     }
                     isActive={isActive}
                     isPinned={pinned.has(item.id)}
+                    lineage={
+                      onToggleLineage && groupSize > 0
+                        ? {
+                            childCount: groupSize,
+                            expanded: groupExpanded,
+                            onToggle: () => onToggleLineage(item.id),
+                          }
+                        : null
+                    }
+                    lineageDepth={lineage.depthById.get(item.id) ?? 0}
                     hasTabsToRight={hasTabsToRight}
                     hasTabsToLeft={hasTabsToLeft}
                     tabCount={entries.length}

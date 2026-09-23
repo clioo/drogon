@@ -60,6 +60,13 @@ import {
   togglePinnedOrder,
   type TabStripState,
 } from "./features/shell/tab-order";
+import {
+  buildTabStripLineage,
+  foldAwareBulkCloseTargets,
+  resolveTabPromptTarget,
+  toggleCollapsedLeader,
+  type TabStripLineage,
+} from "./features/shell/tab-strip/tab-lineage";
 import { NewWorkspaceComposerModal } from "./features/new-workspace/NewWorkspaceComposerModal";
 import {
   composerAgentLaunchInput,
@@ -75,10 +82,19 @@ import {
 // of hardcoding one.
 import { resolveHarnessPermissionMode } from "../../shared/agent-defaults";
 import { TabBar } from "./features/shell/TabBar";
+import { CloseBusyTerminalDialog } from "./features/shell/CloseBusyTerminalDialog";
+import {
+  isAgentTerminalSession,
+  isBusyTerminalSession,
+  readSkipCloseBusyTerminalConfirm,
+  writeSkipCloseBusyTerminalConfirm,
+} from "./features/shell/close-busy-terminal";
 import { tabCreateMenuChord } from "./features/shell/TabCreateMenuChords";
 import {
   editorDiffTabId,
   editorTabId,
+  renameTargetPath,
+  retargetEditorTabsAfterRename,
   type EditorTabDiffArea,
   type EditorTabState,
 } from "./features/shell/editor-tab";
@@ -260,6 +276,20 @@ import {
 } from "./features/shell/sidebar-bot-sessions";
 import { sidebarSessionView } from "./features/shell/sidebar-sessions";
 import {
+  createSidebarSessionCollector,
+  pollSidebarSessions,
+  type SidebarSessionSourceView,
+} from "./features/shell/sidebar-session-source";
+import {
+  createObservationLedger,
+  isStalePollSettlement,
+  observationKeyOf,
+  readObservationSnapshot,
+  sameObservation,
+  type ObservationLedger,
+  type ObservationSnapshot,
+} from "./features/shell/sidebar-session-observation";
+import {
   planBrowserRehydrate,
   windowBrowserBridge,
 } from "./features/browser/browser-bridge";
@@ -416,26 +446,761 @@ export function appendOrReplaceSession(
  * Returns the given array unchanged when there is nothing to adopt, so a
  * poll that brings no news cannot re-render the shell.
  */
+/**
+ * PERF-03: field-level session equality for poll identity stabilization.
+ * Every rendered field of the session contract is compared (including
+ * `args` element-wise), so keeping the previous array can never hide a
+ * real change — it only stops a byte-identical poll reply from minting a
+ * new array identity and re-rendering the whole shell. `gridCursor` is
+ * intentionally excluded: it is read-path-only (TerminalPane), never
+ * rendered by the shell list.
+ */
+export function sameSession(left: Session, right: Session): boolean {
+  if (left === right) return true;
+  return (
+    left.id === right.id &&
+    left.workspaceId === right.workspaceId &&
+    left.hostId === right.hostId &&
+    left.incarnation === right.incarnation &&
+    left.command === right.command &&
+    (left.args === right.args ||
+      (left.args.length === right.args.length &&
+        left.args.every((arg, index) => arg === right.args[index]))) &&
+    left.cols === right.cols &&
+    left.rows === right.rows &&
+    left.verdict === right.verdict &&
+    left.exitCode === right.exitCode &&
+    left.createdAt === right.createdAt &&
+    left.agentState === right.agentState &&
+    left.agentStateAt === right.agentStateAt &&
+    (left.agentStateAuthority ?? null) ===
+      (right.agentStateAuthority ?? null) &&
+    left.agentPromptPreview === right.agentPromptPreview &&
+    left.cacheIdleAt === right.cacheIdleAt &&
+    left.harnessId === right.harnessId &&
+    left.parentSessionId === right.parentSessionId &&
+    left.causedByEventId === right.causedByEventId &&
+    left.agentSessionId === right.agentSessionId &&
+    left.agentSessionTranscriptPath === right.agentSessionTranscriptPath &&
+    left.agentResume === right.agentResume &&
+    // A metadata-only delta (a plain shell observed foregrounding a
+    // harness, a busy-close foreground flag flipping) changes what the
+    // sidebar renders, so it must replace the list. Absent reads as the
+    // idle claim (null observation, no foreground child), matching an
+    // older daemon's rows; false and true never agree.
+    (left.observedHarnessId ?? null) === (right.observedHarnessId ?? null) &&
+    (left.observedHarnessAt ?? null) === (right.observedHarnessAt ?? null) &&
+    (left.hasForegroundChild ?? false) === (right.hasForegroundChild ?? false)
+  );
+}
+
+/**
+ * PERF-03: list-level identity for the 3s host-wide poll. Order matters
+ * (tab/strip order follows list order), so this is positional: same length
+ * and field-equal in every slot keeps the previous array.
+ */
+export function sameSessions(
+  previous: readonly Session[],
+  next: readonly Session[],
+): boolean {
+  if (previous === next) return true;
+  if (previous.length !== next.length) return false;
+  return previous.every((item, index) => sameSession(item, next[index]));
+}
+
+/**
+ * PERF-04: stable primitive for effect keys. `status.capabilities` (and the
+ * status object itself) gets a fresh identity on every `status()` reply, so
+ * effects must key on the capability SET, never the array.
+ */
+export function capabilityDigest(capabilities: readonly string[]): string {
+  return [...capabilities].sort().join("|");
+}
+
+/**
+ * PERF-03: fast poll ticks (3s session list, 4s Bots snapshot) run only
+ * while the page is visible. A hidden page (minimized, occluded) still gets
+ * a slow 30s fallback tick so it can never go stale; mount and
+ * explicitly-triggered polls always run ungated. DOM focus is deliberately
+ * NOT consulted: background validation windows keep DOM focus via focus
+ * emulation, but a harness without emulation must still observe live data.
+ */
+export function isPollPageVisible(): boolean {
+  if (typeof document === "undefined") return true;
+  return document.visibilityState !== "hidden";
+}
+
+/**
+ * PERF-03b: fast-tick gate for the host-wide session poll. A visible page
+ * polls at the fast cadence unconditionally — the tab strip adopts
+ * out-of-band sessions (CLI-created, Bot-created, another window) from
+ * every host-wide reply, so gating on sidebar/Bots-route visibility cost
+ * up to 30s of tab staleness with the sidebar collapsed. Sidebar and route
+ * are deliberately NOT inputs here, so that regression is structurally
+ * impossible. A hidden page (minimized, occluded) skips fast ticks and
+ * gets the 30s slow fallback instead.
+ */
+export function shouldSessionPollTick(
+  pageVisible: boolean,
+  lastPollMs: number,
+  nowMs: number,
+): boolean {
+  if (pageVisible) return true;
+  return isSlowPollDue(lastPollMs, nowMs);
+}
+
+/**
+ * PERF-03: slow fallback between fast ticks while gated (hidden page or,
+ * for the Bots snapshot, no visible consumer). Returns true when a poll is
+ * due: always on the first tick after (re)mount, then at most every 30s
+ * until the fast gate reopens.
+ */
+export function isSlowPollDue(lastPollMs: number, nowMs: number): boolean {
+  if (lastPollMs <= 0) return true;
+  return nowMs - lastPollMs >= 30_000;
+}
+
+/**
+ * PERF-03: identity for the 4s Bots snapshot poll. The snapshot shape is
+ * large and daemon-owned, so equality is by canonical serialization rather
+ * than field enumeration: both sides come from the same producer (the
+ * loader + serde field order), so identical content serializes identically
+ * and any content change replaces the result. A false "different" only
+ * costs one render; a false "same" is impossible for distinct content.
+ */
+export function sameBotsLoadResult(
+  previous: BotsLoadResult | null,
+  next: BotsLoadResult,
+): boolean {
+  if (previous === next) return true;
+  if (previous === null) return false;
+  if (previous.status !== next.status) return false;
+  try {
+    return JSON.stringify(previous) === JSON.stringify(next);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * R3 provenance for `adoptOutOfBandSessions`: which rows the poll that
+ * produced `hostWide` actually read, and that poll's request order. Absent
+ * entirely, every exact-match row counts as fresh (the R2 contract the
+ * older tests pin). Present, only rows the poll really delivered may move
+ * the selected copy — retained collector rows still render unselected
+ * last-known cards but are NOT new facts — and only past the ledger's
+ * per-session proof, so an older poll settling after a newer one cannot
+ * roll the selection back. A null clear and a foreground flip carry no
+ * usable timestamp of their own; the poll order IS their ordering proof.
+ */
+export type ObservationProvenance = {
+  freshKeys?: ReadonlySet<string>;
+  freshWorkspaceIds?: ReadonlySet<string>;
+  seq?: number;
+  ledger?: ObservationLedger;
+  workspaceProof?: ReadonlyMap<string, number>;
+};
+
+export type AdoptOutOfBandPlan = {
+  /** The next selected list (`current` itself when there is no news). */
+  sessions: Session[];
+  /**
+   * Exact observation keys this plan applied. The caller commits them with
+   * `commitObservationProof` exactly once, when it commits `sessions` — the
+   * plan itself never touches the ledger, so replaying it with identical
+   * inputs (a React setState updater may run twice) always agrees.
+   */
+  appliedKeys: string[];
+  appliedObservations: { key: string; snapshot: ObservationSnapshot }[];
+};
+
+/**
+ * Records that `seq` wrote each applied value. Forward-only and idempotent:
+ * a stale or repeated commit never moves proof back, so committing the same
+ * plan twice (StrictMode effect replay) is a no-op the second time.
+ */
+export function commitObservationProof(
+  ledger: ObservationLedger | undefined,
+  applied: readonly string[] | readonly { key: string; snapshot: ObservationSnapshot }[],
+  seq: number | undefined,
+): void {
+  if (ledger === undefined || seq === undefined) return;
+  for (const item of applied) {
+    if (typeof item === "string") ledger.markApplied(item, seq);
+    else ledger.markApplied(item.key, seq, item.snapshot);
+  }
+}
+
+export function pruneObservationProofForSessions(
+  ledger: ObservationLedger,
+  sessions: readonly Session[],
+): void {
+  ledger.prune(new Set(sessions.map((item) => observationKeyOf(item))));
+}
+
+/**
+ * Pure planner for `adoptOutOfBandSessions`: checks the ledger but never
+ * writes it. Collects the applied keys for one `commitObservationProof`
+ * call by the committer.
+ */
+export function planAdoptOutOfBandSessions(
+  current: Session[],
+  hostWide: readonly Session[],
+  workspaceId: string,
+  isHidden: (session: Session) => boolean,
+  provenance?: ObservationProvenance,
+): AdoptOutOfBandPlan {
+  const known = new Set(current.map((item) => `${item.hostId}:${item.id}`));
+  const freshKeys = provenance?.freshKeys;
+  const seq = provenance?.seq;
+  const ledger = provenance?.ledger;
+  const appliedKeys: string[] = [];
+  const appliedObservations: { key: string; snapshot: ObservationSnapshot }[] = [];
+  // R3: a retained row is last-known rendering, never news — an id the
+  // selected list never saw cannot join it from a row no successful read
+  // delivered.
+  const adopted = hostWide.filter(
+    (item) =>
+      item.workspaceId === workspaceId &&
+      !known.has(`${item.hostId}:${item.id}`) &&
+      !isHidden(item) &&
+      (freshKeys === undefined || freshKeys.has(observationKeyOf(item))),
+  );
+  // R2 selected-copy reconciliation: an already-listed row keeps the
+  // selected list's push state, names and sizing — but its observed
+  // harness/foreground metadata must track the host-wide poll, which
+  // re-reads the daemon every tick while the selected copy otherwise
+  // only refreshes on selection/tab events. On an exact
+  // host+id+incarnation match the fresh row IS the same session, so its
+  // three observation fields win — including an explicit clear (fresh
+  // null), which stale selected data must never revive. A
+  // same-id/different-incarnation or different-host row is left alone,
+  // and ONLY these three fields are ever touched: the poll snapshot is
+  // continuous but can lag a selection refetch, so it must never
+  // overwrite push state, sizing, or anything else.
+  // R3: "the fresh row" must be an ACTUAL successful observation. Under
+  // provenance a retained row for the target (kept across failures while
+  // another workspace progressed) or an older poll settling late must not
+  // erase a newer Pi, revive a cleared observation, or downgrade a fresh
+  // foreground true.
+  const freshByKey = new Map<string, Session>();
+  for (const item of hostWide)
+    freshByKey.set(`${item.hostId}:${item.id}`, item);
+  let result = current;
+  if (adopted.length > 0) {
+    result = [
+      ...current,
+      ...[...adopted].sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt),
+      ),
+    ];
+    // An adopted row arrives with the poll's own fresh observation: its
+    // proof is committed once, by the committer, so a later stale poll
+    // cannot move what it just wrote.
+    if (seq !== undefined && ledger !== undefined)
+      for (const item of adopted) {
+        const key = observationKeyOf(item);
+        appliedKeys.push(key);
+        appliedObservations.push({ key, snapshot: readObservationSnapshot(item) });
+      }
+  }
+  for (let index = 0; index < current.length; index += 1) {
+    const item = result[index]!;
+    const fresh = freshByKey.get(`${item.hostId}:${item.id}`);
+    if (!fresh || fresh.incarnation !== item.incarnation) continue;
+    const key = observationKeyOf(fresh);
+    if (
+      freshKeys !== undefined &&
+      (seq === undefined || ledger === undefined
+        ? !freshKeys.has(key)
+        : !freshKeys.has(key) || !ledger.shouldApply(key, seq))
+    )
+      continue;
+    // R3: every sufficiently ordered successful read is new proof, even a
+    // byte-identical one — null clears and foreground flips carry no
+    // timestamp of their own, so the request order IS the evidence. Commit
+    // before the value comparison so an equal read still advances the ledger;
+    // the array keeps its identity below when nothing moved.
+    const snapshot = readObservationSnapshot(fresh);
+    if (seq !== undefined && ledger !== undefined) {
+      appliedKeys.push(key);
+      appliedObservations.push({ key, snapshot });
+    }
+    if (sameObservation(readObservationSnapshot(item), snapshot)) continue;
+    if (result === current) result = current.slice();
+    result[index] = {
+      ...item,
+      observedHarnessId: snapshot.observedHarnessId,
+      observedHarnessAt: snapshot.observedHarnessAt,
+      hasForegroundChild: snapshot.hasForegroundChild,
+    };
+  }
+  return { sessions: result, appliedKeys, appliedObservations };
+}
+
+/**
+ * Pure single-pass adopt: the plan's sessions. The ledger is never written
+ * here — callers that pass a ledger commit via `planAdoptOutOfBandSessions`
+ * plus one `commitObservationProof` call, so updater replay stays pure.
+ */
 export function adoptOutOfBandSessions(
   current: Session[],
   hostWide: readonly Session[],
   workspaceId: string,
   isHidden: (session: Session) => boolean,
+  provenance?: ObservationProvenance,
 ): Session[] {
-  const known = new Set(current.map((item) => `${item.hostId}:${item.id}`));
-  const adopted = hostWide.filter(
-    (item) =>
-      item.workspaceId === workspaceId &&
-      !known.has(`${item.hostId}:${item.id}`) &&
-      !isHidden(item),
+  return planAdoptOutOfBandSessions(
+    current,
+    hostWide,
+    workspaceId,
+    isHidden,
+    provenance,
+  ).sessions;
+}
+
+/**
+ * A queued adopt: immutable successful-read facts admitted OUTSIDE React at
+ * queue time (proof is committed once, there), for pure projection onto the
+ * ACTUAL current sessions inside the functional updater. Admission never
+ * consults a React mirror and never compares displayed values: every fresh,
+ * sufficiently ordered fact is admitted — including a byte-identical
+ * re-read, whose request order is the only evidence for null clears and
+ * foreground flips — and the admitted batch is frozen. The updater reads
+ * only the frozen facts plus the actual current rows (no ledger reads, no
+ * external writes), so replay with identical inputs — StrictMode
+ * double-invoke, or a replay after a later proof commit — always agrees.
+ * Ordering across queues comes from React's updater order plus the ledger's
+ * per-key proof captured here, never from a read inside the updater.
+ */
+export type QueuedAdoptProjection = {
+  /** Full rows to append when their host+id is still unknown (plan order). */
+  adopted: Session[];
+  /** Per-identity observation overwrites, keyed by exact host+id+incarnation. */
+  observations: { key: string; snapshot: ObservationSnapshot }[];
+  /** Exact observation keys the caller commits with `commitObservationProof`. */
+  appliedKeys: string[];
+  /** Exact admitted observation values, stored with their ordering proof. */
+  appliedObservations: { key: string; snapshot: ObservationSnapshot }[];
+};
+
+export function planQueuedAdopt(
+  hostWide: readonly Session[],
+  workspaceId: string,
+  isHidden: (session: Session) => boolean,
+  provenance: ObservationProvenance,
+): QueuedAdoptProjection {
+  const freshKeys = provenance.freshKeys;
+  const freshWorkspaceIds = provenance.freshWorkspaceIds;
+  const seq = provenance.seq;
+  const ledger = provenance.ledger;
+  const workspaceProof = provenance.workspaceProof;
+  const workspaceOrdered = (workspaceId: string): boolean => {
+    if (freshWorkspaceIds !== undefined && !freshWorkspaceIds.has(workspaceId))
+      return false;
+    if (seq !== undefined && workspaceProof !== undefined)
+      return !isStaleWorkspaceRead(workspaceProof, workspaceId, seq);
+    return true;
+  };
+  const ordered = (item: Session): boolean => {
+    const key = observationKeyOf(item);
+    if (freshKeys !== undefined && !freshKeys.has(key)) return false;
+    if (!workspaceOrdered(item.workspaceId)) return false;
+    if (seq !== undefined && ledger !== undefined)
+      return ledger.shouldApply(key, seq);
+    return true;
+  };
+  // Adopted rows: target workspace, not dismissed, actually read, ordered.
+  // Observation facts: every ordered target read, dismissed or not (the
+  // existing adopt refreshes listed rows even when the fresh row is
+  // dismissal-filtered for adoption). Both lists are frozen here; the
+  // projection decides append vs overwrite against the actual rows.
+  const admitted = hostWide.filter(
+    (item) => item.workspaceId === workspaceId && ordered(item),
   );
-  if (adopted.length === 0) return current;
-  return [
-    ...current,
-    ...[...adopted].sort((left, right) =>
-      left.createdAt.localeCompare(right.createdAt),
-    ),
-  ];
+  const adopted = admitted
+    .filter((item) => !isHidden(item))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const seen = new Set<string>();
+  const observations: QueuedAdoptProjection["observations"] = [];
+  const appliedKeys: string[] = [];
+  for (const item of admitted) {
+    const key = observationKeyOf(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    observations.push({ key, snapshot: readObservationSnapshot(item) });
+    if (seq !== undefined && ledger !== undefined) appliedKeys.push(key);
+  }
+  // Adopted rows carry full state for the append path; observations carry
+  // the frozen trio for the same keys (a freshly appended row reconciles
+  // its own observation as a no-op).
+  return { adopted, observations, appliedKeys, appliedObservations: observations };
+}
+
+/**
+ * Pure projection of a queued adopt onto the actual current sessions: queued
+ * local updates (push state, renames, sizing) survive because every other
+ * field is carried over untouched, and only the captured observation trio
+ * moves — on an exact host+id+incarnation match. Returns the input array
+ * itself when there is nothing to apply, so a no-op plan commits nothing.
+ */
+export function applyQueuedAdopt(
+  current: Session[],
+  projection: QueuedAdoptProjection,
+): Session[] {
+  let result = current;
+  if (projection.adopted.length > 0) {
+    const known = new Set(
+      current.map((item) => `${item.hostId}:${item.id}`),
+    );
+    const missing = projection.adopted.filter(
+      (item) => !known.has(`${item.hostId}:${item.id}`),
+    );
+    if (missing.length > 0) result = [...current, ...missing];
+  }
+  for (const { key, snapshot } of projection.observations) {
+    const index = result.findIndex((item) => observationKeyOf(item) === key);
+    if (index === -1) continue;
+    if (sameObservation(readObservationSnapshot(result[index]!), snapshot))
+      continue;
+    if (result === current) result = current.slice();
+    result[index] = {
+      ...result[index]!,
+      observedHarnessId: snapshot.observedHarnessId,
+      observedHarnessAt: snapshot.observedHarnessAt,
+      hasForegroundChild: snapshot.hasForegroundChild,
+    };
+  }
+  return result;
+}
+
+/**
+ * A settled selected fetch: the fetch's own rows (dismissal-filtered, fetch
+ * order — the membership authority for this scoped read) plus the per-key
+ * ledger verdict captured at settle time. Observation from the fetch wins a
+ * row only when no newer proof already wrote it; everything else merges
+ * per identity inside the functional updater, never as a whole-snapshot
+ * drop — so queued local updates and newer observation metadata survive.
+ */
+export type SelectedFetchPlan = {
+  rows: Session[];
+  fetchWinsObservation: ReadonlyMap<string, boolean>;
+  admittedObservationValues: ReadonlyMap<string, ObservationSnapshot>;
+  appliedKeys: string[];
+  appliedObservations: { key: string; snapshot: ObservationSnapshot }[];
+};
+
+export function planSelectedFetch(
+  visible: readonly Session[],
+  requestSeq: number,
+  ledger: ObservationLedger | undefined,
+): SelectedFetchPlan {
+  const rows = [...visible];
+  const fetchWinsObservation = new Map<string, boolean>();
+  const admittedObservationValues = new Map<string, ObservationSnapshot>();
+  const appliedKeys: string[] = [];
+  const appliedObservations: { key: string; snapshot: ObservationSnapshot }[] = [];
+  for (const row of rows) {
+    const key = observationKeyOf(row);
+    const wins = ledger === undefined || ledger.shouldApply(key, requestSeq);
+    fetchWinsObservation.set(key, wins);
+    if (wins) {
+      appliedKeys.push(key);
+      appliedObservations.push({ key, snapshot: readObservationSnapshot(row) });
+    } else {
+      const admitted = ledger?.admitted(key)?.snapshot;
+      if (admitted) admittedObservationValues.set(key, admitted);
+    }
+  }
+  return {
+    rows,
+    fetchWinsObservation,
+    admittedObservationValues,
+    appliedKeys,
+    appliedObservations,
+  };
+}
+
+/**
+ * Pure per-identity reconciliation of a settled selected fetch onto the
+ * actual current sessions. Rows the fetch no longer lists are closed (the
+ * scoped read is authoritative for membership); a listed row keeps its
+ * incarnation truth wholesale on restart, and on an exact
+ * host+id+incarnation match merges: observation from the fetch only where
+ * it still holds the proof, push state newest-wins via the shared push
+ * merge, every other daemon field from the fetch. Returns the input array
+ * itself when field-equal, so an unchanged fetch commits nothing.
+ */
+export function chooseActiveAfterSelectedFetch(
+  currentActive: string,
+  visible: readonly Session[],
+): string {
+  return visible.some((item) => item.id === currentActive)
+    ? currentActive
+    : (visible.at(-1)?.id ?? "");
+}
+
+export function applySelectedFetch(
+  current: Session[],
+  plan: SelectedFetchPlan,
+): Session[] {
+  const actualByKey = new Map(
+    current.map((item) => [observationKeyOf(item), item]),
+  );
+  // Membership follows the fetch: an actual row the fetch no longer lists is
+  // closed, so it is dropped by simply never entering `next`.
+  const next: Session[] = [];
+  for (const row of plan.rows) {
+    const key = observationKeyOf(row);
+    const actual = actualByKey.get(key);
+    const admitted = plan.admittedObservationValues.get(key);
+    const fetchWins = plan.fetchWinsObservation.get(key) === true;
+    if (!actual) {
+      next.push(
+        fetchWins
+          ? row
+          : { ...row, ...(admitted ?? readObservationSnapshot({})) },
+      );
+      continue;
+    }
+    let merged = row;
+    if (!fetchWins)
+      merged = { ...merged, ...(admitted ?? readObservationSnapshot(actual)) };
+    const probe = applySessionStatePush([actual], {
+      sessionId: row.id,
+      workspaceId: row.workspaceId,
+      agentState: row.agentState ?? "unknown",
+      agentStateAt: row.agentStateAt ?? null,
+      agentStateAuthority: row.agentStateAuthority ?? null,
+      ...(row.agentPromptPreview !== undefined
+        ? { agentPromptPreview: row.agentPromptPreview }
+        : {}),
+      ...(row.cacheIdleAt !== undefined ? { cacheIdleAt: row.cacheIdleAt } : {}),
+    });
+    const decided = probe.sessions[0]!;
+    merged = {
+      ...merged,
+      agentState: decided.agentState,
+      agentStateAt: decided.agentStateAt,
+      agentStateAuthority: decided.agentStateAuthority,
+      agentPromptPreview: decided.agentPromptPreview,
+      cacheIdleAt: decided.cacheIdleAt,
+    };
+    next.push(merged);
+  }
+  if (next.length !== current.length) return next;
+  return sameSessions(current, next) ? current : next;
+}
+
+export type SidebarPollSettlement = {
+  /**
+   * The array to render/commit: the view's fresh array when any field
+   * moved, the previous array (same identity, no re-render) otherwise.
+   */
+  sessions: Session[];
+  /** This poll's request order — the ordering proof for the adopt path. */
+  seq: number;
+  /** Exact keys this poll actually read — the proof's scope. */
+  freshKeys: ReadonlySet<string>;
+  /** Workspace ids whose membership this poll actually read and may adopt. */
+  freshWorkspaceIds: ReadonlySet<string>;
+  /** True when `sessions` is a new reference the caller must commit. */
+  dataChanged: boolean;
+};
+
+/**
+ * Settles one non-stale successful poll read. Every successful read is new
+ * ordering evidence — even a byte-identical one, whose null clears and
+ * foreground flips carry no timestamp of their own — so the proof (seq +
+ * freshKeys) always advances to this poll. The data array keeps its
+ * identity while idle so the 3 s tick still commits nothing new.
+ */
+export const WORKSPACE_READ_PROOF_MAX_ENTRIES = 512;
+
+const WORKSPACE_READ_STATE = Symbol("drogonWorkspaceReadState");
+
+type WorkspaceReadState = {
+  rows: Map<string, Session[]>;
+};
+
+type WorkspaceReadProofWithState = Map<string, number> & {
+  [WORKSPACE_READ_STATE]?: WorkspaceReadState;
+};
+
+function workspaceReadState(
+  proof: Map<string, number>,
+): WorkspaceReadState {
+  const stateful = proof as WorkspaceReadProofWithState;
+  if (!stateful[WORKSPACE_READ_STATE]) {
+    Object.defineProperty(stateful, WORKSPACE_READ_STATE, {
+      value: { rows: new Map<string, Session[]>() },
+      enumerable: false,
+    });
+  }
+  return stateful[WORKSPACE_READ_STATE]!;
+}
+
+function workspaceRows(
+  proof: ReadonlyMap<string, number>,
+  workspaceId: string,
+): Session[] | null {
+  const state = (proof as WorkspaceReadProofWithState)[WORKSPACE_READ_STATE];
+  const rows = state?.rows.get(workspaceId);
+  return rows ? [...rows] : null;
+}
+
+export function markWorkspaceReadProof(
+  proof: Map<string, number>,
+  workspaceIds: Iterable<string>,
+  seq: number,
+  maxEntries: number = WORKSPACE_READ_PROOF_MAX_ENTRIES,
+): void {
+  const bound = Math.max(1, Math.floor(maxEntries));
+  const state = workspaceReadState(proof);
+  for (const workspaceId of workspaceIds) {
+    const last = proof.get(workspaceId);
+    if (last !== undefined && seq <= last) continue;
+    if (proof.has(workspaceId)) proof.delete(workspaceId);
+    while (proof.size >= bound) {
+      const oldest = proof.keys().next();
+      if (oldest.done) break;
+      proof.delete(oldest.value);
+      state.rows.delete(oldest.value);
+    }
+    proof.set(workspaceId, seq);
+  }
+}
+
+function markWorkspaceRows(
+  proof: Map<string, number>,
+  workspaceId: string,
+  rows: readonly Session[],
+  seq: number,
+): void {
+  const previous = proof.get(workspaceId);
+  markWorkspaceReadProof(proof, [workspaceId], seq);
+  if (previous !== undefined && seq <= previous) return;
+  workspaceReadState(proof).rows.set(workspaceId, [...rows]);
+}
+
+export function isStaleWorkspaceRead(
+  proof: ReadonlyMap<string, number>,
+  workspaceId: string,
+  requestSeq: number,
+): boolean {
+  const last = proof.get(workspaceId);
+  return last !== undefined && requestSeq < last;
+}
+
+export function settleSelectedWorkspaceFetch(args: {
+  visible: readonly Session[];
+  workspaceId: string;
+  requestSeq: number;
+  ledger: ObservationLedger;
+  workspaceProof: Map<string, number>;
+}): { stale: boolean; plan: SelectedFetchPlan | null } {
+  if (
+    isStaleWorkspaceRead(args.workspaceProof, args.workspaceId, args.requestSeq)
+  ) {
+    const effectiveRows = workspaceRows(args.workspaceProof, args.workspaceId);
+    return {
+      stale: false,
+      plan: planSelectedFetch(effectiveRows ?? [], args.requestSeq, args.ledger),
+    };
+  }
+  const plan = planSelectedFetch(args.visible, args.requestSeq, args.ledger);
+  commitObservationProof(args.ledger, plan.appliedObservations, args.requestSeq);
+  markWorkspaceRows(args.workspaceProof, args.workspaceId, plan.rows, args.requestSeq);
+  return { stale: false, plan };
+}
+
+export function settleSidebarPoll(
+  previousSessions: Session[],
+  view: SidebarSessionSourceView,
+  requestSeq: number,
+  workspaceProof?: Map<string, number>,
+): SidebarPollSettlement {
+  if (!workspaceProof) {
+    const dataChanged = !sameSessions(previousSessions, view.sessions);
+    return {
+      sessions: dataChanged ? view.sessions : previousSessions,
+      seq: requestSeq,
+      freshKeys: view.freshKeys,
+      freshWorkspaceIds: view.freshWorkspaceIds,
+      dataChanged,
+    };
+  }
+
+  const incomingByWorkspace = new Map<string, Session[]>();
+  for (const session of view.sessions) {
+    const rows = incomingByWorkspace.get(session.workspaceId) ?? [];
+    rows.push(session);
+    incomingByWorkspace.set(session.workspaceId, rows);
+  }
+
+  const staleWorkspaces = new Set<string>();
+  if (workspaceProof) {
+    for (const workspaceId of view.freshWorkspaceIds) {
+      const rows = incomingByWorkspace.get(workspaceId) ?? [];
+      if (isStaleWorkspaceRead(workspaceProof, workspaceId, requestSeq)) {
+        staleWorkspaces.add(workspaceId);
+      } else {
+        markWorkspaceRows(workspaceProof, workspaceId, rows, requestSeq);
+      }
+    }
+    for (const workspaceId of incomingByWorkspace.keys()) {
+      if (view.freshWorkspaceIds.has(workspaceId)) continue;
+      if (
+        workspaceRows(workspaceProof, workspaceId) !== null ||
+        isStaleWorkspaceRead(workspaceProof, workspaceId, requestSeq)
+      )
+        staleWorkspaces.add(workspaceId);
+    }
+  }
+
+  const sessions: Session[] = [];
+  const replaced = new Set<string>();
+  for (const session of view.sessions) {
+    if (!staleWorkspaces.has(session.workspaceId)) {
+      sessions.push(session);
+      continue;
+    }
+    if (replaced.has(session.workspaceId)) continue;
+    replaced.add(session.workspaceId);
+    sessions.push(...(workspaceRows(workspaceProof, session.workspaceId) ?? []));
+  }
+  for (const workspaceId of staleWorkspaces) {
+    if (replaced.has(workspaceId)) continue;
+    sessions.push(...(workspaceRows(workspaceProof, workspaceId) ?? []));
+  }
+
+  const remainingFreshKeys =
+    staleWorkspaces.size === 0
+      ? view.freshKeys
+      : new Set(
+          [...view.freshKeys].filter((key) =>
+            sessions.some(
+              (session) =>
+                !staleWorkspaces.has(session.workspaceId) &&
+                observationKeyOf(session) === key,
+            ),
+          ),
+        );
+  const dataChanged = !sameSessions(previousSessions, sessions);
+  return {
+    sessions: dataChanged ? sessions : previousSessions,
+    seq: requestSeq,
+    freshKeys: remainingFreshKeys,
+    freshWorkspaceIds:
+      staleWorkspaces.size === 0
+        ? view.freshWorkspaceIds
+        : new Set(
+            [...view.freshWorkspaceIds].filter(
+              (workspaceId) => !staleWorkspaces.has(workspaceId),
+            ),
+          ),
+    dataChanged,
+  };
 }
 
 /**
@@ -495,6 +1260,38 @@ export function applyConfirmedClose(
         )?.id ?? "")
       : active;
   return { sessions, active: nextActive };
+}
+
+export type EditorFileRenamePlan =
+  | { kind: "noop" }
+  | { kind: "rename"; workspaceId: string; from: string; to: string };
+
+/**
+ * Pure plan step for the strip's editor Rename (#335): resolves (tabId, new
+ * base name) to a rename or a no-op. Throws the user-facing message for
+ * input that can never succeed (dirty tabs hold path-keyed drafts a rename
+ * would orphan; separators never pass the daemon). Daemon-side failures
+ * (collisions, missing bridge) still surface from the RPC itself, and a
+ * failed RPC never retargets — the caller applies the plan only after the
+ * rename resolves. Tested in App.editor-file-rename.test.ts.
+ */
+export function planEditorFileRename(
+  tabs: readonly EditorTabState[],
+  tabId: string,
+  newName: string,
+): EditorFileRenamePlan {
+  const tab = tabs.find((candidate) => candidate.tabId === tabId);
+  if (!tab || tab.diff !== undefined || tab.missing !== undefined) {
+    return { kind: "noop" };
+  }
+  if (tab.dirty) throw new Error("Save the file before renaming it.");
+  const name = newName.trim();
+  if (name.includes("/") || name.includes("\\")) {
+    throw new Error("A name cannot contain path separators.");
+  }
+  const to = renameTargetPath(tab.path, name);
+  if (to === tab.path) return { kind: "noop" };
+  return { kind: "rename", workspaceId: tab.workspaceId, from: tab.path, to };
 }
 
 export const IconButton = forwardRef<
@@ -565,6 +1362,134 @@ export function MountedPanel({
   );
 }
 
+/**
+ * PERF-03: the Bot inspector's live facts own their timers in this subtree.
+ * The daemon pid projection (4s poll) and the Started-row clock (1s tick)
+ * used to live in App state, so every tick re-rendered the whole shell.
+ * Mounted per focused Bot session (`key` on the session id upstream), so a
+ * stale in-flight read can never paint over the currently focused session.
+ */
+export function BotSessionInspectorLive({
+  meta,
+  session,
+  workspacePath,
+  hostId,
+  locale,
+}: {
+  meta: BotSessionMeta;
+  session: Session;
+  /** The Bot's own home workspace path; `null` while `workspaces` lags. */
+  workspacePath: string | null;
+  /** Live connection host; `null` while disconnected (pid reads Unknown). */
+  hostId: string | null;
+  locale: string;
+}) {
+  const [processId, setProcessId] = useState<{
+    sessionId: string;
+    processId: number | null;
+  } | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const sessionId = session.id;
+  const botId = meta.botId;
+  useEffect(() => {
+    // Live-ticking clock for the inspector's Started row — subtree-local.
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [sessionId]);
+  useEffect(() => {
+    if (hostId === null) {
+      setProcessId(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      const result = await window.drogon.botSnapshot({
+        hostId,
+        workspaceId: "",
+        locale,
+      });
+      if (cancelled || !result.ok) return;
+      const bot = result.result.bots.find(
+        (candidate) => candidate.id === botId,
+      );
+      const pid =
+        bot?.currentSession?.sessionId === sessionId
+          ? (bot.currentSession.processId ?? null)
+          : null;
+      // The sessionId guard means a stale in-flight read for a
+      // since-switched-away session can never paint over the focused one.
+      setProcessId({ sessionId, processId: pid });
+    };
+    void poll();
+    const timer = window.setInterval(() => {
+      if (isPollPageVisible()) void poll();
+    }, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [botId, sessionId, hostId, locale]);
+  return (
+    <BotSessionInspector
+      meta={meta}
+      session={session}
+      workspacePath={workspacePath}
+      processId={processId?.sessionId === sessionId ? processId.processId : null}
+      nowMs={nowMs}
+    />
+  );
+}
+
+/**
+ * Issue #606: what a bulk close ("others" / "to the right" / "to the left")
+ * actually destroys, and which tab should hold the selection afterwards.
+ *
+ * Both answers come from the strip's VISIBLE order. Over the flat order,
+ * "close to the right" of a leader reaches tabs grouping moved elsewhere and
+ * "close others" stops the PTYs of folded subagents nobody can see; and a
+ * survivor picked from the flat order can be a tab that is being destroyed in
+ * the same breath. A folded group still goes with the leader it is folded
+ * into, because that tab is what stands for it on screen.
+ *
+ * `nextSelection` is null when the current tab survives — the caller must not
+ * move the selection then.
+ */
+export function planStripBulkClose({
+  lineage,
+  pinnedIds,
+  anchorId,
+  mode,
+  currentId,
+}: {
+  lineage: TabStripLineage;
+  pinnedIds: ReadonlySet<string> | readonly string[];
+  anchorId: string;
+  mode: "others" | "to-right" | "to-left";
+  currentId: string;
+}): { targets: string[]; nextSelection: string | null } {
+  const targets = foldAwareBulkCloseTargets({
+    lineage,
+    pinnedIds,
+    anchorId,
+    mode,
+  });
+  if (targets.length === 0) return { targets, nextSelection: null };
+  const doomed = new Set(targets);
+  if (!doomed.has(currentId)) return { targets, nextSelection: null };
+  const order = lineage.visibleOrder;
+  const at = order.indexOf(anchorId);
+  // The anchor is the last resort, not a candidate to skip: a bulk close
+  // never targets it, so when every neighbour is doomed it is the only tab
+  // left to hold the selection. Leaving it out stranded the selection on a
+  // tab that was being closed — reachable with "Close others".
+  const neighbor = [
+    ...order.slice(at + 1),
+    ...order.slice(0, at).reverse(),
+    anchorId,
+  ].find((id) => !doomed.has(id));
+  return { targets, nextSelection: neighbor ?? null };
+}
+
 export function App() {
   const settings = uiSettings();
   const agentPreferences = useAgentSettings();
@@ -605,6 +1530,16 @@ export function App() {
   }, [sessions]);
   const [active, setActive] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
+  // PERF-04: explicit reconnect trigger. Effects key on the stable
+  // primitives below plus this epoch — never on the `status` object, whose
+  // identity every successful `status()` reply mints anew. The reconnect
+  // path bumps the epoch explicitly, so re-attach-after-outage (#185,
+  // R16-M) keeps working while spurious identity churn stops cascading
+  // sessions + project-view re-fetches and their loading flash.
+  const [statusEpoch, setStatusEpoch] = useState(0);
+  const statusHostId = status?.hostId ?? null;
+  const statusServiceInstanceId = status?.serviceInstanceId ?? null;
+  const statusCapabilityDigest = capabilityDigest(status?.capabilities ?? []);
   // Read inside in-flight `create`/`launchHarness`/`close` callbacks so a
   // late response is checked against what's current *now*, not a stale
   // value closed over when the call started.
@@ -831,6 +1766,11 @@ export function App() {
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     loadSidebarWidth(window.localStorage),
   );
+  // PERF-03: interval gates read these through refs so opening/closing the
+  // sidebar or navigating never recreates the poll timers (and their
+  // immediate re-polls).
+  const sidebarOpenRef = useRef(sidebarOpen);
+  sidebarOpenRef.current = sidebarOpen;
   // R6-B right sidebar: width, collapsed state and tab persist in the
   // shell's own localStorage keys (source defaults: width 280, Explorer).
   // A saved open choice wins; otherwise the reference's visible default is
@@ -955,9 +1895,18 @@ export function App() {
       item.agentState ?? "unknown",
       second.agentState ?? "unknown",
     );
-    return aggregated === (item.agentState ?? "unknown")
-      ? item
-      : { ...item, agentState: aggregated };
+    if (aggregated === (item.agentState ?? "unknown")) return item;
+    // The badge shows the hotter pane's state, so it must also carry that
+    // pane's turn proof — never the root's stale proof, and never a proof
+    // the hotter pane did not report (an old-daemon push without metadata
+    // clears rather than inherits).
+    const winner =
+      aggregated === (second.agentState ?? "unknown") ? second : item;
+    return {
+      ...item,
+      agentState: aggregated,
+      agentStateAuthority: winner.agentStateAuthority ?? null,
+    };
   });
   // A restored selection can point at a second pane (it was the last
   // session): the tab it belongs to is its split root.
@@ -1159,7 +2108,10 @@ export function App() {
       // read is in flight (never a stale error, never an empty flash).
       if (!botsAvailable || !botsScope) return;
       const result = await loadBotSnapshot(botsGatedBridge, botsScope);
-      if (!cancelled) setBotsLoad(result);
+      if (!cancelled)
+        setBotsLoad((previous) =>
+          sameBotsLoadResult(previous, result) ? previous : result,
+        );
     }
     void run();
     return () => {
@@ -1185,13 +2137,56 @@ export function App() {
   // never only while the page that opened it happens to still be open.
   // Runs on the same cadence as the host-wide session-list poll below.
   useEffect(() => {
-    if (!botsAvailable || botsScopeHost === null) return;
-    const timer = window.setInterval(
-      () => setBotsReload((value) => value + 1),
-      4000,
-    );
+    if (!botsAvailable || botsScopeHost === null || botsScopeLocale === null)
+      return;
+    // PERF-03: the 4s poll loads here and publishes ONLY on content change,
+    // so an unchanged snapshot commits nothing while idle — no botsReload
+    // bump. Explicit bumps (route enter, open/stop flows) still force a
+    // refresh through the effect above. Cadence gate: fast ticks only while
+    // the page is visible and a consumer is showing (the Bots page or the
+    // open sidebar's Chats section); otherwise a 30s slow fallback keeps
+    // the snapshot from going stale. The sequence guard drops a stale
+    // overlapping resolution so an older reply can never overwrite a newer
+    // snapshot. Cadence and identity only; the snapshot merge is untouched.
+    // PERF-03b review: this gate STAYS, unlike the session poll's. Audited
+    // consumers of the snapshot: the Bots page (route enter forces a fresh
+    // read through the effect above, so a stale snapshot never paints),
+    // the sidebar Chats section (visible only while open), and the
+    // inspector's linkedBotSessionMeta fallback (identity chrome only —
+    // the synchronously-recorded botSessions map is primary and liveness
+    // rides the now-ungated 3s session poll). No off-screen-but-load-bearing
+    // consumer exists here, and unlike the index-backed session.list this
+    // payload (bots + history) is large, so the daemon-load saving is real.
+    const scope = {
+      hostId: botsScopeHost,
+      workspaceId: "",
+      locale: botsScopeLocale,
+    };
+    let lastPollMs = 0;
+    let sequence = 0;
+    const timer = window.setInterval(() => {
+      const nowMs = Date.now();
+      const consumersVisible =
+        routeRef.current === BOTS_ROUTE_ID || sidebarOpenRef.current;
+      if (
+        (!isPollPageVisible() || !consumersVisible) &&
+        !isSlowPollDue(lastPollMs, nowMs)
+      )
+        return;
+      lastPollMs = nowMs;
+      sequence += 1;
+      const ownSequence = sequence;
+      void loadBotSnapshot(botsGatedBridge, scope)
+        .then((result) => {
+          if (ownSequence !== sequence) return;
+          setBotsLoad((previous) =>
+            sameBotsLoadResult(previous, result) ? previous : result,
+          );
+        })
+        .catch(() => {});
+    }, 4000);
     return () => window.clearInterval(timer);
-  }, [botsAvailable, botsScopeHost, botsScopeWorkspace, botsScopeLocale]);
+  }, [botsAvailable, botsGatedBridge, botsScopeHost, botsScopeLocale]);
   // Stable files base: Bots snapshot refreshes must never reset the Files
   // descriptor identity (mounted editor drafts/attempts). The bots layer
   // rebuilds on snapshot change; the files base below never does.
@@ -1283,18 +2278,13 @@ export function App() {
   // full host-wide session list (`window.drogon.sessions()` with no
   // `workspaceId`) on its own cadence, independent of `selected`.
   const [allBotSessions, setAllBotSessions] = useState<Session[]>([]);
-  // Live pid for the currently-focused Bot session, refreshed by the
-  // polling effect below (bot.snapshot's projected `currentSession.processId`).
-  // Keyed by session id so a stale read for a since-switched-away session
-  // can never paint over the pid of whichever Bot session is active now.
-  const [botSessionPid, setBotSessionPid] = useState<{
-    sessionId: string;
-    processId: number | null;
-  } | null>(null);
-  // Live-ticking clock for the inspector's Started row; ticks only while a
-  // Bot session tab is actually focused (effect below), never in the
-  // background.
-  const [botSessionClockMs, setBotSessionClockMs] = useState(() => Date.now());
+  // R3: synchronous mirror of the last COMMITTED host-wide list, so the
+  // poll can pair the adopt proof with the exact array it describes
+  // (a `useState` updater runs at render time, too late to pair).
+  const allBotSessionsRef = useRef<Session[]>([]);
+  // PERF-03: the focused Bot session's live pid + Started clock live in
+  // BotSessionInspectorLive's own subtree now (see above), not here — App
+  // keeps only the identity (`botSessions` map) it records synchronously.
   // #270: same pattern for the Tasks page's Close/Esc — the registered
   // descriptor (the workspace-scoped mount) needs a stable onClose that
   // resolves to the view-history handler defined further down.
@@ -1827,7 +2817,15 @@ export function App() {
       .map((group) => group.project.id);
     if (gitIds.length === 0) return;
     void refreshWorktreeIssueLinks(tasksGatedBridge, gitIds);
-  }, [status, projectGroups, tasksGatedBridge]);
+    // PERF-04: same stable-primitive keying as the sessions effect above.
+  }, [
+    statusHostId,
+    statusServiceInstanceId,
+    statusCapabilityDigest,
+    statusEpoch,
+    projectGroups,
+    tasksGatedBridge,
+  ]);
   const refresh = useCallback(
     () =>
       action(async () => {
@@ -1968,9 +2966,9 @@ export function App() {
       void refresh();
       return;
     }
-    // Re-attaches without remounting panes: a fresh status identity
-    // retriggers the sessions effect while the unchanged revision keeps
-    // every same-identity pane — and its scrollback — mounted. A full
+    // Re-attaches without remounting panes: the explicit status-epoch bump
+    // below retriggers the sessions effect while the unchanged revision
+    // keeps every same-identity pane — and its scrollback — mounted. A full
     // refresh() here would remount all panes and clear their buffers just
     // as the service returns. Errors set during the outage belonged to
     // it, so a success clears them. R16-AJ (fixes #218): a silent
@@ -1983,6 +2981,10 @@ export function App() {
         if (!response.ok) return;
         setError("");
         setStatus(response.result);
+        // PERF-04: the sessions + project-view effects key on stable
+        // primitives, so this explicit bump is what re-attaches them after
+        // the outage (same re-fetch as the old fresh-identity trigger).
+        setStatusEpoch((epoch) => epoch + 1);
         void reloadWorkspaces();
       })
       .catch(() => {});
@@ -2006,21 +3008,85 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [status, workspaces, tasksProjectBridge, projectReloadTick]);
+    // PERF-04: keyed on stable primitives + the reconnect epoch, never the
+    // `status` object identity. The epoch bump keeps re-attach-after-outage
+    // reloading exactly as before.
+  }, [
+    statusHostId,
+    statusServiceInstanceId,
+    statusCapabilityDigest,
+    statusEpoch,
+    workspaces,
+    tasksProjectBridge,
+    projectReloadTick,
+  ]);
+  // R3 observation freshness: poll request order is the only proof that can
+  // order a null clear or a foreground flip (neither carries a usable
+  // timestamp). The clock numbers every host-wide poll start; the ledger
+  // remembers per exact session which number last wrote the selected copy;
+  // the provenance ref holds the fresh set of the last COMMITTED view for
+  // the adopt effect below. Refs, not state, like the collector: none of
+  // this may restart the effects below, and a workspace switch never
+  // resets them.
+  const sidebarPollClock = useRef(0);
+  const sidebarSettledSeq = useRef(0);
+  const workspaceReadProof = useRef<Map<string, number>>(new Map());
+  const observationLedger = useRef<ObservationLedger>(createObservationLedger());
+  const sidebarObservationProvenance = useRef<{
+    seq: number;
+    freshKeys: ReadonlySet<string>;
+    freshWorkspaceIds: ReadonlySet<string>;
+  }>({ seq: 0, freshKeys: new Set(), freshWorkspaceIds: new Set() });
+  // R3 selected-copy reconciliation, shared by the adopt effect below and
+  // the poll settlement further down. Immutable successful-read facts are
+  // admitted outside React (`planQueuedAdopt` over the poll rows, never a
+  // React mirror) and their proof is committed once, here — the functional
+  // updater below (`applyQueuedAdopt`) reads only the frozen facts plus the
+  // actual current rows, so replay with identical inputs (StrictMode
+  // double-invoke, or a replay after a later proof commit) always agrees.
+  // Projecting onto the ACTUAL current sessions means queued local updates
+  // (push state, renames, sizing) survive. `active` is deliberately left
+  // alone: adopting a session must never steal the tab the owner is
+  // looking at.
+  const queueSelectedAdopt = useCallback(() => {
+    const workspaceId = selectedRef.current;
+    if (!workspaceId) return;
+    const dismissed = loadDismissedSessions();
+    const isHidden = (item: Session) =>
+      isSessionDismissed(dismissed, item.hostId, item);
+    const provenance = sidebarObservationProvenance.current;
+    const ledger = observationLedger.current;
+    const projection = planQueuedAdopt(
+      allBotSessionsRef.current,
+      workspaceId,
+      isHidden,
+      {
+        freshKeys: provenance.freshKeys,
+        freshWorkspaceIds: provenance.freshWorkspaceIds,
+        seq: provenance.seq,
+        ledger,
+        workspaceProof: workspaceReadProof.current,
+      },
+    );
+    if (
+      projection.adopted.length === 0 &&
+      projection.observations.length === 0
+    )
+      return;
+    commitObservationProof(ledger, projection.appliedObservations, provenance.seq);
+    setSessions((items) => applyQueuedAdopt(items, projection));
+  }, []);
   useEffect(() => {
     // A session this shell did not start — `drogon-cli terminal create`, a
     // Bot's own session, another window — reaches the selected workspace's
     // list here, from the host-wide poll that already runs for the sidebar.
-    // `active` is deliberately left alone: adopting a session must never
-    // steal the tab the owner is looking at.
-    if (!selected) return;
-    const dismissed = loadDismissedSessions();
-    setSessions((items) =>
-      adoptOutOfBandSessions(items, allBotSessions, selected, (item) =>
-        isSessionDismissed(dismissed, item.hostId, item),
-      ),
-    );
-  }, [allBotSessions, selected]);
+    // The provenance ref was stored synchronously with the commit that
+    // produced the current `allBotSessions` value, so the pairing holds.
+    queueSelectedAdopt();
+  }, [allBotSessions, selected, queueSelectedAdopt]);
+  useEffect(() => {
+    pruneObservationProofForSessions(observationLedger.current, sessions);
+  }, [sessions]);
   useEffect(() => {
     // Persists every confirmed selection once it settles against a known
     // workspace, so the next reload's restore has an up-to-date target.
@@ -2032,7 +3098,9 @@ export function App() {
       });
   }, [selected, workspaces]);
   useEffect(() => {
-    if (!selected || !status) {
+    // PERF-04: keyed on stable primitives + the reconnect epoch (see
+    // statusEpoch), never the `status` object identity.
+    if (!selected || statusHostId === null) {
       setLoadingSessions(false);
       setSessions([]);
       setActive("");
@@ -2040,6 +3108,12 @@ export function App() {
     }
     let cancelled = false;
     setLoadingSessions(true);
+    // R3: the request number is this fetch's ordering proof, taken when the
+    // request STARTS. Stamping at completion with the then-current clock
+    // would let a late older response claim a newer order than a poll that
+    // settled while it was in flight — and overwrite that poll's fresher
+    // observation facts.
+    const requestSeq = (sidebarPollClock.current += 1);
     void window.drogon
       .sessions(selected)
       .then((response) => {
@@ -2057,12 +3131,26 @@ export function App() {
         const visible = response.result.sessions.filter(
           (item) => !isSessionDismissed(dismissed, item.hostId, item),
         );
-        setSessions(visible);
-        setActive((value) =>
-          visible.some((item) => item.id === value)
-            ? value
-            : (visible.at(-1)?.id ?? ""),
-        );
+        // R3: this scoped read is a successful observation of the selected
+        // workspace's rows — record its proof at its request order, so a
+        // retained row (or an older poll settling late) cannot roll the
+        // snapshot it delivers back. A newer poll still proves past it.
+        // Reconciled per identity through the functional updater form, never
+        // as a whole-snapshot drop: queued local updates survive, and
+        // observation the ledger already proved newer is kept, not rolled
+        // back. The per-key verdict is captured here, once, so the updater
+        // itself stays pure (replay always agrees).
+        const settlement = settleSelectedWorkspaceFetch({
+          visible,
+          workspaceId: selected,
+          requestSeq,
+          ledger: observationLedger.current,
+          workspaceProof: workspaceReadProof.current,
+        });
+        if (settlement.plan)
+          setSessions((items) => applySelectedFetch(items, settlement.plan!));
+        if (!settlement.stale)
+          setActive((value) => chooseActiveAfterSelectedFetch(value, visible));
       })
       .catch(() => {
         if (!cancelled)
@@ -2074,7 +3162,22 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [selected, status, revision]);
+  }, [
+    selected,
+    statusHostId,
+    statusServiceInstanceId,
+    statusCapabilityDigest,
+    statusEpoch,
+    revision,
+  ]);
+  // The sidebar's session source (owner's sidebar fix, 2026-09-21):
+  // host-wide while that read works, the workspaces the sidebar shows when
+  // it does not. Refs, not state: the collector is a poll accumulator and
+  // the id list is read at poll time, so neither may restart the effect
+  // below — and a workspace switch must never reset it.
+  const sidebarSessionsSource = useRef(createSidebarSessionCollector());
+  const sidebarWorkspaceIds = useRef<string[]>([]);
+  sidebarWorkspaceIds.current = workspaces.map((workspace) => workspace.id);
   // Bot-session persistence (task_926fddc5e769 follow-up): the host-wide
   // counterpart to the `selected`-scoped fetch above. Deliberately its OWN
   // effect (not folded into the one above) so a workspace switch never
@@ -2086,23 +3189,124 @@ export function App() {
   // `sidebarSessions` below. A transient failure keeps the prior list rather
   // than flashing every session away.
   useEffect(() => {
-    if (!status) {
-      setAllBotSessions([]);
+    if (statusHostId === null) {
+      // Identity-stable clear: an already-empty list keeps its array so
+      // disconnected re-runs never re-render the shell.
+      if (allBotSessionsRef.current.length !== 0) {
+        allBotSessionsRef.current = [];
+        setAllBotSessions([]);
+      }
       return;
     }
     let cancelled = false;
+    let lastPollMs = 0;
+    // Owner's sidebar fix (2026-09-21): the host-wide list is ONE response
+    // frame, and `drogond` refuses any frame past `MAX_FRAME_BYTES` (1 MiB)
+    // — it closes the connection instead, so one oversized reply left every
+    // card except the selected one with no rows at all. The collector asks
+    // host-wide first and, when that read fails, reads the workspaces the
+    // sidebar actually shows in rotating batches, so the cards keep their
+    // agents either way. Unchanged replies still commit nothing.
+    // R3 singleflight, epoch-local: one poll at a time keeps request order
+    // == read order within this connection epoch; a skipped tick retries 3s
+    // later, so nothing is lost. Local (not a shared ref) so a hung poll's
+    // finally — or this effect's cleanup — can never clear the NEXT epoch's
+    // flag and wedge (or double-release) its first tick.
+    let inFlight = false;
     const poll = async () => {
-      const result = await window.drogon.sessions();
-      if (cancelled || !result.ok) return;
-      setAllBotSessions(result.result.sessions);
+      if (inFlight) return;
+      inFlight = true;
+      // R3: the request number is this poll's ordering proof (a null clear
+      // and a foreground flip carry no timestamp of their own).
+      const requestSeq = (sidebarPollClock.current += 1);
+      // R3 epoch isolation: this poll reads into a fork of the last
+      // committed collector. A cancelled epoch's late rows, or a stale
+      // poll's older truth, die with the fork unless this exact settlement
+      // proves fresh below — the shared accumulator only ever moves forward.
+      const fork = sidebarSessionsSource.current.fork();
+      try {
+        lastPollMs = Date.now();
+        const view = await pollSidebarSessions({
+          collector: fork,
+          workspaceIds: sidebarWorkspaceIds.current,
+          fetchHostWide: async () => {
+            const result = await window.drogon.sessions();
+            return result.ok
+              ? { ok: true, sessions: result.result.sessions }
+              : { ok: false };
+          },
+          fetchScoped: async (workspaceId) => {
+            const result = await window.drogon.sessions(workspaceId);
+            return result.ok
+              ? { ok: true, sessions: result.result.sessions }
+              : { ok: false };
+          },
+        });
+        if (cancelled) return;
+        // R3: an older request settling after a newer one (reconnect race,
+        // a hung batch) must not replace the rendering, the adopt proof, or
+        // the shared collector.
+        if (isStalePollSettlement(requestSeq, sidebarSettledSeq.current)) return;
+        sidebarSettledSeq.current = requestSeq;
+        // Fresh: the fork becomes the committed truth (its rotation,
+        // scoped cache and fresh set included).
+        sidebarSessionsSource.current = fork;
+        // R3: every successful read is new ordering evidence, even a
+        // byte-identical one — so the proof always advances to this poll.
+        // PERF-03: the data array keeps its identity while idle (no new
+        // facts to render); any field-level difference still replaces it.
+        // The proof is stored synchronously with the data it describes, so
+        // the pairing holds.
+        const settled = settleSidebarPoll(
+          allBotSessionsRef.current,
+          view,
+          requestSeq,
+          workspaceReadProof.current,
+        );
+        sidebarObservationProvenance.current = {
+          seq: settled.seq,
+          freshKeys: settled.freshKeys,
+          freshWorkspaceIds: settled.freshWorkspaceIds,
+        };
+        if (settled.dataChanged) {
+          allBotSessionsRef.current = settled.sessions;
+          setAllBotSessions(settled.sessions);
+        }
+        // The adopt effect above will not re-run for an unchanged commit
+        // (its inputs are identical), so queue the same pure projection here
+        // against the fresh proof: a stale selected fetch may have replaced
+        // the selected copy since the last commit, and only this poll's
+        // order can heal it. A no-op plan queues nothing.
+        queueSelectedAdopt();
+      } catch (error) {
+        if (!cancelled) console.warn("Sidebar session poll failed", error);
+      } finally {
+        inFlight = false;
+      }
+    };
+    const tick = () => {
+      // PERF-03b: no consumer gate here — the tab-strip adopt effect below
+      // is an always-visible consumer of every host-wide reply, so a
+      // visible page keeps the 3s cadence regardless of sidebar state.
+      // Unchanged replies still commit nothing (sameSessions), so the fast
+      // cadence costs IPC only while idle.
+      if (!shouldSessionPollTick(isPollPageVisible(), lastPollMs, Date.now()))
+        return;
+      void poll();
     };
     void poll();
-    const timer = window.setInterval(() => void poll(), 3000);
+    const timer = window.setInterval(tick, 3000);
     return () => {
       cancelled = true;
+      // Epoch-local singleflight needs no reset here: a hung in-flight poll
+      // settles against its discarded fork and is dropped by `cancelled`
+      // (and by request order above). Nothing shared is touched.
       window.clearInterval(timer);
     };
-  }, [status]);
+    // PERF-04: connectivity primitives + reconnect epoch, never `status`.
+    // queueSelectedAdopt is ref-driven and identity-stable, so it never
+    // restarts the poll.
+  }, [statusHostId, statusServiceInstanceId, statusEpoch, queueSelectedAdopt]);
   useEffect(() => {
     // J1 needs_input: main polls session.list for transitions (this repo
     // has no daemon push channel) and forwards them here. Clicking the
@@ -2137,6 +3341,7 @@ export function App() {
         workspaceId: event.workspaceId,
         agentState: event.agentState as AgentState,
         agentStateAt: event.agentStateAt ?? null,
+        agentStateAuthority: event.agentStateAuthority ?? null,
         agentPromptPreview: event.agentPromptPreview,
         cacheIdleAt: event.cacheIdleAt,
       };
@@ -2509,53 +3714,12 @@ export function App() {
     })();
   };
   // Bot session inspector (bug-bot-a836b4ebf8be65505): identity is known
-  // synchronously from `botSessions` (recorded above), but the pid is a
-  // live daemon-side fact that has to be fetched — `bot.snapshot`'s own
-  // projection, polled only while a Bot session tab is actually focused.
-  // The `sessionId` guard on the state write means a stale in-flight read
-  // for a since-switched-away session can never paint over the currently
-  // focused one's pid.
+  // synchronously from `botSessions` (recorded above). PERF-03: the live
+  // pid projection + Started clock live in BotSessionInspectorLive's own
+  // subtree, so they never re-render App.
   const activeBotMeta = terminal
     ? (botSessions.get(terminal.id) ?? linkedBotSessionMeta(loadedBots, terminal))
     : null;
-  useEffect(() => {
-    if (!activeBotMeta || !status?.hostId || !terminal) {
-      setBotSessionPid(null);
-      return;
-    }
-    const sessionId = terminal.id;
-    const hostId = status.hostId;
-    let cancelled = false;
-    const poll = async () => {
-      const result = await window.drogon.botSnapshot({
-        hostId,
-        workspaceId: "",
-        locale: settings.get("locale"),
-      });
-      if (cancelled || !result.ok) return;
-      const bot = result.result.bots.find(
-        (candidate) => candidate.id === activeBotMeta.botId,
-      );
-      const pid =
-        bot?.currentSession?.sessionId === sessionId
-          ? (bot.currentSession.processId ?? null)
-          : null;
-      setBotSessionPid({ sessionId, processId: pid });
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 4000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [activeBotMeta, status?.hostId, terminal?.id]);
-  // Live-ticking clock for the inspector's Started row — only while a Bot
-  // session is actually focused, never a background timer.
-  useEffect(() => {
-    if (!activeBotMeta) return;
-    const timer = window.setInterval(() => setBotSessionClockMs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [activeBotMeta]);
   const [stoppingBotSession, setStoppingBotSession] = useState(false);
   // Bot session Stop (bug-bot-a836b4ebf8be65505's working red Stop
   // button): the SAME generic `session.stop` every other session uses —
@@ -3014,13 +4178,15 @@ export function App() {
   // returns to the terminal pane, selecting a page shows the browser pane
   // for it (the pane reports bounds for the selection, activating it on
   // the host). Closing a page reconciles through the strip subscription.
-  const selectSessionTab = (id: string) => {
+  // PERF-03: stable identity (only stable setters inside) so sidebar rows
+  // and the tab strip never re-render from a fresh callback alone.
+  const selectSessionTab = useCallback((id: string) => {
     setRoute(null);
     setActive(id);
     setActiveBrowserTabId(null);
     setActiveEditorTabId(null);
     setActiveMentuTab(false);
-  };
+  }, []);
   const selectBrowserTab = (tabId: string) => {
     setRoute(null);
     setActiveBrowserTabId(tabId);
@@ -3240,6 +4406,43 @@ export function App() {
     ].find((id) => remainingIds.has(id));
     setActiveEditorTabId(neighbor ?? remaining[remaining.length - 1].tabId);
   };
+  // Editor tab Rename (#335): the strip commits (tabId, new base name) from
+  // its inline input. App runs files.rename with the explorer's own
+  // scope/shape, then retargets the open tab so no stale or tombstoned tab
+  // remains. Separator names and collisions fail through the action error
+  // channel like any other strip operation; a failed RPC never retargets.
+  // Dirty tabs stay out (their drafts are keyed by path, which a rename
+  // would orphan) — the strip hides the row, this is the second gate.
+  const renameEditorFile = (tabId: string, newName: string) =>
+    action(async () => {
+      const hostId = status?.hostId;
+      if (!hostId) throw new Error("No workspace is selected.");
+      const plan = planEditorFileRename(visibleEditorTabs, tabId, newName);
+      if (plan.kind === "noop") return;
+      const rename = filesGatedBridge.fileRename;
+      if (!rename) {
+        throw new Error(
+          "Renaming needs a newer daemon with files.rename support.",
+        );
+      }
+      checked(
+        await rename({
+          hostId,
+          workspaceId: plan.workspaceId,
+          from: plan.from,
+          to: plan.to,
+        }),
+      );
+      const retargeted = retargetEditorTabsAfterRename(
+        editorTabs,
+        tabId,
+        plan.to,
+      );
+      setEditorTabs(retargeted.tabs);
+      if (retargeted.activatedTabId !== null) {
+        setActiveEditorTabId(retargeted.activatedTabId);
+      }
+    });
   const newBrowserTab = () =>
     action(async () => {
       const workspaceId = contextRef.current.workspaceId;
@@ -3527,15 +4730,51 @@ export function App() {
     setTabStrip(remapped);
   };
   useEffect(() => {
-    if (!selected || !status) return;
+    // PERF-04: one-shot per workspace keyed on the host primitive, never
+    // the `status` object identity; the ref guard owns re-entry.
+    if (!selected || statusHostId === null) return;
     if (rehydratedTabsRef.current.has(selected)) return;
     rehydratedTabsRef.current.add(selected);
     void rehydrateWorkspaceTabs(selected);
     // One-shot per workspace; the guard above owns re-entry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, status]);
+  }, [selected, statusHostId, statusEpoch]);
   const changeTabOrder = (order: string[]) =>
     updateTabStrip({ ...tabStrip, order });
+  // Issue #606: the strip's subagent groups, from the same
+  // `parentSessionId` lineage the worktree card folds with. Computed here
+  // (not only inside TabBar) because folding a group has to answer a
+  // question the strip cannot: which session the prompt belongs to once
+  // the active tab is hidden.
+  const stripLineage = buildTabStripLineage({
+    order: liveStripOrder(),
+    sessions: stripSessions,
+    collapsedLeaderIds: tabStrip.collapsedLineage ?? [],
+    pinnedIds: tabStrip.pinned,
+  });
+  // A folded subagent has no tab, so it must not hold the input either:
+  // its leader answers for the whole group while it stays folded. Only
+  // the active session moves — the route and the browser/editor selection
+  // are left exactly as the user left them.
+  const promptTargetSessionId = resolveTabPromptTarget(
+    activeRootId,
+    stripLineage,
+  );
+  useEffect(() => {
+    if (!promptTargetSessionId || promptTargetSessionId === activeRootId)
+      return;
+    setActive(promptTargetSessionId);
+  }, [promptTargetSessionId, activeRootId]);
+  const toggleTabLineage = (leaderId: string) => {
+    updateTabStrip({
+      ...tabStrip,
+      collapsedLineage: toggleCollapsedLeader(
+        tabStrip.collapsedLineage ?? [],
+        leaderId,
+        new Set(stripSessions.map((item) => item.id)),
+      ),
+    });
+  };
   const toggleTabPin = (id: string) => {
     const order = reconcileTabOrder(
       tabStrip.order,
@@ -3563,31 +4802,27 @@ export function App() {
     anchorId: string,
     mode: "others" | "to-right" | "to-left",
   ) => {
-    const order = liveStripOrder();
-    const targets = bulkCloseTargets(order, tabStrip.pinned, anchorId, mode);
-    if (targets.length === 0) return;
-    const doomed = new Set(targets);
-    // Move selection off a doomed tab first so each close keeps a survivor.
-    const currentId =
-      activeMentuTab
+    const plan = planStripBulkClose({
+      lineage: stripLineage,
+      pinnedIds: tabStrip.pinned,
+      anchorId,
+      mode,
+      currentId: activeMentuTab
         ? MENTU_TAB_ID
-        : (activeEditorTabId ?? activeBrowserTabId ?? active);
-    if (doomed.has(currentId)) {
-      const at = order.indexOf(anchorId);
-      const neighbor = [
-        ...order.slice(at + 1),
-        ...order.slice(0, at).reverse(),
-      ].find((id) => !doomed.has(id));
-      if (neighbor) {
-        if (neighbor === MENTU_TAB_ID) openMentuTab();
-        else if (visibleEditorTabs.some((tab) => tab.tabId === neighbor))
-          selectEditorTab(neighbor);
-        else if (browserTabs.some((tab) => tab.tabId === neighbor))
-          selectBrowserTab(neighbor);
-        else selectSessionTab(neighbor);
-      }
+        : (activeEditorTabId ?? activeBrowserTabId ?? active),
+    });
+    if (plan.targets.length === 0) return;
+    // Move selection off a doomed tab first so each close keeps a survivor.
+    if (plan.nextSelection !== null) {
+      const neighbor = plan.nextSelection;
+      if (neighbor === MENTU_TAB_ID) openMentuTab();
+      else if (visibleEditorTabs.some((tab) => tab.tabId === neighbor))
+        selectEditorTab(neighbor);
+      else if (browserTabs.some((tab) => tab.tabId === neighbor))
+        selectBrowserTab(neighbor);
+      else selectSessionTab(neighbor);
     }
-    for (const target of targets) {
+    for (const target of plan.targets) {
       const session = sessions.find((item) => item.id === target);
       // Split-aware: closing a split tab stops both panes, never orphans.
       if (session) void closeTabSession(session);
@@ -3729,13 +4964,94 @@ export function App() {
     changeTheme(
       theme === "system" ? "dark" : theme === "dark" ? "light" : "system",
     );
+  // Issue #333: busy-tab close confirmations. Every close entry point
+  // (strip X, bulk close, pane X, keyboard) funnels through the `close*`
+  // wrappers below, which queue a request here instead of stopping a
+  // session with work in flight. One dialog shows the head; confirming
+  // runs it, cancelling drops it, and Don't-ask-again persists the skip
+  // and flushes the rest without re-prompting.
+  type PendingBusyClose = {
+    kind: "tab" | "split" | "single";
+    sessionId: string;
+    agent: boolean;
+  };
+  const [busyCloseQueue, setBusyCloseQueue] = useState<PendingBusyClose[]>(
+    [],
+  );
+  const busyCloseQueueRef = useRef<PendingBusyClose[]>([]);
+  const enqueueBusyClose = (request: PendingBusyClose) => {
+    busyCloseQueueRef.current = [...busyCloseQueueRef.current, request];
+    setBusyCloseQueue(busyCloseQueueRef.current);
+  };
+  const dequeueBusyClose = (): PendingBusyClose | null => {
+    const [head, ...rest] = busyCloseQueueRef.current;
+    if (!head) return null;
+    busyCloseQueueRef.current = rest;
+    setBusyCloseQueue(rest);
+    return head;
+  };
+  // Returns true when the close was queued behind the confirm dialog. Only
+  // the queued sessions are confirmed; a stale prompt for a tab that is
+  // already gone resolves to a no-op, never a blind stop.
+  const queueBusyClose = (
+    targets: Session[],
+    request: { kind: PendingBusyClose["kind"]; sessionId: string },
+  ): boolean => {
+    if (readSkipCloseBusyTerminalConfirm()) return false;
+    const busy = targets.filter((item) => isBusyTerminalSession(item));
+    if (busy.length === 0) return false;
+    enqueueBusyClose({
+      ...request,
+      agent: busy.some((item) => isAgentTerminalSession(item)),
+    });
+    return true;
+  };
+  const runBusyCloseRequest = (request: PendingBusyClose) => {
+    const session = sessionsRef.current.find(
+      (item) => item.id === request.sessionId,
+    );
+    if (!session) return;
+    if (request.kind === "tab") void closeTabSessionNow(session);
+    else if (request.kind === "split") void closeSplitPaneNow(session);
+    else void closeNow(session);
+  };
+  const confirmBusyClose = (dontAskAgain: boolean) => {
+    if (dontAskAgain) {
+      writeSkipCloseBusyTerminalConfirm(true);
+      // The skip is a standing answer for every queued close, so the whole
+      // queue flushes without re-prompting.
+      const queued = busyCloseQueueRef.current;
+      busyCloseQueueRef.current = [];
+      setBusyCloseQueue([]);
+      for (const request of queued) runBusyCloseRequest(request);
+      return;
+    }
+    const head = dequeueBusyClose();
+    if (head) runBusyCloseRequest(head);
+  };
+  const cancelBusyClose = () => {
+    dequeueBusyClose();
+  };
+  // Read-only twin of the splits lookup inside closeTabSessionNow: same
+  // inputs, so the gate sees the same second pane the close would stop.
+  const splitSecondSession = (sessionId: string): Session | null => {
+    const splits = pruneTerminalSplits(
+      hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
+      new Set(sessionsRef.current.map((item) => item.id)),
+    );
+    const split = splitForTab(splits, sessionId);
+    if (!split) return null;
+    return (
+      sessionsRef.current.find((item) => item.id === split.panes[1]) ?? null
+    );
+  };
   // The tab close is an explicit, confirmed dismissal (R16-AL2, issue
   // #228): `session.close` stops a live PTY and forgets the durable
   // record, so `exited` rows AND post-restart `unverifiable` stubs alike
   // release their tab. The reply verdict is never gated on: a stub keeps
   // its honest `unverifiable` (loss of contact is not exit) and is
   // removed anyway — the user, not the liveness oracle, decided to close.
-  const close = (session: Session) =>
+  const closeNow = (session: Session) =>
     action(async () => {
       confirmCloseOrAlreadyAbsent(
         await window.drogon.close({
@@ -3771,6 +5087,13 @@ export function App() {
       setSessions(applied.sessions);
       setActive(applied.active);
     });
+  // Issue #333: the single-session close (pane X on an unsplit tab, tab
+  // menu) confirms a busy session before stopping it.
+  const close = (session: Session) => {
+    if (queueBusyClose([session], { kind: "single", sessionId: session.id }))
+      return;
+    void closeNow(session);
+  };
   // R16-N Split Terminal Right actions. Each pane is a daemon session of
   // the same workspace created through window.drogon.start (the existing
   // session bridge); the tab keeps its root identity while split.
@@ -3825,7 +5148,14 @@ export function App() {
   // Closing one split pane (header X, context menu, exit overlay): only
   // that daemon session stops; the survivor keeps the tab as a single.
   // Closing the root promotes the survivor with its strip identity.
-  const closeSplitPane = (session: Session) =>
+  // Issue #333: a split pane stops only its own session, so the gate
+  // checks exactly the pane being closed.
+  const closeSplitPane = (session: Session) => {
+    if (queueBusyClose([session], { kind: "split", sessionId: session.id }))
+      return;
+    void closeSplitPaneNow(session);
+  };
+  const closeSplitPaneNow = (session: Session) =>
     action(async () => {
       const splits = pruneTerminalSplits(
         hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
@@ -3833,7 +5163,7 @@ export function App() {
       );
       const outcome = closeTerminalSplitPane(splits, session.id);
       if (!outcome.survivorId || !outcome.dissolvedRoot) {
-        void close(session);
+        void closeNow(session);
         return;
       }
       await stopOneSession(session);
@@ -3870,7 +5200,16 @@ export function App() {
     });
   // Closing a whole tab (strip X, bulk close): a split tab stops both
   // panes first so no orphan session survives as a surprise new tab.
-  const closeTabSession = (session: Session) =>
+  // Issue #333: the gate checks both panes — either one busy confirms.
+  const closeTabSession = (session: Session) => {
+    const targets = [session];
+    const second = splitSecondSession(session.id);
+    if (second) targets.push(second);
+    if (queueBusyClose(targets, { kind: "tab", sessionId: session.id }))
+      return;
+    void closeTabSessionNow(session);
+  };
+  const closeTabSessionNow = (session: Session) =>
     action(async () => {
       const splits = pruneTerminalSplits(
         hydrateTerminalSplits(tabStripRef.current.splits ?? {}),
@@ -4936,6 +6275,8 @@ export function App() {
                 stripOrder={tabStrip.order}
                 pinnedIds={tabStrip.pinned}
                 customTitles={tabStrip.titles}
+                collapsedLineageIds={tabStrip.collapsedLineage ?? []}
+                onToggleLineage={toggleTabLineage}
                 onOrderChange={changeTabOrder}
                 onTogglePin={toggleTabPin}
                 onCloseOthers={(id) => closeStripTabs(id, "others")}
@@ -4950,6 +6291,9 @@ export function App() {
                 onSelectSession={selectSessionTab}
                 onSelectBrowserTab={selectBrowserTab}
                 onSelectEditorTab={selectEditorTab}
+                onRenameEditorFile={(tabId, newName) =>
+                  void renameEditorFile(tabId, newName)
+                }
                 mentuOpen={mentuTabOpen}
                 mentuActive={mentuTabActive}
                 onSelectMentu={openMentuTab}
@@ -5466,7 +6810,8 @@ export function App() {
                     className="right-sidebar-panel"
                   >
                     {activeBotMeta && terminal ? (
-                      <BotSessionInspector
+                      <BotSessionInspectorLive
+                        key={terminal.id}
                         meta={activeBotMeta}
                         session={terminal}
                         workspacePath={
@@ -5474,12 +6819,8 @@ export function App() {
                             (item) => item.id === activeBotMeta.workspaceId,
                           )?.path ?? null
                         }
-                        processId={
-                          botSessionPid?.sessionId === terminal.id
-                            ? botSessionPid.processId
-                            : null
-                        }
-                        nowMs={botSessionClockMs}
+                        hostId={statusHostId}
+                        locale={settings.get("locale")}
                       />
                     ) : (
                       <SessionDetailsPanel terminal={terminal ?? null} />
@@ -5544,6 +6885,13 @@ export function App() {
           agent: { harnessId, model: "", provider: "" },
         })}
       />}
+      {busyCloseQueue[0] && (
+        <CloseBusyTerminalDialog
+          agent={busyCloseQueue[0].agent}
+          onConfirm={(dontAskAgain) => confirmBusyClose(dontAskAgain)}
+          onClose={() => cancelBusyClose()}
+        />
+      )}
       {composer && (
         <NewWorkspaceComposerModal
           groups={projectGroups.filter((group) => !group.project.quickSession)}

@@ -1,21 +1,11 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/renderer/src/components/sidebar/worktree-agent-rows.ts
-   (buildWorktreeAgentRows: one row per live/retained agent attributed to
-   the worktree), worktree-agent-row-order.ts (compareWorktreeAgentRows),
-   worktree-agent-row-type.ts (resolveRowAgentType),
-   worktree-agent-row-fallback-tab.ts (a tab with no agent entry still gets
-   a row), src/renderer/src/lib/agent-row-decay-state.ts
-   (agentNoUpdateLabel, formatCompactDuration),
-   src/renderer/src/lib/short-time-ago.ts (formatShortTimeAgo) and
-   src/shared/agent-type-label.ts (formatAgentTypeLabel).
-   Adapter: Orca derives rows from hook-reported agent-status entries keyed
-   by pane over zustand tabs, with subagent children, orchestration workers
-   and retained done snapshots. This repo's contract has none of that: the
-   daemon reports one `agentState` per Session (R16-AE #206 unified the
-   derivation in `sessionDotState`, reused here unchanged), so one Session
-   is exactly one row — a session that never reported still gets its
-   fallback row (unknown dot, harness/shell icon, tab title, freshness
-   secondary) instead of collapsing the card to a bare summary count.
+   worktree-agent-rows.ts, worktree-agent-row-order.ts,
+   worktree-agent-row-type.ts, worktree-agent-row-fallback-tab.ts,
+   agent-row-decay-state.ts, short-time-ago.ts and agent-type-label.ts.
+   Adapter: Orca derives rows from hook-reported agent-status entries; this
+   repo's daemon reports one `agentState` per Session, read here through
+   `sessionAgentState`, so one Session is exactly one row — including a
+   session that never reported (fallback row with freshness secondary).
    Title resolution reuses the tab strip's own functions so a row reads
    exactly what its tab reads. Pure functions, unit-tested. */
 import type {
@@ -23,7 +13,7 @@ import type {
   HarnessId,
   Session,
 } from "../../../../shared/session-contract";
-import { sessionDotState } from "./agent-state";
+import { agentStateLabel, sessionAgentState } from "./agent-state";
 import { defaultTerminalTabTitle } from "./tab-title";
 import {
   partitionPinnedOrder,
@@ -46,6 +36,17 @@ const HARNESS_LABELS: Record<HarnessId, string> = {
 export function formatRowHarnessLabel(harnessId: HarnessId | null): string {
   if (harnessId === null) return "Shell";
   return HARNESS_LABELS[harnessId] ?? harnessId;
+}
+
+/**
+ * Which harness a session is running (issue #622): the launched harness
+ * when `harness.start` named one, else the harness the daemon observed in
+ * the session PTY's foreground process group, else null for a plain shell.
+ * The ONE shared answer — every surface (row title, secondary, glyph, tab
+ * badge) uses this function and no surface re-derives it.
+ */
+export function resolveRowHarnessId(session: Session): HarnessId | null {
+  return session.harnessId ?? session.observedHarnessId ?? null;
 }
 
 /**
@@ -134,11 +135,15 @@ export function resolveRowSecondary(
   now: number,
   primaryTitle = "",
 ): string {
-  const state = sessionDotState(session);
+  const state = sessionAgentState(session);
   if (state === "unknown") return agentNoUpdateLabel(rowEvidenceMs(session), now);
   const preview = resolveRowMessagePreview(session, primaryTitle);
   if (preview) return preview;
-  if (session.harnessId) return formatRowHarnessLabel(session.harnessId);
+  const resolvedHarnessId = resolveRowHarnessId(session);
+  if (resolvedHarnessId) {
+    if (primaryTitle === formatRowHarnessLabel(resolvedHarnessId)) return "";
+    return formatRowHarnessLabel(resolvedHarnessId);
+  }
   return commandBasename(session);
 }
 
@@ -155,14 +160,36 @@ export function compareWorktreeAgentRows(a: Session, b: Session): number {
   );
 }
 
+/**
+ * The row's trailing state text (owner's design, 2026-09-21): the state's
+ * own label, or — while the session is not reporting — how long the silence
+ * has run. `unknown` never borrows a state word the daemon did not report:
+ * the freshness report is the honest thing to say, and it is the same
+ * string the row's secondary slot would otherwise have repeated.
+ */
+export function resolveRowStateLabel(
+  session: Session,
+  state: AgentState,
+  now: number,
+): string {
+  if (state === "unknown") return agentNoUpdateLabel(rowEvidenceMs(session), now);
+  return agentStateLabel(state);
+}
+
 export type WorktreeAgentRow = {
   session: Session;
-  /** Dot state via the shared `sessionDotState` derivation. */
+  /** Dot state via `sessionAgentState` (unproven shell `working` reads `unknown`). */
   state: AgentState;
   /** Tab title, resolved exactly like the strip (rename wins). */
   title: string;
   /** Freshness report, message preview, or harness/command identity. */
   secondary: string;
+  /**
+   * Always-true trailing state text: the state label, or the freshness
+   * report while the session is not reporting. Present on every row (the
+   * owner's decision), main rows included.
+   */
+  stateLabel: string;
   /** Compact age (`22m`) of the last report, or "" when unknowable. */
   relativeTime: string;
   /** True when this row's tab is the active one (focused highlight). */
@@ -211,10 +238,17 @@ export function buildWorktreeAgentRows(
   const customTitles = inputs.customTitles ?? {};
   return ordered.map((session) => {
     const evidenceMs = rowEvidenceMs(session);
+    // A custom rename still wins; otherwise a session running a resolved
+    // harness reads the harness label, and only a session with no resolved
+    // harness keeps `Terminal N`. Numbering still counts every session, so
+    // plain shells keep their exact `Terminal N` titles.
+    const resolvedHarnessId = resolveRowHarnessId(session);
     const title = recoveryTabLabel({
       label: resolveTabTitle(
         session.id,
-        defaultTerminalTabTitle(positionById.get(session.id) ?? 1),
+        resolvedHarnessId
+          ? formatRowHarnessLabel(resolvedHarnessId)
+          : defaultTerminalTabTitle(positionById.get(session.id) ?? 1),
         customTitles,
       ),
       verdict: session.verdict,
@@ -223,9 +257,10 @@ export function buildWorktreeAgentRows(
     });
     return {
       session,
-      state: sessionDotState(session),
+      state: sessionAgentState(session),
       title,
       secondary: resolveRowSecondary(session, now, title),
+      stateLabel: resolveRowStateLabel(session, sessionAgentState(session), now),
       relativeTime: evidenceMs > 0 ? formatShortTimeAgo(evidenceMs, now) : "",
       focused: session.id === inputs.activeSessionId,
     };

@@ -51,6 +51,7 @@ const bridge: DesktopBridge = {
   fileWrite: (value) => ipcRenderer.invoke("drogon:fileWrite", value),
   fileCreate: (value) => ipcRenderer.invoke("drogon:fileCreate", value),
   fileRename: (value) => ipcRenderer.invoke("drogon:fileRename", value),
+  fileDuplicate: (value) => ipcRenderer.invoke("drogon:fileDuplicate", value),
   fileDelete: (value) => ipcRenderer.invoke("drogon:fileDelete", value),
   fileSearch: (value) => ipcRenderer.invoke("drogon:fileSearch", value),
   // R16-AM (coordinator-owned one-liner): git-ignored visible rows.
@@ -76,6 +77,12 @@ const bridge: DesktopBridge = {
         : value,
     ),
   read: (value) => ipcRenderer.invoke("drogon:read", value),
+  // PERF-01 push channel (additive): the held `session.output` long-poll.
+  // Main validates the input through `bridgeSchemas.readOutput` and the
+  // daemon answer through `resultSchemas["session.output"]`; an older
+  // daemon answers `method_not_found`, which the pane reads as
+  // capability-absent and falls back to `read`.
+  readOutput: (value) => ipcRenderer.invoke("drogon:readOutput", value),
   write: (value) => ipcRenderer.invoke("drogon:write", value),
   resize: (value) => ipcRenderer.invoke("drogon:resize", value),
   stop: (value) => ipcRenderer.invoke("drogon:stop", value),

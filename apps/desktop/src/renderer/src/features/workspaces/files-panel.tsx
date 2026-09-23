@@ -80,6 +80,15 @@ export function joinEntryPath(parentPath: string, name: string): string {
   return parentPath.endsWith("/") ? parentPath + name : `${parentPath}/${name}`;
 }
 
+/**
+ * Resolve an explorer row directory (workspace-relative, "" = root) against
+ * the workspace path for session spawn (#275 fork `startupCwd` parity, kept
+ * green for #335): the daemon validates containment, this only joins.
+ */
+export function resolveTerminalSpawnCwd(workspacePath: string, cwd: string): string {
+  return cwd === "" ? workspacePath : `${workspacePath}/${cwd}`;
+}
+
 /** Map a service entry onto the explorer's row model; symlinks keep their marker. */
 export function entryToNode(
   entry: WorkspaceFileEntry,
@@ -275,6 +284,14 @@ export function createExplorerSource(
             .fileRename({ ...scope, from, to })
             .then((result): Result<null> => (result.ok ? { ok: true, result: null } : result))
         : unsupported("files.rename"),
+    // Server-side duplicate (issue #334): an absent bridge method (older
+    // daemon) fails closed with an explicit error, never a crash.
+    duplicate: (from, to) =>
+      bridge.fileDuplicate
+        ? bridge
+            .fileDuplicate({ ...scope, from, to })
+            .then((result): Result<null> => (result.ok ? { ok: true, result: null } : result))
+        : unsupported("files.duplicate"),
     remove: (paths) =>
       bridge.fileDelete
         ? bridge
@@ -461,9 +478,8 @@ function FilesPanel({
   // explorer passes a workspace-relative dir ("" = root), resolved here
   // against the workspace path; the daemon validates containment.
   const openTerminalAt = (cwd: string) => {
-    const absolute = cwd === "" ? workspace.path : `${workspace.path}/${cwd}`;
     void window.drogon
-      .start(workspaceId, { cwd: absolute })
+      .start(workspaceId, { cwd: resolveTerminalSpawnCwd(workspace.path, cwd) })
       .catch(() => undefined);
   };
   // Frame-safe derived values: a selection/open path from another scope is

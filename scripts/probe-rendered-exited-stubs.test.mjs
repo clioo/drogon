@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import {
   assertNoLiveRecords,
   assertStubRecordsForgotten,
@@ -39,4 +42,33 @@ test("Kill all leaves no records of any verdict", () => {
       `verdict ${verdict} must not survive Kill all`,
     );
   }
+});
+
+// Lane 1 second-pass pin: the label-turnover wait. After the recovery
+// overlay Restart revives a stub, the strip re-derives the tab label on a
+// later render than the session list — so the probe waits for the
+// forgotten id to leave every tab label before asserting its tab is gone.
+// Reverting that hunk must fail this test. The live run proves the
+// behaviour itself.
+const stubsProbeSource = readFileSync(
+  path.join(
+    fileURLToPath(new URL(".", import.meta.url)),
+    "probe-rendered-exited-stubs.mjs",
+  ),
+  "utf8",
+);
+
+describe("exited stub revive label turnover", () => {
+  it("waits for the forgotten id to leave the tab labels first", () => {
+    const wait = stubsProbeSource.indexOf("never lets go of the forgotten id");
+    assert.ok(wait !== -1, "the label-turnover wait must exist");
+    const forgotten = stubsProbeSource.indexOf("assertStubRecordsForgotten");
+    assert.ok(forgotten !== -1, "the record-forget assertion must exist");
+    const gone = stubsProbeSource.indexOf("new RegExp(revivedFromId) }).count()");
+    assert.ok(gone !== -1, "the tab-gone assertion must exist");
+    assert.ok(
+      forgotten < wait && wait < gone,
+      "order must be record-forgotten, then label turnover, then tab gone",
+    );
+  });
 });

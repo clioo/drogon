@@ -49,6 +49,13 @@ const explorerBridgeSchemas = {
     from: relPath,
     to: relPath,
   }),
+  // Server-side duplicate (issue #334): same two-path shape as rename.
+  fileDuplicate: z.object({
+    hostId: opaqueId,
+    workspaceId: opaqueId,
+    from: relPath,
+    to: relPath,
+  }),
   fileDelete: z.object({
     hostId: opaqueId,
     workspaceId: opaqueId,
@@ -63,6 +70,12 @@ const explorerResultSchemas = {
     kind: z.enum(["file", "directory"]),
   }),
   "files.rename": z.object({
+    hostId: opaqueId,
+    workspaceId: opaqueId,
+    from: relPath,
+    to: relPath,
+  }),
+  "files.duplicate": z.object({
     hostId: opaqueId,
     workspaceId: opaqueId,
     from: relPath,
@@ -363,14 +376,18 @@ async function dispatchExplorerRequest(
       ? "files.create"
       : method === "fileRename"
         ? "files.rename"
-        : "files.delete";
+        : method === "fileDuplicate"
+          ? "files.duplicate"
+          : "files.delete";
   // The parsed shapes above guarantee these casts.
   const params =
     method === "fileCreate"
       ? explorerBridgeSchemas.fileCreate.parse(value)
       : method === "fileRename"
         ? explorerBridgeSchemas.fileRename.parse(value)
-        : explorerBridgeSchemas.fileDelete.parse(value);
+        : method === "fileDuplicate"
+          ? explorerBridgeSchemas.fileDuplicate.parse(value)
+          : explorerBridgeSchemas.fileDelete.parse(value);
   const result = await call(nativeMethod, params);
   // An older host without the method reports method-not-found: surface it
   // verbatim (fail-closed, never a local fallback or synthesized result).
@@ -393,6 +410,12 @@ async function dispatchExplorerRequest(
     const rename = explorerResultSchemas["files.rename"].parse(output);
     const asked = explorerBridgeSchemas.fileRename.parse(value);
     if (rename.from !== asked.from || rename.to !== asked.to)
+      return invalid();
+  }
+  if (method === "fileDuplicate") {
+    const duplicate = explorerResultSchemas["files.duplicate"].parse(output);
+    const asked = explorerBridgeSchemas.fileDuplicate.parse(value);
+    if (duplicate.from !== asked.from || duplicate.to !== asked.to)
       return invalid();
   }
   if (method === "fileDelete") {

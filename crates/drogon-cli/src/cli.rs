@@ -957,7 +957,7 @@ pub enum WorktreeAction {
         #[arg(long, value_name = "ID")]
         project: String,
     },
-    /// Remove a worktree; refuses a dirty checkout unless --force
+    /// Remove a worktree; refuses a dirty, locked or unregistered checkout unless --force
     #[command(
         args_override_self = true,
         override_usage = "drogon-cli worktree rm <ID> [--force]\nValid flags: --data-dir, --force, --help, --json, --request-id, --retry-request"
@@ -1013,7 +1013,7 @@ pub enum TerminalAction {
     /// Write UTF-8 text to a session (encoded to base64 exactly once)
     #[command(
         args_override_self = true,
-        override_usage = "drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT>\nValid flags: --data-dir, --help, --incarnation, --json, --request-id, --retry-request, --session, --text"
+        override_usage = "drogon-cli terminal send --session <ID> --incarnation <TOKEN> --text <TEXT> [--literal]\nValid flags: --data-dir, --help, --incarnation, --json, --literal, --request-id, --retry-request, --session, --text"
     )]
     Send {
         #[arg(long, value_name = "ID")]
@@ -1022,6 +1022,10 @@ pub enum TerminalAction {
         incarnation: String,
         #[arg(long, value_name = "TEXT")]
         text: String,
+        /// Send TEXT's bytes verbatim: no trailing-newline-to-Return
+        /// translation. For piping data rather than typing a message.
+        #[arg(long)]
+        literal: bool,
     },
     /// Resize a session's PTY
     #[command(
@@ -1935,7 +1939,33 @@ impl Cli {
                     responsibility_id,
                     responsibility_name,
                     instructions,
+                }
+                | BotAction::WatchIssue {
+                    bot,
+                    workspace,
+                    repo,
+                    filter,
+                    login,
+                    harness,
+                    skills,
+                    secret_ref,
+                    api_base,
+                    cron,
+                    manual,
+                    disabled: _,
+                    approve: _,
+                    responsibility_id,
+                    responsibility_name,
+                    instructions,
                 } => {
+                    // An issue has no review request, so `watch-issue`
+                    // admits one filter fewer. Everything else — the
+                    // bounds, the login requirement, the id shapes — is
+                    // deliberately identical for the two watches.
+                    let admitted: &[&str] = match action {
+                        BotAction::WatchIssue { .. } => &["opened", "assigned"],
+                        _ => &["opened", "assigned", "review_requested"],
+                    };
                     require_nonempty("bot", bot)?;
                     require_nonempty("workspace", workspace)?;
                     require_nonempty("repo", repo)?;
@@ -1943,10 +1973,11 @@ impl Cli {
                         return Err(CliError::Usage("--manual takes no --cron".into()));
                     }
                     let filter = filter.as_deref().unwrap_or("opened");
-                    if !matches!(filter, "opened" | "assigned" | "review_requested") {
-                        return Err(CliError::Usage(
-                            "--filter must be opened, assigned or review_requested".into(),
-                        ));
+                    if !admitted.contains(&filter) {
+                        return Err(CliError::Usage(format!(
+                            "--filter must be {}",
+                            admitted.join(", ")
+                        )));
                     }
                     if filter != "opened" && login.is_none() {
                         return Err(CliError::Usage(format!(
@@ -3502,6 +3533,56 @@ pub enum BotAction {
         override_usage = "drogon-cli bot watch-pr --bot <ID> --workspace <ID> --repo <OWNER/NAME> [--filter opened|assigned|review_requested] [--login <LOGIN>] [--harness <ID>] [--skill <NAME>]... [--secret-ref <REF>] [--api-base <URL>] [--cron <EXPR> | --manual] [--disabled] [--approve] [--responsibility-id <ID> | --responsibility-name <NAME> [--instructions <TEXT>]]\nValid flags: --api-base, --approve, --bot, --cron, --data-dir, --disabled, --filter, --harness, --help, --instructions, --json, --login, --manual, --repo, --request-id, --responsibility-id, --responsibility-name, --retry-request, --secret-ref, --skill, --workspace"
     )]
     WatchPullRequest {
+        #[arg(long, value_name = "ID")]
+        bot: String,
+        #[arg(long, value_name = "ID")]
+        workspace: String,
+        #[arg(long, value_name = "OWNER/NAME")]
+        repo: String,
+        #[arg(long, value_name = "KIND")]
+        filter: Option<String>,
+        #[arg(long, value_name = "LOGIN")]
+        login: Option<String>,
+        #[arg(long, value_name = "ID")]
+        harness: Option<String>,
+        #[arg(long = "skill", value_name = "NAME")]
+        skills: Vec<String>,
+        #[arg(long = "secret-ref", value_name = "REF")]
+        secret_ref: Option<String>,
+        #[arg(long = "api-base", value_name = "URL")]
+        api_base: Option<String>,
+        #[arg(long, value_name = "EXPR")]
+        cron: Option<String>,
+        #[arg(long)]
+        manual: bool,
+        #[arg(long)]
+        disabled: bool,
+        /// Approve the exact rule hash in the same command (the single
+        /// consent point); without it the watch stays parked and runs
+        /// nothing until you approve it.
+        #[arg(long)]
+        approve: bool,
+        #[arg(long, value_name = "ID")]
+        responsibility_id: Option<String>,
+        #[arg(long, value_name = "NAME")]
+        responsibility_name: Option<String>,
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        instructions: Option<String>,
+    },
+    /// Watch a GitHub repository for ISSUES that are the case you name
+    /// (--filter assigned needs --login), and release the Bot's action
+    /// when one appears. Same guarantees as watch-pr: per-issue-number
+    /// dedupe, and a first run that SEEDS the baseline instead of
+    /// replaying every issue that is already open. Pull requests are
+    /// excluded (GitHub's issue list returns them; this watch does not).
+    /// Staged parked unless --approve is passed (approval arms the EXACT
+    /// rule hash).
+    #[command(
+        name = "watch-issue",
+        args_override_self = true,
+        override_usage = "drogon-cli bot watch-issue --bot <ID> --workspace <ID> --repo <OWNER/NAME> [--filter opened|assigned] [--login <LOGIN>] [--harness <ID>] [--skill <NAME>]... [--secret-ref <REF>] [--api-base <URL>] [--cron <EXPR> | --manual] [--disabled] [--approve] [--responsibility-id <ID> | --responsibility-name <NAME> [--instructions <TEXT>]]\nValid flags: --api-base, --approve, --bot, --cron, --data-dir, --disabled, --filter, --harness, --help, --instructions, --json, --login, --manual, --repo, --request-id, --responsibility-id, --responsibility-name, --retry-request, --secret-ref, --skill, --workspace"
+    )]
+    WatchIssue {
         #[arg(long, value_name = "ID")]
         bot: String,
         #[arg(long, value_name = "ID")]

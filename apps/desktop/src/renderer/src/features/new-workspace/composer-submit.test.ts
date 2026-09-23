@@ -97,51 +97,50 @@ function claudeHarness(): Harness {
 }
 
 describe("resolveComposerSubmit", () => {
-  test("a folder project opens its implicit workspace without a name", () => {
+  test("a folder project creates a named folder Workspace section (#579)", () => {
     const resolved = resolveComposerSubmit([folderGroup()], [workspace()], {
       projectId: "folder:1",
-      name: "",
+      name: "analysis",
       baseRef: "",
       agent: noAgent(),
     });
     expect(resolved).toEqual({
       target: {
-        kind: "implicit",
+        kind: "worktree",
         project: folderProject(),
-        workspaceId: "ws-1",
+        name: "analysis",
+        folderWorkspace: true,
         agent: noAgent(),
       },
     });
   });
 
-  test("a folder project carries the picked agent for the implicit workspace", () => {
+  test("a folder project carries the picked agent for the new section (#579)", () => {
     const resolved = resolveComposerSubmit([folderGroup()], [workspace()], {
       projectId: "folder:1",
-      name: "",
+      name: "analysis",
       baseRef: "",
       agent: piAgent(),
     });
     expect(resolved).toEqual({
       target: {
-        kind: "implicit",
+        kind: "worktree",
         project: folderProject(),
-        workspaceId: "ws-1",
+        name: "analysis",
+        folderWorkspace: true,
         agent: piAgent(),
       },
     });
   });
 
-  test("a folder project without a registered workspace errors honestly", () => {
-    const resolved = resolveComposerSubmit([folderGroup()], [], {
+  test("a folder project without a name errors honestly (#579)", () => {
+    const resolved = resolveComposerSubmit([folderGroup()], [workspace()], {
       projectId: "folder:1",
-      name: "",
+      name: "   ",
       baseRef: "",
       agent: noAgent(),
     });
-    expect(resolved).toEqual({
-      error:
-        "The folder workspace is missing. Refresh the connection and retry.",
-    });
+    expect("error" in resolved).toBe(true);
   });
 
   test("a missing project asks for a choice", () => {

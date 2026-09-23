@@ -274,6 +274,48 @@ describe("groupWorktreesByPrStatus", () => {
       result.find((b) => b.key === "unavailable")!.entries.map((e) => e.worktree.id),
     ).toEqual(["wt-b"]);
   });
+
+  it("buckets the stored linked review when the branch matched nothing (no card/group contradiction)", () => {
+    // Same data the card shows as "PR #7" must group under the linked
+    // review's own bucket ("merged"), never "No pull request".
+    const groups: ProjectGroup[] = [
+      {
+        project: project({ id: "a" }),
+        worktrees: [worktree({ id: "wt-linked", branch: "feature", linkedPr: 7 })],
+      },
+    ];
+    const pulls = new Map([
+      ["a", [pull({ number: 7, state: "merged", headRefName: "renamed" })]],
+    ]);
+    const result = groupWorktreesByPrStatus(groups, pulls);
+    expect(result.find((b) => b.key === "merged")!.entries.map((e) => e.worktree.id)).toEqual([
+      "wt-linked",
+    ]);
+    expect(result.find((b) => b.key === "none")).toBeUndefined();
+  });
+
+  it("buckets the live review when a branch carries concluded history too", () => {
+    const groups: ProjectGroup[] = [
+      {
+        project: project({ id: "a" }),
+        worktrees: [worktree({ id: "wt-w", branch: "w" })],
+      },
+    ];
+    const pulls = new Map([
+      [
+        "a",
+        [
+          pull({ number: 641, state: "merged", headRefName: "w" }),
+          pull({ number: 642, state: "open", headRefName: "w" }),
+        ],
+      ],
+    ]);
+    const result = groupWorktreesByPrStatus(groups, pulls);
+    expect(result.find((b) => b.key === "open")!.entries.map((e) => e.worktree.id)).toEqual([
+      "wt-w",
+    ]);
+    expect(result.find((b) => b.key === "merged")).toBeUndefined();
+  });
 });
 
 describe("isDefaultBranchWorktree", () => {

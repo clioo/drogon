@@ -8,39 +8,83 @@ import {
   TERMINAL_SEEK_MAX_PAGES,
 } from "./terminal-read-pacing";
 
+import type { ReplayTailPage } from "./terminal-read-pacing";
+
+const page = (
+  bytes: number[],
+  overrides: Partial<ReplayTailPage> = {},
+): ReplayTailPage => ({
+  bytes: new Uint8Array(bytes),
+  startCursor: 0,
+  nextCursor: bytes.length,
+  cols: 100,
+  rows: 24,
+  truncated: false,
+  ...overrides,
+});
+
 describe("createReplayTailBuffer", () => {
   it("keeps everything under the limit without marking a drop", () => {
     const tail = createReplayTailBuffer(100);
-    tail.push(new Uint8Array([1, 2, 3]), false);
-    tail.push(new Uint8Array([4, 5, 6]), false);
+    tail.push(page([1, 2, 3]));
+    tail.push(page([4, 5, 6]));
     expect(tail.dropped).toBe(false);
     const drained = tail.drain();
-    expect(drained.map((c) => [...c])).toEqual([
+    expect(drained.map((p) => [...p.bytes])).toEqual([
       [1, 2, 3],
       [4, 5, 6],
     ]);
   });
 
-  it("drops the oldest chunks past the limit and marks the replay dropped", () => {
+  it("keeps each page's grid report, so a replay can plan at its cuts", () => {
+    // #605: the tail is replayed page by page, and a page that spans a resize
+    // is only replayable at the right widths if its cuts survived the seek.
     const tail = createReplayTailBuffer(100);
-    const page = new Uint8Array(60);
-    tail.push(page, false);
-    tail.push(new Uint8Array(60), false);
+    tail.push(
+      page([1, 2, 3], {
+        startCursor: 40,
+        nextCursor: 43,
+        cols: 72,
+        rows: 24,
+        gridCursor: 41,
+        gridChanges: [{ cursor: 41, cols: 72, rows: 24 }],
+      }),
+    );
+    const [kept] = tail.drain();
+    expect(kept.startCursor).toBe(40);
+    expect(kept.nextCursor).toBe(43);
+    expect(kept.cols).toBe(72);
+    expect(kept.gridCursor).toBe(41);
+    expect(kept.gridChanges).toEqual([{ cursor: 41, cols: 72, rows: 24 }]);
+  });
+
+  it("drops the oldest pages past the limit and marks the replay dropped", () => {
+    const tail = createReplayTailBuffer(100);
+    const first = page(new Array(60).fill(1), { startCursor: 0, nextCursor: 60 });
+    const second = page(new Array(60).fill(2), {
+      startCursor: 60,
+      nextCursor: 120,
+    });
+    tail.push(first);
+    tail.push(second);
     expect(tail.dropped).toBe(true);
     const drained = tail.drain();
     expect(drained).toHaveLength(1);
-    expect(drained[0]).toHaveLength(60);
+    expect(drained[0].bytes).toHaveLength(60);
+    // The page that survived keeps the range it covers: dropping an older page
+    // never renumbers a later one.
+    expect(drained[0].startCursor).toBe(60);
   });
 
   it("marks a drop when the daemon itself reports truncation", () => {
     const tail = createReplayTailBuffer(TERMINAL_REPLAY_TAIL_BYTE_LIMIT);
-    tail.push(new Uint8Array([1]), true);
+    tail.push(page([1], { truncated: true }));
     expect(tail.dropped).toBe(true);
   });
 
   it("drain empties the buffer so a live read starts clean", () => {
     const tail = createReplayTailBuffer(100);
-    tail.push(new Uint8Array([1]), false);
+    tail.push(page([1]));
     tail.drain();
     expect(tail.drain()).toEqual([]);
   });

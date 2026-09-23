@@ -206,7 +206,7 @@ export function buildWiredBotsPanelProps(
       return (async () => {
         const response = await gatedBridge.botRun?.({
           hostId: scope.hostId,
-          workspaceId: scope.workspaceId,
+          workspaceId: "",
           locale: scope.locale,
           botId,
           responsibilityId,

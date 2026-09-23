@@ -11,7 +11,7 @@
 //! output cap, kill+reap) rather than duplicating that machinery.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use drogon_protocol::RpcError;
@@ -311,6 +311,247 @@ fn canonical_or_raw(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
+/// Whether `project_path`'s git still has an admin entry for a working tree
+/// at `worktree_path`, including a prunable one whose directory has already
+/// vanished. `None` means the probe itself could not answer -- no usable
+/// `git`, an unreadable repository -- and nothing may be concluded from it.
+fn git_registers_worktree(project_path: &Path, worktree_path: &str) -> Option<bool> {
+    let cache = CapabilityCache::new();
+    let entries = match git_process::run_read_only_git(
+        ReadOnlyGitOperation::WorktreeList,
+        project_path,
+        &HostScope::Native,
+        &cache,
+        budget(),
+    ) {
+        Ok(ParsedGitOutput::WorktreeList(entries)) => entries,
+        Ok(ParsedGitOutput::Status(_)) | Err(_) => return None,
+    };
+    let wanted = canonical_or_raw(worktree_path);
+    Some(
+        entries
+            .into_iter()
+            .any(|entry| canonical_or_raw(&entry.path) == wanted),
+    )
+}
+
+/// What the engine may still do after `git worktree remove` has refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoveRecovery {
+    /// Hand git's own verdict back unchanged.
+    ReportGitFailure,
+    /// Refuse, but name the Force path -- git's fatal does not.
+    OfferForce,
+    /// Delete the checkout here and retire whatever git still holds.
+    DeleteCheckoutDirectory,
+}
+
+/// The whole of #604 in one decision.
+///
+/// `still_registered` is `git_registers_worktree`'s answer, and a probe that
+/// could not answer (`None`) is the one case that forbids everything: a run
+/// of `git` that never reached a verdict -- no git on PATH, a timeout, a
+/// killed capture -- proves nothing about the checkout, so deleting a user's
+/// directory on the strength of it would be a guess. A probe that *did*
+/// answer also proves git is present and the repository readable, which is
+/// what makes the accompanying failure a real refusal rather than a broken
+/// environment.
+///
+/// Given a real refusal, `force` is the desktop dialog's Force checkbox and
+/// the CLI's `--force`, and it has to mean every removal the user ticking it
+/// has already accepted. That is strictly more than `git worktree remove
+/// --force` covers: git demands `-f -f` for a locked working tree, and for a
+/// working tree it no longer registers it has no entry to remove at all and
+/// dies "is not a working tree" however many flags follow. Deleting the
+/// checkout is the only thing left that can retire such a row, so force does
+/// it. Unforced, an unregistered row gets copy that names Force, because
+/// git's fatal tells the user nothing they can act on.
+fn recovery_after_failed_git_remove(force: bool, still_registered: Option<bool>) -> RemoveRecovery {
+    match (force, still_registered) {
+        (_, None) => RemoveRecovery::ReportGitFailure,
+        (true, Some(_)) => RemoveRecovery::DeleteCheckoutDirectory,
+        // git's refusal already reads "use --force to delete it"; repeating
+        // it is better than paraphrasing it.
+        (false, Some(true)) => RemoveRecovery::ReportGitFailure,
+        (false, Some(false)) => RemoveRecovery::OfferForce,
+    }
+}
+
+/// Deletes a checkout directory git would not delete itself. Guarded rather
+/// than a bare `remove_dir_all`: this is the only place the engine removes a
+/// user directory git is not mediating, so the target must be an absolute
+/// path that is neither the project checkout nor one of its ancestors -- the
+/// guard that keeps a forced delete off the primary worktree, which git
+/// refuses with "is a main working tree". A path that is already gone is a
+/// success; the caller's next step is dropping the rows either way.
+/// Refuses when some other registered checkout sits inside the one about to
+/// be removed. It would go with it while its own row survived pointing at
+/// nothing -- one card's delete silently destroying another card's work.
+///
+/// This has to run *before* `git worktree remove`, not only on the recovery
+/// path: git removes an outer working tree under `--force` with exit 0 and
+/// takes the nested checkout with it, so a guard that only fires once git has
+/// refused never sees the case that actually happens. `worktree.create`
+/// accepts a name containing a separator, so the nesting needs no tampering
+/// to reach.
+fn refuse_nested_registrations(
+    worktree_path: &Path,
+    other_registrations: &[String],
+) -> Result<(), RpcError> {
+    let target = PathBuf::from(canonical_or_raw(&worktree_path.to_string_lossy()));
+    let raw_target = worktree_path.to_path_buf();
+    if let Some(nested) = other_registrations.iter().find(|other| {
+        let raw = Path::new(other.as_str()).to_path_buf();
+        let canonical = PathBuf::from(canonical_or_raw(other));
+        (raw != raw_target
+            && raw != target
+            && (raw.starts_with(&target) || raw.starts_with(&raw_target)))
+            || (canonical != target
+                && canonical != raw_target
+                && (canonical.starts_with(&target) || canonical.starts_with(&raw_target)))
+    }) {
+        return Err(error::invalid_argument(format!(
+            "refusing to delete \"{}\": the workspace at \"{nested}\" is inside it. Delete that one first.",
+            worktree_path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn delete_checkout_directory(project_path: &Path, worktree_path: &Path) -> Result<(), RpcError> {
+    if !worktree_path.is_absolute() {
+        return Err(error::invalid_argument(format!(
+            "refusing to delete \"{}\": the recorded workspace path is not absolute",
+            worktree_path.display()
+        )));
+    }
+    // `..` never survives `worktree.create`, but a row that acquired one
+    // anyway must not be waved through: `canonicalize` cannot resolve a `..`
+    // whose intermediate is missing, and the lexical fallback below would
+    // then carry it into a target that resolves to nothing -- so the delete
+    // would "succeed" having removed nothing, while the caller drops the rows
+    // and the real checkout stays on disk, unreachable and undeletable.
+    if worktree_path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        )
+    }) {
+        return Err(error::invalid_argument(format!(
+            "refusing to delete \"{}\": the recorded workspace path is not normalized",
+            worktree_path.display()
+        )));
+    }
+    // The parent is resolved but the final component deliberately is not: a
+    // symlinked workspace has to be unlinked, never followed, or the guards
+    // below would clear a directory belonging to whatever the link points at.
+    let (Some(parent), Some(name)) = (worktree_path.parent(), worktree_path.file_name()) else {
+        return Err(error::invalid_argument(format!(
+            "refusing to delete \"{}\": it names no directory under a parent",
+            worktree_path.display()
+        )));
+    };
+    let resolved_parent = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+    let target = resolved_parent.join(name);
+    let project =
+        std::fs::canonicalize(project_path).unwrap_or_else(|_| project_path.to_path_buf());
+    if project == target || project.starts_with(&target) {
+        return Err(error::invalid_argument(format!(
+            "refusing to delete \"{}\": it is the project checkout or contains it",
+            target.display()
+        )));
+    }
+    let metadata = match std::fs::symlink_metadata(&target) {
+        Ok(metadata) => metadata,
+        // A path that is already gone is a success: the caller's next step is
+        // dropping the rows either way, and refusing here would stand a
+        // workspace back up that nothing can reach -- which is what #604 was.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(error::io_error(format!(
+                "could not inspect \"{}\": {err}",
+                target.display()
+            )));
+        }
+    };
+    let deleted = if metadata.is_dir() {
+        std::fs::remove_dir_all(&target)
+    } else {
+        std::fs::remove_file(&target)
+    };
+    match deleted {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(error::io_error(format!(
+            "could not delete \"{}\": {err}",
+            target.display()
+        ))),
+    }
+}
+
+/// argv for one `git worktree remove`. A forced removal passes `--force`
+/// twice, not once: git refuses a *locked* working tree under a single flag
+/// and answers "use 'remove -f -f' to override or unlock first", so the one
+/// flag Drogon used to send left the Force checkbox unable to delete exactly
+/// the workspaces it exists for (#604).
+fn git_worktree_remove_argv(worktree_path: &str, force: bool) -> Vec<String> {
+    let mut argv = vec!["worktree".to_string(), "remove".to_string()];
+    if force {
+        argv.push("--force".to_string());
+        argv.push("--force".to_string());
+    }
+    argv.push(worktree_path.to_string());
+    argv
+}
+
+/// Removes the checkout behind one workspace row, returning once nothing is
+/// left for the caller to do but drop the rows. See
+/// `recovery_after_failed_git_remove` for what `force` has to mean here.
+fn remove_worktree_checkout(
+    project_path: &Path,
+    worktree_path: &str,
+    force: bool,
+    other_registrations: &[String],
+) -> Result<(), RpcError> {
+    refuse_nested_registrations(Path::new(worktree_path), other_registrations)?;
+    let argv = git_worktree_remove_argv(worktree_path, force);
+    // Git itself refuses a dirty worktree without --force; this call
+    // never re-implements that check.
+    let failure = match run_git(project_path, &argv) {
+        Ok(_) => return Ok(()),
+        Err(failure) => failure,
+    };
+
+    match recovery_after_failed_git_remove(
+        force,
+        git_registers_worktree(project_path, worktree_path),
+    ) {
+        RemoveRecovery::ReportGitFailure => Err(failure),
+        RemoveRecovery::OfferForce => Err(error::io_error(format!(
+            "git no longer registers a working tree at \"{worktree_path}\", so it cannot remove it. Use Force to delete the leftover directory and clear this workspace."
+        ))),
+        RemoveRecovery::DeleteCheckoutDirectory => {
+            delete_checkout_directory(project_path, Path::new(worktree_path))?;
+            // The directory is gone, but git may still hold the admin entry
+            // that made `remove` refuse, and the name stays taken until that
+            // entry goes. Retrying the same scoped remove retires exactly
+            // this worktree's entry, now that what it objected to is no
+            // longer there. `git worktree prune` would do it too -- and would
+            // also deregister every *other* worktree whose directory merely
+            // happens to be away right now (an unmounted volume, a detached
+            // drive), which deleting this workspace has no business doing.
+            // Deliberately not fatal: the rows the user asked to be rid of
+            // are about to go either way, and failing here over an entry git
+            // would not let go of (a read-only `.git`, a squashed NFS root)
+            // is how a workspace became undeletable in the first place. The
+            // cost of the rare miss is a prunable entry keeping the branch
+            // name taken, which `git worktree prune` clears.
+            let _ = run_git(project_path, &git_worktree_remove_argv(worktree_path, true));
+            Ok(())
+        }
+    }
+}
+
 /// Bundles every column `worktree_json` renders, named-field construction
 /// at each of its five call sites (create / list-folder / list-git /
 /// rename / update) instead of a positional argument list long enough to
@@ -497,9 +738,11 @@ fn folder_implicit_worktree_json(
     conn: &rusqlite::Connection,
     project: &crate::project::ProjectInfo,
 ) -> Result<Value, RpcError> {
+    // A folder can back several Workspaces now (issue #579); the implicit
+    // worktree always renders the folder's primary (earliest-created) row.
     let workspace_id: String = conn
         .query_row(
-            "SELECT id FROM workspaces WHERE path = ?1",
+            "SELECT id FROM workspaces WHERE path = ?1 ORDER BY created_at LIMIT 1",
             [&project.path],
             |r| r.get(0),
         )
@@ -655,9 +898,27 @@ impl Engine {
             crate::project::get(&conn, &project_id)?
         };
         if project.kind != "git" {
-            return Err(error::invalid_argument(
-                "worktree.create requires a git project; a folder project has one implicit worktree",
-            ));
+            // A folder Project owns no git worktrees, but it can own several
+            // named Workspaces that share its one folder path (issue #579):
+            // each is its own sidebar section with its own sessions. None of
+            // the git-only Advanced options apply here, so reject them
+            // honestly rather than silently ignoring them.
+            if base_ref.is_some()
+                || branch_override.is_some()
+                || reuse_branch
+                || parent_worktree_id.is_some()
+                || !sparse.is_empty()
+            {
+                return Err(error::invalid_argument(
+                    "a folder workspace has no branch, base ref, parent or sparse checkout",
+                ));
+            }
+            return self.create_folder_workspace(
+                &project,
+                &name,
+                note.as_deref(),
+                creator.as_deref(),
+            );
         }
         if let Some(parent) = &parent_worktree_id {
             let conn = self.db.lock().unwrap();
@@ -866,6 +1127,75 @@ impl Engine {
         }))
     }
 
+    /// Creates an additional Workspace section for a folder Project (issue
+    /// #579). A folder has no git worktrees, so this makes no `git`
+    /// invocation: it registers a second Workspace at the same folder path
+    /// (via [`crate::workspace::register_additional_at_path`]) and inserts a
+    /// real `worktrees` row pointing at it, so the sidebar renders it as its
+    /// own section grouping its own sessions — exactly like a git worktree
+    /// card, minus branch/head. The folder's original implicit worktree
+    /// (`id == project.id`) stays the primary; this row carries a distinct
+    /// uuid, so the renderer treats it as a normal, renamable/removable card.
+    fn create_folder_workspace(
+        &self,
+        project: &crate::project::ProjectInfo,
+        name: &str,
+        note: Option<&str>,
+        creator: Option<&str>,
+    ) -> Result<Value, RpcError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(error::invalid_argument("workspace name must not be empty"));
+        }
+        let conn = self.db.lock().unwrap();
+        let workspace = crate::workspace::register_additional_at_path(
+            &conn,
+            &self.host_id,
+            &project.path,
+            name,
+        )?;
+        let workspace_id = workspace["id"]
+            .as_str()
+            .ok_or_else(|| error::internal_error("workspace registration missing id"))?
+            .to_string();
+        let id = uuid::Uuid::new_v4().to_string();
+        let created_at = now_rfc3339();
+        let sort_order: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM worktrees WHERE project_id = ?1",
+                [&project.id],
+                |r| r.get(0),
+            )
+            .map_err(error::from_sqlite)?;
+        conn.execute(
+            "INSERT INTO worktrees (id, project_id, workspace_id, path, branch, head, base_ref, title, note, parent_worktree_id, created_at, sort_order, last_activity_at, creator) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+            rusqlite::params![id, project.id, workspace_id, project.path, "", "", Option::<String>::None, name, note, Option::<String>::None, created_at, sort_order, created_at, creator],
+        )
+        .map_err(error::from_sqlite)?;
+        Ok(worktree_json(WorktreeMetaRow {
+            id: &id,
+            project_id: &project.id,
+            workspace_id: &workspace_id,
+            path: &project.path,
+            branch: "",
+            head: "",
+            base_ref: None,
+            title: Some(name),
+            note,
+            parent_worktree_id: None,
+            created_at: &created_at,
+            workspace_status: None,
+            is_pinned: false,
+            is_archived: false,
+            sort_order,
+            manual_order: None,
+            last_activity_at: Some(&created_at),
+            linked_pr: None,
+            creator,
+        }))
+    }
+
     /// The fork's smart-name-field branch source (`repo-base-ref-search`):
     /// local heads plus remote refs, most recently committed first, with the
     /// symbolic `<remote>/HEAD` entries dropped. Rows carry the fork's
@@ -943,7 +1273,48 @@ impl Engine {
         let project = crate::project::get(&conn, &project_id)?;
 
         if project.kind == "folder" {
-            return Ok(json!({ "worktrees": [folder_implicit_worktree_json(&conn, &project)?] }));
+            // The synthesized primary (the folder itself) plus any additional
+            // folder Workspaces the user created as their own sections
+            // (issue #579). The additional rows are real `worktrees` rows
+            // with distinct uuids sharing the folder path; they carry no
+            // branch/head, so there is no git checkout to reconcile against.
+            let mut worktrees = vec![folder_implicit_worktree_json(&conn, &project)?];
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, workspace_id, path, title, note, created_at, \
+                     workspace_status, is_pinned, is_archived, sort_order, manual_order, last_activity_at, creator \
+                     FROM worktrees WHERE project_id = ?1 ORDER BY created_at",
+                )
+                .map_err(error::from_sqlite)?;
+            let rows = stmt
+                .query_map([&project_id], |r| {
+                    Ok(worktree_json(WorktreeMetaRow {
+                        id: &r.get::<_, String>(0)?,
+                        project_id: &project_id,
+                        workspace_id: &r.get::<_, String>(1)?,
+                        path: &r.get::<_, String>(2)?,
+                        branch: "",
+                        head: "",
+                        base_ref: None,
+                        title: r.get::<_, Option<String>>(3)?.as_deref(),
+                        note: r.get::<_, Option<String>>(4)?.as_deref(),
+                        parent_worktree_id: None,
+                        created_at: &r.get::<_, String>(5)?,
+                        workspace_status: r.get::<_, Option<String>>(6)?.as_deref(),
+                        is_pinned: r.get::<_, bool>(7)?,
+                        is_archived: r.get::<_, bool>(8)?,
+                        sort_order: r.get::<_, i64>(9)?,
+                        manual_order: r.get::<_, Option<i64>>(10)?,
+                        last_activity_at: r.get::<_, Option<String>>(11)?.as_deref(),
+                        linked_pr: None,
+                        creator: r.get::<_, Option<String>>(12)?.as_deref(),
+                    }))
+                })
+                .map_err(error::from_sqlite)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(error::from_sqlite)?;
+            worktrees.extend(rows);
+            return Ok(json!({ "worktrees": worktrees }));
         }
 
         let mut stmt = conn
@@ -1057,36 +1428,160 @@ impl Engine {
         Ok(json!({ "worktrees": worktrees }))
     }
 
+    /// Every other registered location, so a removal can refuse to take one
+    /// of them down with this one (see `refuse_nested_registrations`).
+    /// Projects count as well as worktrees: a folder project or a nested
+    /// repository registered in its own right is a card too, and losing its
+    /// files to a sibling's delete is the same harm.
+    fn other_registrations(
+        &self,
+        worktree_id: &str,
+        worktree_path: &str,
+    ) -> Result<Vec<String>, RpcError> {
+        let conn = self.db.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT path FROM worktrees WHERE id != ?1 \
+                 UNION SELECT path FROM projects WHERE path != ?2",
+            )
+            .map_err(error::from_sqlite)?;
+        let paths = stmt
+            .query_map(rusqlite::params![worktree_id, worktree_path], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(error::from_sqlite)?;
+        paths
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(error::from_sqlite)
+    }
+
     pub(super) fn do_worktree_remove(&self, params: &Value) -> Result<Value, RpcError> {
         let id = require_str(params, "id")?.to_string();
         let force = optional_bool(params, "force", false)?;
 
-        let (project_path, worktree_path, workspace_id) = {
+        let row = {
             let conn = self.db.lock().unwrap();
             conn.query_row(
-                "SELECT p.path, w.path, w.workspace_id FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE w.id = ?1",
+                "SELECT p.path, p.kind, w.path, w.workspace_id FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE w.id = ?1",
                 [&id],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)),
             )
             .optional()
             .map_err(error::from_sqlite)?
-            .ok_or_else(|| error::not_found("worktree not found"))?
+        };
+        let Some((project_path, project_kind, worktree_path, workspace_id)) = row else {
+            // Deliberately before this call takes the workspace admission
+            // gate: `project.remove` takes that same write gate, and a
+            // thread that already holds it would deadlock the daemon.
+            return self.remove_implicit_folder_worktree(&id);
         };
 
-        let mut argv = vec!["worktree".to_string(), "remove".to_string()];
-        if force {
-            argv.push("--force".to_string());
+        // The same admission gate `project.remove` holds: while this call
+        // settles a workspace's terminals and takes its checkout apart, no
+        // session may be admitted into it, or the delete would race a
+        // brand-new PTY into the directory it is about to remove. It is
+        // taken here rather than at the top of the call because the
+        // implicit-folder branch above delegates to `project.remove`, which
+        // takes this same write gate — one thread cannot hold it twice.
+        let _workspace_admission = self.workspace_lifecycle_gate.write().unwrap();
+
+        // Refuse before settling anything. This check is pure, and a delete
+        // that was always going to refuse must not first cost an agent the
+        // terminal it was working in.
+        if project_kind != "folder" {
+            refuse_nested_registrations(
+                Path::new(&worktree_path),
+                &self.other_registrations(&id, &worktree_path)?,
+            )?;
         }
-        argv.push(worktree_path);
-        // Git itself refuses a dirty worktree without --force; this call
-        // never re-implements that check.
-        run_git(Path::new(&project_path), &argv)?;
+
+        // Issue #621: the checkout is about to be pulled out from under
+        // whatever runs in it, and a folder section's registration out from
+        // under its terminals. `git worktree remove` looks at the index, not
+        // at processes, so the sessions are this call's to answer for.
+        //
+        // Scope: a git checkout takes every Workspace registered inside it
+        // with it, so all of their terminals are at stake — including the
+        // ones `refuse_nested_registrations` cannot see, which reads
+        // `worktrees` and `projects` while a plain `workspace.register` (or
+        // a legacy row) has neither. A folder section deletes no files —
+        // only its own registration goes — so it answers for its own row
+        // alone and never reaches into the Project's.
+        let scope = if project_kind == "folder" {
+            crate::workspace_session_settle::DeletionScope::registration_only(&workspace_id)
+        } else {
+            let mut scope = self.deletion_scope_for(Path::new(&worktree_path))?;
+            if !scope.workspace_ids.contains(&workspace_id) {
+                scope.workspace_ids.push(workspace_id.clone());
+            }
+            scope
+        };
+        // Force stops what it can first; then one rule judges both paths.
+        // Whatever is still unsettled refuses the delete and says which case
+        // it is, so `removed: true` means every terminal in that directory
+        // was observed to exit — never that this process lost track of one.
+        if force {
+            self.settle_workspace_sessions(&scope)?;
+        }
+        if let Some(refusal) = self.workspace_session_evidence(&scope)?.refusal(force) {
+            return Err(refusal);
+        }
+
+        // A folder Workspace section (issue #579) has no git worktree to
+        // remove — its path is the folder itself, shared with the project.
+        // Removing it only unregisters this Workspace row; the folder and
+        // its files are never touched.
+        if project_kind != "folder" {
+            // Re-read rather than reuse the list from before the settle:
+            // `project.add`, `worktree.create` and `workspace.register` take
+            // no workspace gate, so a registration made while terminals were
+            // being stopped would otherwise lose its files to this delete
+            // and leave its rows dangling.
+            remove_worktree_checkout(
+                Path::new(&project_path),
+                &worktree_path,
+                force,
+                &self.other_registrations(&id, &worktree_path)?,
+            )?;
+        }
 
         let conn = self.db.lock().unwrap();
         conn.execute("DELETE FROM worktrees WHERE id = ?1", [&id])
             .map_err(error::from_sqlite)?;
         conn.execute("DELETE FROM workspaces WHERE id = ?1", [&workspace_id])
             .map_err(error::from_sqlite)?;
+        Ok(json!({ "id": id, "removed": true }))
+    }
+
+    /// `worktree.remove` for a folder Project's implicit worktree, whose id
+    /// is the Project's own and which has no `worktrees` row of its own (see
+    /// `folder_implicit_worktree_json`). Without this the lookup above found
+    /// nothing and the sidebar's "Remove Workspace" answered "worktree not
+    /// found" every time, with no Force checkbox to fall back on -- a folder
+    /// workspace could not be deleted at all (#604). What that row owns is a
+    /// registration, so removing it is `project.remove`, with that method's
+    /// file semantics exactly: an ordinary folder project keeps its folder,
+    /// and a Quick Session's app-owned scratch under the data dir is cleaned
+    /// up, which is already what deleting a Chat card does (`ChatsList`
+    /// submits `project.remove`). Unknown ids keep the same `not_found`.
+    fn remove_implicit_folder_worktree(&self, id: &str) -> Result<Value, RpcError> {
+        let is_folder_project = {
+            let conn = self.db.lock().unwrap();
+            conn.query_row(
+                "SELECT 1 FROM projects WHERE id = ?1 AND kind = 'folder'",
+                [id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(error::from_sqlite)?
+            .is_some()
+        };
+        if !is_folder_project {
+            return Err(error::not_found("worktree not found"));
+        }
+        // A fresh params value, so nothing `project.remove` also understands
+        // (`deleteFiles`) can reach it through a `worktree.remove` call.
+        self.do_project_remove(&json!({ "id": id }))?;
         Ok(json!({ "id": id, "removed": true }))
     }
 
@@ -1240,5 +1735,229 @@ mod tests {
     fn short_branch_strips_the_refs_heads_prefix_only_when_present() {
         assert_eq!(short_branch("refs/heads/feature"), "feature");
         assert_eq!(short_branch("feature"), "feature");
+    }
+
+    // --- Forced-removal recovery (#604) -------------------------------------
+
+    #[test]
+    fn a_forced_remove_passes_force_twice_as_git_demands_of_a_locked_worktree() {
+        assert_eq!(
+            git_worktree_remove_argv("/w", false),
+            ["worktree", "remove", "/w"]
+        );
+        assert_eq!(
+            git_worktree_remove_argv("/w", true),
+            ["worktree", "remove", "--force", "--force", "/w"],
+            "one --force leaves git refusing a locked working tree outright"
+        );
+    }
+
+    #[test]
+    fn a_probe_that_cannot_answer_never_licenses_deleting_a_directory() {
+        // No git, a timeout, a killed capture: the accompanying failure says
+        // nothing about the checkout, so force must not act on it either.
+        assert_eq!(
+            recovery_after_failed_git_remove(true, None),
+            RemoveRecovery::ReportGitFailure
+        );
+        assert_eq!(
+            recovery_after_failed_git_remove(false, None),
+            RemoveRecovery::ReportGitFailure
+        );
+    }
+
+    #[test]
+    fn force_deletes_the_checkout_whichever_refusal_git_reached() {
+        // Locked, unregistered, or anything else git exits non-zero on: the
+        // user ticked Force, so the workspace goes.
+        assert_eq!(
+            recovery_after_failed_git_remove(true, Some(true)),
+            RemoveRecovery::DeleteCheckoutDirectory
+        );
+        assert_eq!(
+            recovery_after_failed_git_remove(true, Some(false)),
+            RemoveRecovery::DeleteCheckoutDirectory
+        );
+    }
+
+    #[test]
+    fn unforced_keeps_gits_verdict_but_names_force_when_git_has_no_verdict_to_give() {
+        assert_eq!(
+            recovery_after_failed_git_remove(false, Some(true)),
+            RemoveRecovery::ReportGitFailure,
+            "git's own 'use --force to delete it' is the right message"
+        );
+        assert_eq!(
+            recovery_after_failed_git_remove(false, Some(false)),
+            RemoveRecovery::OfferForce,
+            "'is not a working tree' tells the user nothing they can act on"
+        );
+    }
+
+    #[test]
+    fn nested_registrations_are_refused_but_a_string_prefix_sibling_is_not() {
+        let nested = |target: &str, others: &[&str]| {
+            refuse_nested_registrations(
+                Path::new(target),
+                &others.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            )
+        };
+
+        assert!(
+            nested("/w/outer", &["/w/outer/inner"]).is_err(),
+            "a checkout inside the target would be destroyed with it"
+        );
+        assert!(
+            nested("/w/outer", &["/w/outer/a/b/c"]).is_err(),
+            "however deeply it nests"
+        );
+        // A false refusal would make that workspace undeletable, which is the
+        // bug this whole change exists to end -- so prefix-of-the-string is
+        // not prefix-of-the-path.
+        assert!(
+            nested("/w/outer", &["/w/outer2", "/w/outer-2", "/w/other"]).is_ok(),
+            "a sibling whose name merely starts the same is not inside it"
+        );
+        assert!(
+            nested("/w/outer", &["/w/outer"]).is_ok(),
+            "nor is the target itself, however it got listed twice"
+        );
+        assert!(
+            nested("/w/outer", &["/w", "/elsewhere"]).is_ok(),
+            "nor is anything outside it"
+        );
+    }
+
+    // --- Checkout-directory deletion guards (#604) --------------------------
+
+    #[test]
+    fn checkout_delete_refuses_a_relative_or_project_owning_path() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+
+        assert_eq!(
+            delete_checkout_directory(&project, Path::new("workspaces/x"))
+                .unwrap_err()
+                .code,
+            "invalid_argument"
+        );
+        assert_eq!(
+            delete_checkout_directory(&project, &project)
+                .unwrap_err()
+                .code,
+            "invalid_argument",
+            "the project checkout is never the orphan"
+        );
+        assert_eq!(
+            delete_checkout_directory(&project, root.path())
+                .unwrap_err()
+                .code,
+            "invalid_argument",
+            "nor is any directory containing it"
+        );
+        assert!(project.exists(), "a refused cleanup deletes nothing");
+    }
+
+    #[test]
+    fn checkout_delete_removes_the_checkout_and_tolerates_one_already_gone() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let orphan = root.path().join("orphan");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::create_dir_all(orphan.join("nested")).unwrap();
+        std::fs::write(orphan.join("nested/file.txt"), "work").unwrap();
+
+        delete_checkout_directory(&project, &orphan).unwrap();
+        assert!(!orphan.exists());
+        delete_checkout_directory(&project, &orphan)
+            .expect("a path that is already gone is a success, not a failure");
+    }
+
+    #[test]
+    fn checkout_delete_handles_a_path_that_is_not_a_directory() {
+        // Whatever sits at the recorded path has to go, or the row it belongs
+        // to becomes undeletable again -- the whole of #604.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let stray = root.path().join("was-a-workspace");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::write(&stray, "left behind").unwrap();
+
+        delete_checkout_directory(&project, &stray).unwrap();
+        assert!(!stray.exists());
+    }
+
+    // Unix-only: Windows CI compiles this lib test target (it runs
+    // `cargo test -p drogon-core --lib mentu::execution::timeout_tests`), and
+    // `std::os::unix::fs::symlink` does not exist there.
+    #[cfg(unix)]
+    #[test]
+    fn checkout_delete_unlinks_a_symlinked_checkout_without_following_it() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let elsewhere = root.path().join("elsewhere");
+        let link = root.path().join("linked-workspace");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("keep.txt"), "not this workspace's").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+
+        delete_checkout_directory(&project, &link).unwrap();
+        assert!(!link.exists(), "the link itself is removed");
+        assert!(
+            elsewhere.join("keep.txt").exists(),
+            "whatever it pointed at is left alone"
+        );
+    }
+
+    /// Issue #621: settling a workspace's terminals is worth nothing if a
+    /// session can be admitted into it a moment later, so the removal takes
+    /// the same exclusive admission gate `project.remove` holds, before it
+    /// touches registration or files. A folder section is the probe: it
+    /// reaches the gate with no git repository in play.
+    #[test]
+    fn removal_waits_for_exclusive_workspace_admission() {
+        use std::sync::{Arc, mpsc};
+        use std::time::Duration;
+
+        let data = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let engine = Arc::new(Engine::open(data.path()).unwrap());
+        let project = engine
+            .do_project_add(&json!({"path": folder.path().to_string_lossy()}))
+            .unwrap();
+        let section = engine
+            .do_worktree_create(&json!({"projectId": project["id"], "name": "section"}))
+            .unwrap();
+        let section_id = section["id"].as_str().unwrap().to_string();
+
+        let admitted = engine.workspace_lifecycle_gate.read().unwrap();
+        let worker = engine.clone();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            done_tx
+                .send(worker.do_worktree_remove(&json!({"id": section_id})))
+                .unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            matches!(
+                done_rx.recv_timeout(Duration::from_millis(100)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ),
+            "removal must not proceed while a session admission holds the gate"
+        );
+        drop(admitted);
+        assert_eq!(
+            done_rx
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+                .unwrap()["removed"],
+            json!(true)
+        );
+        thread.join().unwrap();
     }
 }

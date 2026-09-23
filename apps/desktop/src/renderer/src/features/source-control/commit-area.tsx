@@ -26,6 +26,8 @@ export type CommitAreaProps = {
   isBusy: boolean;
   /** Compare state for the dropdown rows and their labels. */
   upstream: string | null;
+  /** Any remote configured; null (unknown daemon) allows Publish and lets the backend fail honestly. */
+  hasRemotes: boolean | null;
   ahead: number | null;
   behind: number | null;
   /** Create PR row gate, from resolveCreatePrToolbarAction. */
@@ -36,6 +38,10 @@ export type CommitAreaProps = {
   onCommitAndPush: () => void;
   onCommitAndSync: () => void;
   onPush: () => void;
+  /** #332 "Publish Branch": push -u origin HEAD, then track upstream. */
+  onPublish: () => void;
+  /** #332 "Force Push": lease-checked rewrite behind a confirm dialog. */
+  onForcePush: () => void;
   /** Fork's "Push before PR": push, then create the PR. */
   onPushBeforePr: () => void;
   /** Fork's "Fast-forward" row — this repo's pull is ff-only. */
@@ -59,6 +65,7 @@ export function CommitArea({
   hasPartiallyStagedChanges,
   isBusy,
   upstream,
+  hasRemotes,
   ahead,
   behind,
   createPrDisabled,
@@ -68,6 +75,8 @@ export function CommitArea({
   onCommitAndPush,
   onCommitAndSync,
   onPush,
+  onPublish,
+  onForcePush,
   onPushBeforePr,
   onFastForward,
   onSync,
@@ -96,6 +105,9 @@ export function CommitArea({
     commitBusy: isBusy,
     syncBusy: isSecondaryBusy,
     hasUpstream: upstream != null,
+    // Null means unknown (older daemon): never claim "No remote" it
+    // cannot prove — the backend fails honestly when no remote exists.
+    hasRemotes: hasRemotes !== false,
     ahead: ahead ?? 0,
     behind: behind ?? 0,
     createPrDisabled: createPrDisabled || isBusy,
@@ -132,6 +144,8 @@ export function CommitArea({
           else if (kind === "commit-push") onCommitAndPush();
           else if (kind === "commit-sync") onCommitAndSync();
           else if (kind === "push") onPush();
+          else if (kind === "publish") onPublish();
+          else if (kind === "force-push") onForcePush();
           else if (kind === "create-pr") onCreatePr();
           else if (kind === "push-pr") onPushBeforePr();
           else if (kind === "fast-forward") onFastForward();

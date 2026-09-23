@@ -38,6 +38,7 @@
 
 import { createServer } from 'node:http'
 import { appendFileSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 const FIXTURE_TOKEN = 'fixture-token'
@@ -45,7 +46,13 @@ const SLOW_JQL_DELAY_MS = 10_000
 
 const { values } = parseArgs({
   options: {
-    data: { type: 'string', default: new URL('./data/screenshot-site.json', import.meta.url).pathname },
+    // `fileURLToPath`, not `.pathname`: a checkout under a path with a
+    // space (Drogon's own worktrees live under "Application Support")
+    // keeps the %20 in a URL pathname and the dataset read fails.
+    data: {
+      type: 'string',
+      default: fileURLToPath(new URL('./data/screenshot-site.json', import.meta.url)),
+    },
     port: { type: 'string', default: '0' },
     log: { type: 'string', default: '' },
   },

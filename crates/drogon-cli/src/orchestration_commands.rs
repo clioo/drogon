@@ -1178,6 +1178,13 @@ pub async fn run(
                 WorkerExecution::Reuse { session_identity } => Some(session_identity.clone()),
                 _ => None,
             };
+            // Issue #622: a worker started from inside a session nests under
+            // it — same env-inherited parent record as `terminal create` /
+            // `harness start`. Outside a session the variable is absent and
+            // the worker stays parentless.
+            let parent_session_id = std::env::var("DROGON_SESSION_ID")
+                .ok()
+                .filter(|parent| !parent.is_empty());
             let params = WorkerStartParams {
                 scope: coordinator_scope(&host_id, scope),
                 task_id: task.clone(),
@@ -1189,6 +1196,7 @@ pub async fn run(
                 comment: comment.clone(),
                 timeout_ms: *timeout_ms,
                 retry_of: retry_of.clone(),
+                parent_session_id,
             };
             let value = validate_params(&params, |p| p.validate_shape(&host_id), request_id)?;
             let call = client

@@ -16,9 +16,51 @@ const pending = {
   revision: "0123456789ab",
   reason: "runtime_busy",
 };
-afterEach(() => {
-  cleanup();
+/**
+ * True once no toast node remains. Gives up after 2s with zero progress: that
+ * means a neighbour file replaced requestAnimationFrame with a no-op, so no
+ * removal timer is even pending and unmounting clears everything. Caps at 10s
+ * so a pathological runner cannot hang the suite.
+ */
+async function toastHostSettled(): Promise<boolean> {
+  const start = Date.now();
+  let lastCount = -1;
+  let lastChange = start;
+  for (;;) {
+    const count = document.querySelectorAll("[data-sonner-toast]").length;
+    const now = Date.now();
+    if (count === 0) return true;
+    if (count !== lastCount) {
+      lastCount = count;
+      lastChange = now;
+    }
+    if (now - lastChange > 2_000 || now - start > 10_000) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+afterEach(async () => {
+  // The safety-poll test leaves fake timers on; the flush below needs the
+  // real clock.
+  vi.useRealTimers();
+  // Dismiss while the Toaster is still mounted so the dismissal flows through
+  // its subscriber instead of into the void.
   toast.dismiss();
+  // Await the actual removal: sonner removes a dismissed toast on a
+  // rAF-deferred publish plus deleteToast's 200ms exit timer
+  // (TIME_BEFORE_UNMOUNT), neither of which unmounting cancels. A test ending
+  // first strands those timers past the file; with `isolate: false` they fire
+  // after this file's jsdom is torn down and crash a later node-env file with
+  // `ReferenceError: window is not defined` (sonner setTimeout ->
+  // removeToast setToasts -> dispatchSetState -> resolveUpdatePriority).
+  if (await toastHostSettled()) {
+    // A dismiss that races an in-flight auto-close schedules TWO exit timers
+    // (the auto-close path plus the delete-flag effect path); the first
+    // removal unmounts the toast while the second is still pending. Let it
+    // fire while the host is still mounted.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  cleanup();
 });
 
 describe("DaemonUpdateBanner", () => {

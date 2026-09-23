@@ -352,6 +352,7 @@ pub(crate) fn launch_reserved_with_cleanup(
                 plan.session_id.clone(),
                 plan.incarnation.clone(),
                 plan.workspace_id.clone(),
+                plan.cwd.clone(),
                 plan.host_id.clone(),
                 plan.command.clone(),
                 plan.args.clone(),

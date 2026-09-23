@@ -1,11 +1,11 @@
 /* MIT Copyright (c) 2026 Lovecast Inc. Ported from Orca's
-   src/renderer/src/components/sidebar/worktree-card-agent-summary.ts
-   (adapter: the reference summarizes dashboard agent rows with dot
-   states; this repo's card sees Sessions with `agentState`, so the same
-   group-order/count projection runs over `agentState` values instead.
+   worktree-card-agent-summary.ts (adapter: the reference summarizes agent
+   rows with dot states; this repo groups Sessions by `sessionAgentState`,
+   the same normalized derivation rows, tabs and the card sentence read.
    Pure functions, unit-tested.) */
 import type { AgentState, Session } from "../../../../shared/session-contract";
-import { sessionDotState } from "./agent-state";
+import { sessionAgentState } from "./agent-state";
+import { resolveRowHarnessId } from "./worktree-agent-rows";
 
 // Why: the source's SUMMARY_STATE_ORDER (waiting, blocked, working,
 // monitoring, interrupted, done, unverifiable, idle) puts the stale-channel
@@ -66,27 +66,28 @@ export function formatWorktreeCardSummaryLine(
 export function cardDotState(sessions: Session[]): AgentState {
   if (sessions.length === 0) return "unknown";
   const present = new Set<AgentState>();
-  for (const session of sessions) present.add(sessionDotState(session));
+  for (const session of sessions) present.add(sessionAgentState(session));
   return SUMMARY_STATE_ORDER.find((state) => present.has(state)) ?? "unknown";
 }
 
 /**
  * The worktree's agent identity for the card's status lane: the session that
  * owns the state the lane's glyph is showing (`cardDotState`'s winning
- * group), and only when that session actually reported a harness. The lane
- * draws no avatar for a plain shell or an empty card — the reference's
- * summary pill pairs an AgentStateDot with the AgentIcon of the agents in
- * that same state group (worktree-card-compact-agents.tsx), and this is the
- * same pairing for the single card-level lane.
+ * group), and only when that session has a resolved harness (launch or
+ * observed, via `resolveRowHarnessId`). The lane draws no avatar for a
+ * plain shell or an empty card — the reference's summary pill pairs an
+ * AgentStateDot with the AgentIcon of the agents in that same state group
+ * (worktree-card-compact-agents.tsx), and this is the same pairing for the
+ * single card-level lane.
  */
 export function cardIdentitySession(sessions: Session[]): Session | null {
   const identified = sessions.filter(
-    (session) => session.harnessId !== null && session.harnessId !== undefined,
+    (session) => resolveRowHarnessId(session) !== null,
   );
   if (identified.length === 0) return null;
   const dot = cardDotState(sessions);
   return (
-    identified.find((session) => sessionDotState(session) === dot) ??
+    identified.find((session) => sessionAgentState(session) === dot) ??
     identified[0] ??
     null
   );
@@ -96,7 +97,7 @@ export function summarizeCardAgentStates(sessions: Session[]): string {
   if (sessions.length === 0) return "";
   const counts = new Map<AgentState, number>();
   for (const session of sessions) {
-    const state = sessionDotState(session);
+    const state = sessionAgentState(session);
     counts.set(state, (counts.get(state) ?? 0) + 1);
   }
   const parts = SUMMARY_STATE_ORDER.flatMap((state) => {
@@ -126,7 +127,7 @@ export function buildCardSummaryGroups(
 ): SummarySessionGroup[] {
   const groups = new Map<AgentState, Session[]>();
   for (const session of sessions) {
-    const state = sessionDotState(session);
+    const state = sessionAgentState(session);
     const group = groups.get(state);
     if (group) {
       group.push(session);
@@ -148,7 +149,7 @@ export function summarizeSessionIdentities(
 ): string {
   return sessions
     .map((session) => {
-      const stateLabel = formatSummaryStateLabel(sessionDotState(session));
+      const stateLabel = formatSummaryStateLabel(sessionAgentState(session));
       return `${labelFor(session)} ${stateLabel}`;
     })
     .join("; ");

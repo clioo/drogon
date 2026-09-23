@@ -197,6 +197,47 @@ pub fn error_envelope(request_id: &str, code: &str, message: &str) -> Value {
     })
 }
 
+/// Every environment variable that binds a `drogon-cli` invocation to some
+/// OTHER Drogon runtime. This suite is routinely run from inside a Drogon
+/// session — a developer's terminal or a dispatched worker — and each of
+/// these would silently retarget the CLI away from the test's own mock:
+/// `DROGON_SESSION_ID` makes `terminal`/`worktree` verbs infer a parent that
+/// does not exist here, and `DROGON_DISPATCH_CAPABILITY` is authoritative
+/// over the service token (`credential.rs`), so every call comes back
+/// `unauthorized`. Stripped before `extra_env`, so a test that wants one of
+/// them still sets it explicitly and gets exactly the value it asked for.
+pub const INHERITED_BINDINGS: &[&str] = &[
+    // Authoritative over the service token (`credential.rs`): inherited, the
+    // test's own daemon answers every call `unauthorized`.
+    "DROGON_DISPATCH_CAPABILITY",
+    // Session identity and its incarnations: `terminal`/`worktree` verbs
+    // infer a parent from these, and `orchestration_binding.rs` refuses a
+    // stale one.
+    "DROGON_SESSION_ID",
+    "DROGON_SESSION_INCARNATION",
+    "DROGON_HOOK_INCARNATION",
+    "DROGON_INCARNATION",
+    "DROGON_WORKSPACE_ID",
+    // Scope hints `orchestration_commands.rs` reads: an inherited host id
+    // makes `--from` fail `unsupported_host` and conflicts with `--host`.
+    "DROGON_HOST_ID",
+    "DROGON_DISPATCH_ID",
+    "DROGON_TASK_ID",
+    "DROGON_RUN_ID",
+    "DROGON_COORDINATOR_ID",
+    // Read daemon-side (`drogon-core` mentu runtime): a developer's value
+    // would reach every daemon a test spawns.
+    "DROGON_MENTU_RUNTIME",
+];
+
+/// Points a command at `data_dir` and clears every inherited binding.
+pub fn scrub_environment(command: &mut std::process::Command, data_dir: &Path) {
+    command.env("DROGON_DATA_DIR", data_dir);
+    for name in INHERITED_BINDINGS {
+        command.env_remove(name);
+    }
+}
+
 /// Runs the built drogon-cli binary with `DROGON_DATA_DIR` pointed at the
 /// mock's data directory.
 pub fn run_cli(data_dir: &Path, args: &[&str]) -> std::process::Output {
@@ -210,7 +251,8 @@ pub fn run_cli_with(
     extra_env: &[(&str, &str)],
 ) -> std::process::Output {
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_drogon-cli"));
-    command.args(args).env("DROGON_DATA_DIR", data_dir);
+    command.args(args);
+    scrub_environment(&mut command, data_dir);
     for (key, value) in extra_env {
         command.env(key, value);
     }
@@ -226,10 +268,8 @@ pub fn run_cli_in(
     extra_env: &[(&str, &str)],
 ) -> std::process::Output {
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_drogon-cli"));
-    command
-        .args(args)
-        .current_dir(cwd)
-        .env("DROGON_DATA_DIR", data_dir);
+    command.args(args).current_dir(cwd);
+    scrub_environment(&mut command, data_dir);
     for (key, value) in extra_env {
         command.env(key, value);
     }

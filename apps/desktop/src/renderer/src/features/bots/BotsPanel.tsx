@@ -137,6 +137,7 @@ export function BotsPanel({
     approveMonitor,
     automationSummaries,
     monitorsByBotId,
+    monitorReadErrorByBotId,
     expandedOverrides,
     toggleExpanded,
     filterQuery,
@@ -148,6 +149,7 @@ export function BotsPanel({
     effective.bots,
     monitorsByBotId ?? {},
     observedLivenessByBotId,
+    monitorReadErrorByBotId,
   );
   const automationsById: Map<string, AutomationSummary> | null =
     automationSummaries === null
@@ -255,7 +257,15 @@ export function BotsPanel({
                 {visibleBots.map((bot) => {
                   const monitorCount =
                     monitorsByBotId?.[bot.id]?.length ?? 0;
-                  const unconfigured = isBotUnconfigured(bot, monitorCount);
+                  // A read that ran and FAILED leaves the count unknown,
+                  // so the card must not collapse as "nothing configured".
+                  const monitorsUnread =
+                    monitorReadErrorByBotId[bot.id] !== undefined;
+                  const unconfigured = isBotUnconfigured(
+                    bot,
+                    monitorCount,
+                    monitorsUnread,
+                  );
                   return (
                     <div
                       key={bot.id}
@@ -272,10 +282,15 @@ export function BotsPanel({
                         history={effective.history}
                         automationsById={automationsById}
                         monitors={monitorsByBotId?.[bot.id] ?? null}
+                        monitorReadError={
+                          monitorReadErrorByBotId[bot.id] ?? null
+                        }
                         busy={busy}
                         observedLiveness={observedLivenessByBotId?.[bot.id]}
                         expanded={expandedOverrides[bot.id] ?? !unconfigured}
-                        onToggleExpanded={() => toggleExpanded(bot.id)}
+                        onToggleExpanded={() =>
+                          toggleExpanded(bot.id, monitorsUnread)
+                        }
                         onAddResponsibility={() => {
                           setSelectedBotId(bot.id);
                           setShowResponsibilityForm(true);

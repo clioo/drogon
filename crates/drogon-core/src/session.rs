@@ -20,7 +20,25 @@ use serde_json::{Value, json};
 
 use crate::agent_state::{self, Activity, AgentState};
 use crate::error;
+use std::collections::VecDeque;
+
 use crate::ring::RingBuffer;
+use crate::terminal_modes::{
+    BRACKETED_PASTE_END, BRACKETED_PASTE_START, BracketedPasteScanner, TerminalModes,
+};
+
+/// One grid the pty held, and the ring offset it took effect at.
+#[derive(Clone, Copy)]
+pub(crate) struct GridChange {
+    pub(crate) cursor: u64,
+    pub(crate) cols: u16,
+    pub(crate) rows: u16,
+}
+
+/// How many grid changes a session retains. A drag is tens of resizes; a
+/// reader at the live edge consumes each within a page or two, so this only
+/// has to cover a reader that fell behind, not a whole session.
+const GRID_HISTORY_LIMIT: usize = 64;
 
 #[path = "session_admission.rs"]
 pub(crate) mod session_admission;
@@ -83,6 +101,13 @@ pub(crate) struct SessionHandle {
     pub(crate) session_id: String,
     pub(crate) incarnation: String,
     pub(crate) workspace_id: String,
+    /// The directory this PTY was spawned in. `session.start` accepts an
+    /// explicit `cwd` anywhere inside the workspace root, so the owning
+    /// workspace does not say where the child actually sits — and a delete
+    /// has to know, or it unlinks a directory a terminal is standing in
+    /// (issue #621). Not persisted: a row from a prior instance has no
+    /// child to place, and inventing one would be the opposite of evidence.
+    pub(crate) cwd: String,
     pub(crate) host_id: String,
     pub(crate) command: String,
     pub(crate) args: Vec<String>,
@@ -112,7 +137,17 @@ pub(crate) struct SessionHandle {
     writer: Mutex<Option<Box<dyn Write + Send>>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
     ring: Mutex<RingBuffer>,
-    size: Mutex<(u16, u16)>,
+    /// Every grid this pty has held, each with the ring offset it took
+    /// effect at, oldest first and never empty — the last entry is the
+    /// current grid. One mutex so a reader can never pair a grid with a
+    /// cursor from a different resize.
+    ///
+    /// A history rather than one cut (#605): two resizes can land inside a
+    /// single read page, and a reader told only the newest grid would parse
+    /// the bytes composed at the middle one at the wrong width — stranding
+    /// them exactly like the bug this whole mechanism exists to prevent.
+    /// A fast divider drag against a chatty TUI is how that happens.
+    size: Mutex<VecDeque<GridChange>>,
     /// Child observation is independent of PTY EOF and serialized with exact stop.
     exit_code: Mutex<Option<i64>>,
     /// Set by the reader thread when the PTY read side reached EOF or an
@@ -184,6 +219,24 @@ pub(crate) struct SessionHandle {
     /// so hook wait signals are ignored for it (see `hooks.rs`) and its
     /// exit advances the linked run rows (see `run_completion.rs`).
     headless: AtomicBool,
+    /// Issue #625: whether a framed body would be read as TEXT by the
+    /// program on the far end, from what it announced in its OWN output
+    /// (observed by the reader thread) and from whether `harness.start`
+    /// launched an agent composer here. See
+    /// [`crate::terminal_modes::TerminalModes::paste_is_text`]. That is
+    /// the only far end a framed write is safe for, so this gate decides
+    /// whether `write_parts` frames a body before the Return that
+    /// submits it.
+    paste_is_text: AtomicBool,
+    /// The incremental scanner behind `paste_is_text`. Held separately
+    /// because it carries a partial sequence across chunk boundaries;
+    /// only the reader thread touches it, and readers of the flag use the
+    /// lock-free `AtomicBool` instead.
+    paste_mode_scanner: Mutex<BracketedPasteScanner>,
+    /// Memoized foreground-agent observation (issue #622, in-memory only,
+    /// never persisted). Keyed on the observed pgid with a short TTL so a
+    /// `session.list` poll never turns into a process-probe storm.
+    foreground: Mutex<crate::session_foreground::ForegroundMemo>,
     db: Arc<Mutex<Connection>>,
 }
 
@@ -195,6 +248,7 @@ impl SessionHandle {
         session_id: String,
         incarnation: String,
         workspace_id: String,
+        cwd: String,
         host_id: String,
         command: String,
         args: Vec<String>,
@@ -213,6 +267,7 @@ impl SessionHandle {
             session_id,
             incarnation,
             workspace_id,
+            cwd,
             host_id,
             command,
             args,
@@ -224,7 +279,13 @@ impl SessionHandle {
             writer: Mutex::new(Some(writer)),
             child: Mutex::new(child),
             ring: Mutex::new(RingBuffer::new()),
-            size: Mutex::new((cols, rows)),
+            // Cursor 0: every byte this session ever writes was produced
+            // at the grid it was opened with, until a resize says otherwise.
+            size: Mutex::new(VecDeque::from([GridChange {
+                cursor: 0,
+                cols,
+                rows,
+            }])),
             exit_code: Mutex::new(None),
             reader_done: AtomicBool::new(false),
             last_activity: Mutex::new(None),
@@ -238,8 +299,46 @@ impl SessionHandle {
             explicit_wait_clear: AtomicBool::new(false),
             turn_fact: AtomicU8::new(TURN_INACTIVE),
             headless: AtomicBool::new(false),
+            paste_is_text: AtomicBool::new(false),
+            paste_mode_scanner: Mutex::new(BracketedPasteScanner::default()),
+            foreground: Mutex::new(crate::session_foreground::ForegroundMemo::default()),
             db,
         })
+    }
+
+    /// Feeds one PTY output chunk to the terminal-mode observer. Called
+    /// by the reader thread only, in stream order.
+    pub(crate) fn observe_output_modes(&self, chunk: &[u8]) {
+        let mut scanner = self.paste_mode_scanner.lock().unwrap();
+        scanner.feed(chunk);
+        let modes: TerminalModes = scanner.modes();
+        drop(scanner);
+        let paste_is_text = modes.paste_is_text(self.launched_agent_composer());
+        // Only a change touches the atomic: steady output stays quiet.
+        if self.paste_is_text.load(Ordering::Acquire) != paste_is_text {
+            self.paste_is_text.store(paste_is_text, Ordering::Release);
+        }
+    }
+
+    /// Whether a framed body would be read as text by the far end
+    /// (issue #625). See `TerminalModes::paste_is_text`.
+    pub(crate) fn paste_is_text(&self) -> bool {
+        self.paste_is_text.load(Ordering::Acquire)
+    }
+
+    /// Whether `harness.start` launched an agent composer in this PTY.
+    ///
+    /// Every harness Drogon can launch is one (`HarnessId::ALL`: Claude
+    /// Code, Codex, Pi, OpenCode, Antigravity), so the launch record is
+    /// the answer and no list has to be kept in step here. A plain
+    /// `session.start` — a shell, or whatever the user runs in it — has
+    /// no record and is judged by what it announces instead.
+    ///
+    /// A headless run (`claude -p`) also carries a record, but it paints
+    /// no TUI and never announces bracketed paste, so it is never framed
+    /// for either way.
+    fn launched_agent_composer(&self) -> bool {
+        self.harness_id.is_some()
     }
 
     pub(crate) fn set_status_hooks_enabled(&self, enabled: bool) -> Result<(), RpcError> {
@@ -434,9 +533,11 @@ impl SessionHandle {
 
     /// Hook-authoritative turn fact backing [`agent_state::HookTurn`]:
     /// resumption hooks open the turn, wait hooks park it, turn-end hooks
-    /// conclude it. In-memory only — after a daemon restart the session
-    /// falls back to the activity clock (`HookTurn::Inactive`) rather than
-    /// claiming a turn nobody re-observed.
+    /// conclude it. Mirrored into the durable `sessions.turn_fact` /
+    /// `turn_fact_at` columns (`persist_turn_fact`), so a daemon restart
+    /// keeps reporting a hook-reported turn from the hook's own authority
+    /// (`row_to_session_json` re-reports it) instead of hiding it — loss of
+    /// contact never proves the turn concluded.
     pub(crate) fn hook_turn_fact(&self) -> crate::agent_state::HookTurn {
         match self.turn_fact.load(Ordering::Acquire) {
             TURN_ACTIVE => crate::agent_state::HookTurn::Active,
@@ -767,6 +868,14 @@ fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Se
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    // Issue #625: the far end announces bracketed paste in
+                    // its own output, so observing it costs one scan of a
+                    // chunk we already hold. BEFORE the ring push, so a
+                    // caller that can read a session's `ESC [ ? 2004 h`
+                    // has necessarily already seen the flag flip — a
+                    // caller must never be able to observe the announcement
+                    // and then get an unframed write.
+                    handle.observe_output_modes(&buf[..n]);
                     handle.ring.lock().unwrap().push(&buf[..n]);
                     let now = Instant::now();
                     let marked = if last_activity_marked
@@ -1145,22 +1254,249 @@ pub(crate) fn read(
         .unwrap()
         .read(cursor, limit_bytes)
         .ok_or_else(|| error::invalid_argument("cursor is ahead of all data written so far"))?;
+    Ok(read_response(handle, &outcome))
+}
+
+fn read_response(handle: &SessionHandle, outcome: &crate::ring::ReadOutcome) -> Value {
     let current_verdict_exit = current_verdict(handle);
-    Ok(json!({
+    json!({
         "session": to_json(handle, &current_verdict_exit.0, current_verdict_exit.1),
         "dataBase64": base64_encode(&outcome.bytes),
         "startCursor": outcome.start_cursor,
         "nextCursor": outcome.next_cursor,
         "truncated": outcome.truncated,
-    }))
+        // Additive (#605): the grid in force at this page's first byte,
+        // then every change inside the page, in order. A reader switches
+        // its emulator at each one, so two resizes that land in the same
+        // page are both honoured instead of collapsing to the newest.
+        "gridChanges": grid_changes_for(handle, outcome.start_cursor, outcome.next_cursor),
+    })
 }
 
-pub(crate) fn write(handle: &SessionHandle, data: &[u8]) -> Result<usize, RpcError> {
+/// The grid a reader must hold at `start`, plus every change up to and
+/// including `end`. The leading entry is reported at `start` even when its
+/// cut is older, so a page always says what width to parse its first byte
+/// at — including after ring truncation carried the reader past a cut.
+fn grid_changes_for(handle: &SessionHandle, start: u64, end: u64) -> Value {
+    let history = handle.size.lock().unwrap();
+    let mut changes: Vec<Value> = Vec::new();
+    let mut in_force: Option<&GridChange> = None;
+    for change in history.iter() {
+        if change.cursor <= start {
+            in_force = Some(change);
+            continue;
+        }
+        if change.cursor > end {
+            break;
+        }
+        changes.push(json!({
+            "cursor": change.cursor,
+            "cols": change.cols,
+            "rows": change.rows,
+        }));
+    }
+    let mut out = Vec::with_capacity(changes.len() + 1);
+    // When eviction has dropped every cut at or before `start`, there is
+    // nothing truthful to stamp: the oldest grid still remembered took
+    // effect strictly after `start` (every retained cut has cursor >
+    // `start` exactly when this arm runs), so naming it at `start` would
+    // attribute bytes composed before it to a grid the pty did not hold
+    // for them. An empty array keeps the reader on the grid it holds,
+    // which for a contiguous reader is the grid those bytes were composed
+    // at; a reader that jumped here heals on the next page whose `start`
+    // a retained cut covers.
+    if let Some(change) = in_force {
+        out.push(json!({ "cursor": start, "cols": change.cols, "rows": change.rows }));
+    }
+    out.extend(changes);
+    Value::Array(out)
+}
+
+/// PERF-01 push channel: the long-poll twin of [`read`]. Blocks (bounded by
+/// `wait_ms`, clamped to `SESSION_OUTPUT_WAIT_MAX_MS`) until the ring holds
+/// bytes at/after `cursor` or the child's exit has been observed, then
+/// answers the exact `session.read` shape so the cursor/page protocol
+/// (replay, truncation, verdict truth) is unchanged. A zero wait degrades
+/// to one immediate [`read`]. Precedent for blocking inside an RPC handler:
+/// `session_events::poll` — and the server is one thread per client, so a
+/// held poll never starves other calls.
+pub(crate) const SESSION_OUTPUT_WAIT_MAX_MS: u64 = 30_000;
+const SESSION_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+pub(crate) fn read_long_poll(
+    handle: &SessionHandle,
+    cursor: u64,
+    limit_bytes: usize,
+    wait_ms: u64,
+) -> Result<Value, RpcError> {
+    let deadline = Instant::now() + Duration::from_millis(wait_ms.min(SESSION_OUTPUT_WAIT_MAX_MS));
+    loop {
+        // A future cursor is a client bug, not a wait condition: `read`
+        // rejects it, so the held variant must too instead of hanging until
+        // the ring catches up to a cursor it may never reach.
+        let outcome = handle
+            .ring
+            .lock()
+            .unwrap()
+            .read(cursor, limit_bytes)
+            .ok_or_else(|| error::invalid_argument("cursor is ahead of all data written so far"))?;
+        // Wake on new bytes OR on a positively observed exit: the pane must
+        // learn `exited` within a frame of the reap, not at the next wait
+        // deadline. An empty live page only answers once the wait expires,
+        // which doubles as the reconciliation tick (it carries the session).
+        if !outcome.bytes.is_empty()
+            || current_verdict(handle).0 == "exited"
+            || Instant::now() >= deadline
+        {
+            return Ok(read_response(handle, &outcome));
+        }
+        std::thread::sleep(SESSION_OUTPUT_POLL_INTERVAL);
+    }
+}
+
+/// Gap between the body and the Return that submits it (issue #625). Long
+/// enough that a far end which IS blocked in `read()` gets two reads (so a
+/// TUI with no bracketed paste still sees a discrete keypress), short
+/// enough that a relay nudging several sessions does not feel it. A far
+/// end that is mid-turn and not reading will still coalesce them, which is
+/// what the bracketed-paste framing is for.
+const ENTER_SETTLE: Duration = Duration::from_millis(40);
+
+/// Smallest body that is treated as a message rather than as keystrokes.
+///
+/// Framing a single-key answer (`y`, `2`) would turn it into a paste a
+/// select prompt ignores — a worse bug than the one being fixed — so the
+/// threshold exists. But it has to sit where a keystroke stops and a
+/// message starts, not higher: an adversarial pass showed an eight-byte
+/// body (`continue`) and its Return still coalescing into ONE read on a
+/// busy far end, which is the whole failure mode.
+///
+/// Three bytes is the line, and it is not arbitrary: an unframed body
+/// reaches the far end together with its Return, so a body of N bytes is
+/// an N+1 byte burst. Below three, that burst is at most the two or three
+/// bytes any heuristic must still call typing — which is the invariant
+/// the PTY suite's own TUI model asserts against this constant. One or
+/// two bytes is a key or a key pair; a key that is an escape sequence
+/// (arrows, function keys) carries `ESC`, which `should_frame` refuses on
+/// separately. A caller who really is sending longer keystroke input has
+/// `--literal`, which frames nothing.
+const PASTE_FRAME_MIN_BYTES: usize = 3;
+
+/// What one `session.write` actually put on the PTY.
+pub(crate) struct WriteOutcome {
+    /// Bytes of the CALLER's payload accepted. Framing markers are the
+    /// transport's and are deliberately not counted: `acceptedBytes` has
+    /// always meant "what you asked for got through".
+    pub(crate) accepted: usize,
+    /// `keypress` when the Return went out in its own write after the body
+    /// was flushed, `raw` when the payload was written verbatim (no
+    /// `submitEnter`, so any Return inside it is just a byte in the burst).
+    pub(crate) enter_delivery: &'static str,
+    /// Whether the body was wrapped in bracketed-paste markers.
+    pub(crate) bracketed: bool,
+}
+
+/// Whether wrapping `body` in paste markers is both safe and useful.
+///
+/// Safe: the far end reads a paste as text
+/// (`TerminalModes::paste_is_text` — bracketed paste on, and either a
+/// harness Drogon launched or, in a session it did not, a program that
+/// is not on the alternate screen), and the body carries no C0
+/// control byte that a paste frame would either swallow (a real keystroke
+/// like `ETX`) or be broken by (`ESC`). Sanitizing those bytes instead
+/// would corrupt what the caller asked to deliver, so a body containing
+/// them is written raw and keeps exactly today's meaning — including the
+/// documented interior carriage return, which stays a Return. That is a
+/// stated limit, not an oversight: a body carrying its own control bytes
+/// gets the paced Return and nothing more, so on a far end that is not
+/// reading it can still be read as one burst. Such a body is keystrokes,
+/// and keystrokes are what `--literal` and a second send are for.
+///
+/// Useful: only a body big enough to read as a paste needs the frame.
+fn should_frame(body: &[u8], paste_is_text: bool) -> bool {
+    if !paste_is_text || body.is_empty() {
+        return false;
+    }
+    if body.len() < PASTE_FRAME_MIN_BYTES && !body.contains(&b'\n') {
+        return false;
+    }
+    !body
+        .iter()
+        .any(|byte| (*byte < 0x20 && *byte != b'\n' && *byte != b'\t') || *byte == 0x7f)
+}
+
+/// The error a failed PTY write reports.
+///
+/// Splitting the Return off the body (issue #625) created a state that
+/// did not exist when one write carried both: the body can land and the
+/// Return can fail, which leaves the message typed into the composer and
+/// unsubmitted. A caller told only "a write failed" would retry the whole
+/// send and type it twice, so the message says what got through and what
+/// to do about it. That is the cost of the split, named rather than
+/// hidden.
+fn write_failure(body_already_delivered: bool, cause: &str) -> RpcError {
+    if body_already_delivered {
+        error::io_error(format!(
+            "pty write failed after the body was already delivered, so the message \
+             is in the composer unsubmitted; send a lone Return rather than the \
+             whole message again: {cause}"
+        ))
+    } else {
+        error::io_error(format!("pty write failed: {cause}"))
+    }
+}
+
+/// Delivers one `session.write`.
+///
+/// With `submit_enter`, `data` must end in the carriage return that
+/// submits it, and that Return is delivered the way a keyboard delivers
+/// one: after the body has been flushed, in a write of its own, and — when
+/// the far end has bracketed paste on — after the marker that closes the
+/// paste. That is issue #625: a paste-detecting TUI which is mid-turn is
+/// not blocked in `read()`, so a fused body-plus-Return burst arrives in
+/// ONE read, the heuristic calls the whole thing a paste, and the Return
+/// never submits. The message sits in the composer while the caller is
+/// told it was sent.
+///
+/// The whole sequence runs under a single acquisition of the writer lock,
+/// which is why it lives here and not in the CLI: two agents nudging the
+/// same session cannot interleave a body between another send's body and
+/// its Return.
+///
+/// Two consequences of the split, both stated rather than papered over:
+///
+/// - A send now costs `ENTER_SETTLE` (measured at about 69 ms end to end
+///   per send against a real daemon), so a relay nudging many sessions
+///   pays it per session. That is the price of a Return the far end acts
+///   on.
+/// - The child can exit BETWEEN the body and the Return, where one fused
+///   write would have landed or not landed as a unit. The caller is told
+///   exactly that by [`write_failure`], which is better than the silent
+///   half-delivery the old shape produced whenever a paste heuristic ate
+///   the Return.
+pub(crate) fn write_parts(
+    handle: &SessionHandle,
+    data: &[u8],
+    submit_enter: bool,
+) -> Result<WriteOutcome, RpcError> {
     if try_reap(handle).is_some() {
         return Err(error::unverifiable(
             "session already exited; cannot accept more input",
         ));
     }
+    let body = if submit_enter {
+        match data.split_last() {
+            Some((b'\r', body)) => body,
+            _ => {
+                return Err(error::invalid_argument(
+                    "submitEnter needs dataBase64 to end with the carriage return it submits",
+                ));
+            }
+        }
+    } else {
+        data
+    };
+    let frame = submit_enter && should_frame(body, handle.paste_is_text());
     // Writer lock only: a long/blocking write must not serialize master
     // operations (`resize`) or native release behind it.
     let mut writer = handle.writer.lock().unwrap();
@@ -1171,11 +1507,44 @@ pub(crate) fn write(handle: &SessionHandle, data: &[u8]) -> Result<usize, RpcErr
             "session already exited; cannot accept more input",
         ));
     };
-    writer
-        .write_all(data)
-        .map_err(|e| error::io_error(format!("pty write failed: {e}")))?;
+    fn put(
+        writer: &mut (impl Write + ?Sized),
+        bytes: &[u8],
+        already_delivered: bool,
+    ) -> Result<(), RpcError> {
+        writer
+            .write_all(bytes)
+            .map_err(|e| write_failure(already_delivered, &e.to_string()))
+    }
+    if !submit_enter {
+        put(writer, data, false)?;
+        let _ = writer.flush();
+        return Ok(WriteOutcome {
+            accepted: data.len(),
+            enter_delivery: "raw",
+            bracketed: false,
+        });
+    }
+    if !body.is_empty() {
+        if frame {
+            put(writer, BRACKETED_PASTE_START, false)?;
+            put(writer, body, true)?;
+            put(writer, BRACKETED_PASTE_END, true)?;
+        } else {
+            put(writer, body, false)?;
+        }
+        let _ = writer.flush();
+        // Still holding the writer lock: the gap is part of one send, not
+        // a window another send can type into.
+        std::thread::sleep(ENTER_SETTLE);
+    }
+    put(writer, b"\r", !body.is_empty())?;
     let _ = writer.flush();
-    Ok(data.len())
+    Ok(WriteOutcome {
+        accepted: data.len(),
+        enter_delivery: "keypress",
+        bracketed: frame,
+    })
 }
 
 /// Returns the session's truthful post-resize verdict rather than a
@@ -1204,8 +1573,46 @@ pub(crate) fn resize(handle: &SessionHandle, cols: u16, rows: u16) -> Result<Val
                 pixel_height: 0,
             })
             .map_err(|e| error::io_error(format!("pty resize failed: {e}")))?;
+        // Inside the native lock, immediately after the ioctl: every byte the
+        // ring already holds was composed for the OLD grid, and the child has
+        // not yet been able to act on the SIGWINCH this call just raised. That
+        // offset is the cut a reader needs (#605) — a terminal that switches
+        // grids anywhere else re-wraps the agent's in-flight frame, its
+        // cursor-relative erase then lands on the wrong rows, and the
+        // superseded frame is stranded on screen for the rest of the session.
+        //
+        // Truthfully, two kinds of byte can still land on the wrong side of
+        // this cut, and neither is fixable from here:
+        //  - bytes the reader thread has read out of the pty but not yet
+        //    pushed into the ring. One reader wake-up's worth.
+        //  - output a child writes from its own SIGWINCH handler *before*
+        //    re-reading the window size. That is unbounded and belongs to
+        //    the child: a TUI that repaints from cached dimensions composes
+        //    those bytes for the old grid after we have already cut. Every
+        //    TUI worth the name re-queries the size first, and for those the
+        //    residual is only the drain lag above.
+        // A native terminal emulator has the same property — bytes already
+        // in the kernel buffer when it calls TIOCSWINSZ are parsed at the
+        // new grid.
+        let grid_cursor = handle.ring.lock().unwrap().end_cursor();
+        let mut history = handle.size.lock().unwrap();
+        // A resize to the size it already has is not a cut: recording one
+        // would spend a history slot and make a reader re-apply a grid it
+        // already holds.
+        if history.back().map(|g| (g.cols, g.rows)) != Some((cols, rows)) {
+            history.push_back(GridChange {
+                cursor: grid_cursor,
+                cols,
+                rows,
+            });
+            // Bounded: a reader that has already passed an old cut will
+            // never ask for it again, and the ring drops those bytes long
+            // before this many resizes matter.
+            while history.len() > GRID_HISTORY_LIMIT {
+                history.pop_front();
+            }
+        }
     }
-    *handle.size.lock().unwrap() = (cols, rows);
     let conn = handle.db.lock().unwrap();
     conn.execute(
         "UPDATE sessions SET cols = ?2, rows = ?3 WHERE id = ?1",
@@ -1372,7 +1779,10 @@ pub(crate) fn snapshot(handle: &SessionHandle) -> Value {
 /// exited via its own `verdict`, so this never re-reaps `exit_code` itself.
 /// An uncleared hook signal reports `needs_input` with its own stamp; the
 /// reader thread clears it on the next output chunk.
-fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, Option<String>) {
+fn agent_state_fields(
+    handle: &SessionHandle,
+    verdict: &str,
+) -> (&'static str, Option<String>, Option<&'static str>) {
     let last_activity_instant = &*handle.last_activity.lock().unwrap();
     let (activity, wall_clock_at) = match last_activity_instant {
         None => (Activity::NeverObserved, None),
@@ -1410,23 +1820,180 @@ fn agent_state_fields(handle: &SessionHandle, verdict: &str) -> (&'static str, O
     } else {
         handle.hook_turn_fact()
     };
-    let state = agent_state::derive(
+    let derived = agent_state::derive(
         verdict == "exited",
         activity,
         needs_input_at.is_some(),
         hook_turn,
     );
+    // F1 sidebar truth: activity-clock `Working` is PTY output (echo,
+    // redraw, an idle composer repainting without hooks) — unproven as a
+    // turn for shells, observed harnesses, and `harness.start` launches
+    // alike, so it downgrades to `Unknown` (session kept, no turn claimed).
+    // Hook-backed turns never reach the gate as unproven (`Active`
+    // bypasses it). Identity observation still runs below in `to_json` —
+    // a hosted harness stays recognized there, only its turn reads unknown.
+    let state = agent_state::gate_shell_activity(derived, hook_turn);
+    // Read before `at` moves the stamp below: a wait stamp only ever lands
+    // via a harness hook signal (`note_hook_event`), so its presence is the
+    // hook proof behind `needs_input` regardless of the turn fact.
+    let hook_wait = needs_input_at.is_some();
     let at = match state {
         AgentState::Working | AgentState::Idle => state_at,
         AgentState::NeedsInput => needs_input_at,
         AgentState::Exited | AgentState::Unknown => None,
     };
-    (state.as_wire(), at)
+    // Turn-authority proof for the wire (`agentStateAuthority`): only the
+    // hook lifecycle proves a turn — an open hook turn behind `working`, a
+    // turn-end hook behind `idle`, a hook wait signal behind `needs_input`.
+    // `working` past the gate always rides an open hook turn (the gate
+    // downgrades every other `working` to `unknown`), so it never claims
+    // `activity` proof; a quiet clock behind `idle` is reported as
+    // `activity`, never as proof of idleness. `unknown`/`exited` claim
+    // nothing. Missing on older daemons reads as no proof downstream.
+    let authority = if verdict == "exited" {
+        None
+    } else if hook_wait {
+        Some(agent_state::AUTHORITY_HOOK)
+    } else {
+        match hook_turn {
+            agent_state::HookTurn::Active | agent_state::HookTurn::Ended => {
+                Some(agent_state::AUTHORITY_HOOK)
+            }
+            agent_state::HookTurn::Untracked | agent_state::HookTurn::Inactive => match state {
+                AgentState::Idle => Some(agent_state::AUTHORITY_ACTIVITY),
+                _ => None,
+            },
+        }
+    };
+    (state.as_wire(), at, authority)
+}
+
+/// Whether the session leader currently has a live child process of its own
+/// (issue #333): an idle shell at its prompt is childless, while a shell
+/// with a running job waits on a forked child. Any uncertainty (non-live
+/// verdict, no pid, failed census) reads as not busy: the renderer treats
+/// the flag as a positive busy signal only, never as proof of idleness.
+pub(crate) fn has_foreground_child(handle: &SessionHandle, verdict: &str) -> bool {
+    if verdict != "live" {
+        return false;
+    }
+    match handle.child_process_id() {
+        Some(pid) => has_live_child_process(pid),
+        None => false,
+    }
+}
+
+/// Process census for [`has_foreground_child`]: one live (non-zombie) direct
+/// child is enough — the renderer only needs a boolean, never the list.
+#[cfg(target_os = "macos")]
+fn has_live_child_process(pid: u32) -> bool {
+    // `proc_listchildpids` lives in libSystem, so no explicit link attribute
+    // is needed; a full buffer still reports a positive count, which is all
+    // this census consumes.
+    unsafe extern "C" {
+        fn proc_listchildpids(ppid: i32, buffer: *mut u32, buffersize: i32) -> i32;
+    }
+    let mut buffer = [0u32; 16];
+    // SAFETY: read-only census; `buffer` is a live 16-element array and the
+    // length passed is its exact byte size.
+    let count = unsafe {
+        proc_listchildpids(
+            pid as i32,
+            buffer.as_mut_ptr(),
+            (buffer.len() * size_of::<u32>()) as i32,
+        )
+    };
+    count > 0
+}
+
+/// Process census for [`has_foreground_child`] on Linux: a `/proc` scan for
+/// a non-zombie task whose parent is the session leader.
+#[cfg(target_os = "linux")]
+fn has_live_child_process(pid: u32) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(task) = name.to_str() else { continue };
+        if task.as_bytes().first().is_none_or(|b| !b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{task}/stat")) else {
+            continue;
+        };
+        // `comm` may itself contain spaces or parens, so split after its
+        // closing paren: `pid (comm) state ppid ...`.
+        let Some(rest) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let mut fields = rest.1.split_whitespace();
+        let (Some(state), Some(ppid)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        if state != "Z" && ppid.parse::<u32>().is_ok_and(|p| p == pid) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Process census for [`has_foreground_child`] where no census exists yet:
+/// honestly idle rather than guessed busy.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn has_live_child_process(_pid: u32) -> bool {
+    false
+}
+
+/// Foreground-agent observation for `to_json` (issue #622): the harness id
+/// seen in the session PTY's foreground process group, or `None`. Only
+/// harness-less live sessions are probed; a `harness.start` session already
+/// names its harness and keeps the observed fields null. In-memory only,
+/// never persisted, and never authority for hooks, restart or `agentState`.
+/// Memoized per session on the observed pgid with a short TTL; read paths
+/// never spawn child processes.
+pub(crate) fn observed_harness(
+    handle: &SessionHandle,
+    verdict: &str,
+) -> (Option<String>, Option<String>) {
+    if handle.harness_id.is_some() || verdict != "live" || handle.is_exited() {
+        return (None, None);
+    }
+    let pgid = {
+        let native = handle.native.lock().unwrap();
+        let Some(native) = native.as_ref() else {
+            return (None, None);
+        };
+        crate::session_foreground::foreground_pgid(native.master.as_ref())
+    };
+    let now = Instant::now();
+    if let Some(cached) = handle.foreground.lock().unwrap().cached(pgid, now) {
+        return cached;
+    }
+    let harness = pgid.and_then(crate::session_foreground::resolve_harness);
+    let at = harness.as_ref().map(|_| crate::now_rfc3339());
+    // The wire stamp is the memo's effective stamp, not the locally minted
+    // `at`: while the same pgid keeps resolving to the same harness the
+    // memo pins the first stamp, so `observedHarnessAt` stays identical
+    // across reads that straddle the TTL instead of churning once per TTL.
+    handle
+        .foreground
+        .lock()
+        .unwrap()
+        .store(pgid, harness, at, now)
 }
 
 pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i64>) -> Value {
-    let (cols, rows) = *handle.size.lock().unwrap();
-    let (agent_state, agent_state_at) = agent_state_fields(handle, verdict);
+    let current = *handle
+        .size
+        .lock()
+        .unwrap()
+        .back()
+        .expect("grid history is never empty");
+    let (cols, rows, grid_cursor) = (current.cols, current.rows, current.cursor);
+    let (agent_state, agent_state_at, agent_state_authority) = agent_state_fields(handle, verdict);
+    let (observed_harness_id, observed_harness_at) = observed_harness(handle, verdict);
     json!({
         "id": handle.session_id,
         "workspaceId": handle.workspace_id,
@@ -1439,11 +2006,24 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         "causedByEventId": handle.caused_by_event_id,
         "cols": cols,
         "rows": rows,
+        // Additive (issue #605): the ring offset at which this grid took
+        // effect, so a reader can switch its emulator to `cols`x`rows` at
+        // the exact byte the pty did instead of guessing from RPC timing.
+        // Absent on an older daemon, which reads as "always been this grid".
+        "gridCursor": grid_cursor,
         "verdict": verdict,
         "exitCode": exit_code,
         "createdAt": handle.created_at,
         "agentState": agent_state,
         "agentStateAt": agent_state_at,
+        // Additive (activity authority): the turn proof behind `agentState`
+        // (`hook` = the harness's own hook lifecycle, `activity` = the PTY
+        // clock going quiet, null = no proof claimed). Older clients ignore
+        // it; newer renderers never show `working`/`idle` without `hook`.
+        "agentStateAuthority": agent_state_authority,
+        // Additive (issue #333): true while a live foreground child runs
+        // beyond the session leader; absent on older payloads reads as idle.
+        "hasForegroundChild": has_foreground_child(handle, verdict),
         "agentPromptPreview": handle.agent_prompt_preview.lock().unwrap().clone(),
         "cacheIdleAt": handle.cache_idle_at.lock().unwrap().clone(),
         // Additive (`session-contract.ts`): the provider-native conversation
@@ -1459,6 +2039,13 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
             .unwrap()
             .as_ref()
             .and_then(|s| s.transcript_path.clone()),
+        // Additive (issue #622): the harness id observed in the foreground
+        // process group, with its RFC 3339 stamp. An observation, never an
+        // inference, never persisted, and never authority for hooks,
+        // restart or `agentState`. Null unless a harness-less live session
+        // currently foregrounds a catalog harness.
+        "observedHarnessId": observed_harness_id,
+        "observedHarnessAt": observed_harness_at,
     })
 }
 
@@ -1485,6 +2072,75 @@ pub(crate) fn base64_decode(text: &str) -> Result<Vec<u8>, RpcError> {
     base64::engine::general_purpose::STANDARD
         .decode(text)
         .map_err(|_| error::invalid_argument("dataBase64 is not valid base64"))
+}
+
+#[cfg(test)]
+mod write_parts_policy_tests {
+    use super::{PASTE_FRAME_MIN_BYTES, should_frame, write_failure};
+
+    /// The framing gate, without a PTY: the PTY suite pins the bytes,
+    /// this pins the decision and the reasons for it.
+    #[test]
+    fn framing_needs_an_announcement_a_message_and_no_control_bytes() {
+        let message = b"rebase onto v2 please";
+        assert!(should_frame(message, true));
+        // No announcement, no framing — the far end never asked.
+        assert!(!should_frame(message, false));
+        // Nothing to frame.
+        assert!(!should_frame(b"", true));
+        // A key or a key pair stays a keystroke; one byte more is a
+        // message, because unframed it would reach the far end as a
+        // burst with its Return.
+        assert!(!should_frame(b"y", true));
+        assert!(!should_frame(b"ab", true));
+        assert!(should_frame(b"abc", true));
+        assert_eq!(PASTE_FRAME_MIN_BYTES, 3);
+        // A short multi-line body is a message whatever its length.
+        assert!(should_frame(b"a\nb", true));
+        // Control bytes the frame would swallow or be broken by.
+        for hostile in [
+            &b"abcdefghij\x1b[201~"[..],
+            &b"abcdefghij\x03"[..],
+            &b"abcdefghij\rklm"[..],
+            &b"abcdefghij\x7f"[..],
+        ] {
+            assert!(
+                !should_frame(hostile, true),
+                "{hostile:?} must not be framed"
+            );
+        }
+        // A tab is text, not a key that blocks framing.
+        assert!(should_frame(b"abcdefghij\tklm", true));
+    }
+
+    /// A Return that fails after the body landed must not read like a
+    /// write that never happened: the difference decides whether the
+    /// caller resends the message (typing it twice) or just the Return.
+    #[test]
+    fn a_return_that_fails_after_the_body_says_what_got_through() {
+        let nothing_sent = write_failure(false, "Broken pipe (os error 32)");
+        assert_eq!(nothing_sent.code, "io_error");
+        assert!(nothing_sent.message.contains("Broken pipe"));
+        assert!(
+            !nothing_sent.message.contains("composer"),
+            "nothing was delivered, so nothing is waiting: {}",
+            nothing_sent.message
+        );
+
+        let half_sent = write_failure(true, "Input/output error (os error 5)");
+        assert_eq!(half_sent.code, "io_error");
+        assert!(half_sent.message.contains("Input/output error"));
+        assert!(
+            half_sent.message.contains("composer unsubmitted"),
+            "the caller must learn the message is sitting there: {}",
+            half_sent.message
+        );
+        assert!(
+            half_sent.message.contains("lone Return"),
+            "and what to do instead of resending it: {}",
+            half_sent.message
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2039,7 +2695,7 @@ mod wait_signal_activity_tests {
         // Kernel echo of the user's own keystroke (the tty is in canonical
         // mode; `sleep` never reads it) neither clears the wait nor
         // manufactures working — it is not hook evidence.
-        crate::session::write(&handle, b"x").unwrap();
+        crate::session::write_parts(&handle, b"x", false).unwrap();
         assert_eq!(snapshot(&handle)["agentState"], "needs_input");
     }
 
@@ -2059,7 +2715,7 @@ mod wait_signal_activity_tests {
         assert_eq!(handle.hook_turn_fact(), agent_state::HookTurn::Ended);
         assert_eq!(snapshot(&handle)["agentState"], "idle");
         // The user's echo at the idle prompt is not hook evidence.
-        crate::session::write(&handle, b"x").unwrap();
+        crate::session::write_parts(&handle, b"x", false).unwrap();
         assert_eq!(snapshot(&handle)["agentState"], "idle");
         // A new turn reopens the hook lifecycle.
         handle.clear_hook_event();
@@ -2079,5 +2735,67 @@ mod wait_signal_activity_tests {
         assert_eq!(handle.hook_turn_fact(), agent_state::HookTurn::Inactive);
         // No output was ever observed: unknown, not a guessed idle.
         assert_eq!(snapshot(&handle)["agentState"], "unknown");
+    }
+
+    /// R1 activity authority: the wire proof behind `agentState` derives
+    /// only from the actual hook lifecycle — a real resumption, wait or
+    /// turn-end hook — never from harnessId or PTY activity. Quiet clocks
+    /// report `activity` (idle) or nothing at all (unknown), never hook
+    /// proof; a disabled lifecycle drops its proof with the fact.
+    #[test]
+    fn agent_state_authority_comes_only_from_the_hook_lifecycle() {
+        let (_dir, _engine, handle) = started_handle();
+        handle.set_explicit_wait_clear();
+        // Birth: no turn, no proof.
+        let birth = snapshot(&handle);
+        assert_eq!(birth["agentState"], "unknown");
+        assert!(birth["agentStateAuthority"].is_null());
+        // A real resumption hook opens a silent turn: working, hook-proven,
+        // with zero PTY output required.
+        handle.clear_hook_event();
+        let turn = snapshot(&handle);
+        assert_eq!(turn["agentState"], "working");
+        assert_eq!(turn["agentStateAuthority"], "hook");
+        // A real wait hook parks it: needs_input stays hook-proven.
+        handle.note_hook_event();
+        let waited = snapshot(&handle);
+        assert_eq!(waited["agentState"], "needs_input");
+        assert_eq!(waited["agentStateAuthority"], "hook");
+        // The generic activity clear spends the wait for untracked
+        // sessions; here the session is hook-authoritative so the test
+        // spends it the hook way instead — a turn end concludes the turn
+        // as hook-proven idle, and later PTY bytes cannot spend the proof.
+        handle.end_hook_event();
+        crate::session::write_parts(&handle, b"x", false).unwrap();
+        let ended = snapshot(&handle);
+        assert_eq!(ended["agentState"], "idle");
+        assert_eq!(ended["agentStateAuthority"], "hook");
+        // Disabling the status hooks drops the lifecycle AND its proof:
+        // the row re-observes from the activity clock, claiming nothing.
+        handle.reset_hook_lifecycle();
+        let disabled = snapshot(&handle);
+        assert_eq!(disabled["agentState"], "unknown");
+        assert!(disabled["agentStateAuthority"].is_null());
+        // Exit claims no turn proof either: the verdict is the truth.
+        let (state, at, authority) = agent_state_fields(&handle, "exited");
+        assert_eq!(state, "exited");
+        assert_eq!(at, None);
+        assert_eq!(authority, None);
+    }
+
+    /// R1: an untracked wait signal is still hook-originated (only hooks
+    /// set it), so `needs_input` carries hook proof; spending it returns
+    /// the row to unproven silence.
+    #[test]
+    fn untracked_wait_signal_carries_hook_proof_until_spent() {
+        let (_dir, _engine, handle) = started_handle();
+        handle.note_hook_event();
+        let waited = snapshot(&handle);
+        assert_eq!(waited["agentState"], "needs_input");
+        assert_eq!(waited["agentStateAuthority"], "hook");
+        assert!(clear_wait_signal_on_activity(&handle));
+        let quiet = snapshot(&handle);
+        assert_eq!(quiet["agentState"], "unknown");
+        assert!(quiet["agentStateAuthority"].is_null());
     }
 }

@@ -46,6 +46,10 @@ export type GitDiffResult = GitScope & {
 export type GitPathsResult = GitScope & { paths: string[] };
 export type GitCommitResult = GitScope & { commit: string };
 export type GitPushResult = GitScope & { pushed: boolean; detail: string };
+// #332: omitted keeps the plain push; "force-with-lease" rewrites the
+// upstream only when the remote has not moved, "publish" sets the
+// upstream on a branch that has none (`push -u origin HEAD`).
+export type GitPushMode = "force-with-lease" | "publish";
 export type GitPrCreateResult = GitScope & { url: string };
 export type GitLineCount = {
   path: string;
@@ -70,7 +74,7 @@ export interface GitBridge {
   gitCommit(
     input: GitScope & { message: string; amend?: boolean },
   ): Promise<Result<GitCommitResult>>;
-  gitPush(input: GitScope): Promise<Result<GitPushResult>>;
+  gitPush(input: GitScope & { mode?: GitPushMode }): Promise<Result<GitPushResult>>;
   gitPrCreate(
     input: GitScope & { title: string; body?: string },
   ): Promise<Result<GitPrCreateResult>>;
@@ -118,7 +122,7 @@ export const gitBridgeSchemas = {
       .refine((value) => !value.includes("\0")),
     amend: z.boolean().optional(),
   }),
-  gitPush: scope,
+  gitPush: scope.extend({ mode: z.enum(["force-with-lease", "publish"]).optional() }),
   gitDiscard: scope.extend({ paths, untracked: z.boolean() }),
   gitLineCounts: scope.extend({ paths }),
   gitPull: scope,

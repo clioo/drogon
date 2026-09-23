@@ -1,7 +1,7 @@
 // R16-Y: `onState` replays the host's current tabs on subscribe, so a
 // fresh subscriber (renderer reload, workspace reselect) sees open tabs
 // immediately instead of waiting for the next host event.
-import { describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
 const { onMock, invokeMock, removeListenerMock } = vi.hoisted(() => ({
   onMock: vi.fn(),
@@ -17,8 +17,24 @@ vi.mock("electron", () => ({
   },
 }));
 
-import { browser } from "./browser";
 import { browserIpcChannels } from "../shared/browser-contract";
+
+// Worker-reuse hermeticity (docs/reference/desktop-test-isolation.md): the
+// desktop suite shares one module registry per worker, so a statically
+// imported bridge would stay bound to whichever file's `electron` mock won
+// the import race (authority-channel-wiring.test.ts mocks the same module
+// with an incompatible shape). Rebinding after a registry reset keeps the
+// replay assertions below deterministic under any file order.
+let browser: typeof import("./browser").browser;
+
+beforeAll(async () => {
+  vi.resetModules();
+  ({ browser } = await import("./browser"));
+});
+
+afterAll(() => {
+  vi.resetModules();
+});
 
 const STATE = {
   tabs: [

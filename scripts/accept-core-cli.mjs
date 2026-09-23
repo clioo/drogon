@@ -20,6 +20,10 @@ import {
 } from "./acceptance-process.mjs";
 import { probeNativeProtocol } from "./probe-native-protocol.mjs";
 import { probeSessionBoundaries } from "./probe-session-boundaries.mjs";
+import {
+  assertSessionRowsPinForegroundChild,
+  normalizeSessionRows,
+} from "./session-row-contract.mjs";
 import { probeHarnessLaunch } from "./probe-harness-launch.mjs";
 import { probeNativeCoordination } from "./probe-native-coordination.mjs";
 import {
@@ -225,7 +229,9 @@ try {
   assert.equal(first.id, duplicate.id);
   assert.equal(first.incarnation, duplicate.incarnation);
   assert.equal(first.verdict, "live");
-  assert.equal((await rpc("session.list")).sessions.length, 1);
+  const liveRows = (await rpc("session.list")).sessions;
+  assert.equal(liveRows.length, 1);
+  assertSessionRowsPinForegroundChild(liveRows, { label: "live session rows" });
   await expectsRpcError(
     "session.start",
     { ...params, cols: 90 },
@@ -347,6 +353,11 @@ try {
     );
   }
   const beforeCrash = (await rpc("session.list")).sessions;
+  assertSessionRowsPinForegroundChild(beforeCrash, {
+    expectFalseFor: (row) => row.verdict !== "live",
+    label: "pre-crash session rows",
+  });
+  report.checks.push("session-rows-pin-has-foreground-child");
   const died = once(daemon, "exit");
   assert.ok(daemon.kill("SIGKILL"));
   await Promise.race([
@@ -374,7 +385,13 @@ try {
     !(await readFile(path.join(dataDir, "auth.token"))).equals(initialToken),
     "Restart must rotate authentication",
   );
-  assert.deepEqual((await rpc("session.list")).sessions, beforeCrash);
+  // Restored rows read straight from SQLite predate the additive
+  // `hasForegroundChild` field (absent reads as idle), so compare the
+  // normalized rows; the pin above already proves live rows carry it.
+  assert.deepEqual(
+    normalizeSessionRows((await rpc("session.list")).sessions),
+    normalizeSessionRows(beforeCrash),
+  );
   assert.ok(
     (await cli(["workspace", "list"])).result.workspaces.some(
       (item) => item.id === workspace.id,

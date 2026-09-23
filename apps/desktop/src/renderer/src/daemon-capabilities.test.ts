@@ -4,7 +4,7 @@
 // `src/main/daemon/daemon-protocol-version.ts`, and the classifier that
 // separates "the daemon is older than this request" (direct to a service
 // restart) from "this build sent something malformed" (verbatim error).
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   BOT_RUN_INTERACTIVE_FIELD_PROTOCOL,
   daemonSkewRefusalMessage,
@@ -120,6 +120,37 @@ describe("isDaemonSkewError: skew vs malformed request", () => {
         message: "one or more sessions are pending, live or unverifiable",
       }),
     ).toBe(false);
+  });
+});
+
+describe("regression: REQUIRED_DAEMON_CAPABILITIES survives the bots-first entry order", () => {
+  test("importing the Bots panel graph before daemon-capabilities keeps the list complete", async () => {
+    // BOTS_CAPABILITY used to live in bots-mount.ts, closing a product
+    // import cycle (daemon-capabilities → bots-mount →
+    // bots-panel-descriptor → BotsPanel → use-bots-page-controller →
+    // bot-session-open → daemon-capabilities) in which
+    // REQUIRED_DAEMON_CAPABILITIES read BOTS_CAPABILITY at
+    // module-evaluation time. Entering the cycle anywhere but
+    // daemon-capabilities itself froze `undefined` into the shared array.
+    // Forcing that previously poisonous order here pins the root fix
+    // (the leaf bots-capability.ts): delete the leaf or re-close the
+    // cycle and this test goes red.
+    vi.resetModules();
+    await import("./bots-mount");
+    const { REQUIRED_DAEMON_CAPABILITIES } = await import("./daemon-capabilities");
+    expect(REQUIRED_DAEMON_CAPABILITIES).toEqual([
+      "agent.settings.v1",
+      "bot.snapshot.v1",
+    ]);
+    expect(REQUIRED_DAEMON_CAPABILITIES).not.toContain(undefined);
+    // The leaf exists so daemon-capabilities never enters the Bots panel
+    // graph; bots-mount keeps its own module-local declaration, so the two
+    // copies must agree — otherwise one gate would check a capability the
+    // service never advertises.
+    const leaf = await import("./bots-capability");
+    const mount = await import("./bots-mount");
+    expect(leaf.BOTS_CAPABILITY).toBe("bot.snapshot.v1");
+    expect(mount.BOTS_CAPABILITY).toBe(leaf.BOTS_CAPABILITY);
   });
 });
 

@@ -79,7 +79,7 @@ fn ctrl_c_kills_session_child_within_two_seconds() {
     // Let the child exec and take the controlling terminal before the
     // interrupt byte arrives.
     std::thread::sleep(Duration::from_millis(200));
-    write(&handle, b"\x03").unwrap();
+    write_parts(&handle, b"\x03", false).unwrap();
 
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while !handle.is_exited() && std::time::Instant::now() < deadline {

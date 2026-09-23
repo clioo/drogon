@@ -589,6 +589,169 @@ pub(crate) fn rename_path(root: &Path, from: &str, to: &str) -> Result<(), RpcEr
     })
 }
 
+/// Streams one regular file's bytes from `from_path` to `to_path` through
+/// the same open `Dir`, so containment rides the sandboxed walk on both
+/// sides. The destination is created exclusive (`O_EXCL` via `create_new`,
+/// mirroring `create_path`): a planted entry that won the race after the
+/// caller's probe fails here as a collision, never as a silent overwrite.
+/// Unlike `files.read`/`files.write` there is no 64 KiB cap and no UTF-8
+/// requirement — arbitrary bytes stream through `io::copy`, so binaries of
+/// any size duplicate faithfully. On unix the source's mode bits travel
+/// with the copy (plain-`cp` semantics); directories keep the platform's
+/// default creation mode. Any failure after the exclusive create removes
+/// the partial destination, so a retry never collides with our own residue.
+fn duplicate_file(root_dir: &Dir, from_path: &Path, to_path: &Path) -> Result<(), RpcError> {
+    // `open_regular_file` opens non-blocking on unix and verifies `is_file`
+    // from the handle it actually got: a FIFO swapped in under a followed
+    // contained symlink fails closed here instead of hanging the copy.
+    let (mut source, source_meta) =
+        open_regular_file(root_dir, from_path, "source path not found")?;
+    // Mode bits travel only on unix (see below); every other target has no
+    // equivalent to carry, so the binding would otherwise be unused there.
+    #[cfg(not(unix))]
+    let _ = &source_meta;
+    let mut create_opts = OpenOptions::new();
+    create_opts.write(true).create_new(true);
+    let mut dest = root_dir.open_with(to_path, &create_opts).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            error::invalid_argument("destination path already exists")
+        } else {
+            map_dir_error(e)
+        }
+    })?;
+    if let Err(e) = std::io::copy(&mut source, &mut dest) {
+        drop(dest);
+        let _ = root_dir.remove_file(to_path);
+        return Err(error::io_error(e.to_string()));
+    }
+    drop(dest);
+    #[cfg(unix)]
+    {
+        let mode = source_meta.permissions().mode();
+        if let Err(e) = root_dir.set_permissions(to_path, Permissions::from_mode(mode)) {
+            let _ = root_dir.remove_file(to_path);
+            return Err(error::io_error(e.to_string()));
+        }
+    }
+    Ok(())
+}
+
+/// Recursively copies the directory at `from_path` to `to_path` (which must
+/// not exist — the caller probes, and the exclusive `create_dir` below
+/// turns a lost race into a collision error rather than a merge). Symlink
+/// entries are refused outright, never followed and never re-created as
+/// links: re-creating them would let an absolute-target link escape the
+/// root on later resolution, and copying through them would duplicate bytes
+/// the listing never advertised. Non-regular entries (FIFOs, sockets,
+/// devices) are refused like `open_regular_file` refuses them. An explicit
+/// work stack replaces recursion so a hostile deep tree cannot exhaust the
+/// call stack. Any failure after the top-level `create_dir` removes the
+/// partial tree, so a retry never collides with our own residue.
+fn duplicate_dir_all(root_dir: &Dir, from_path: &Path, to_path: &Path) -> Result<(), RpcError> {
+    root_dir.create_dir(to_path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            error::invalid_argument("destination path already exists")
+        } else {
+            map_dir_error(e)
+        }
+    })?;
+    let failed = (|| {
+        let mut stack = vec![(from_path.to_path_buf(), to_path.to_path_buf())];
+        while let Some((src_dir, dst_dir)) = stack.pop() {
+            let entries = root_dir.read_dir(&src_dir).map_err(map_dir_error)?;
+            for entry in entries {
+                let entry = entry.map_err(|e| error::io_error(e.to_string()))?;
+                let name = entry.file_name();
+                let src_child = src_dir.join(&name);
+                let dst_child = dst_dir.join(&name);
+                // `lstat`, not `stat` (the same rationale `list_dir`
+                // documents): the entry itself is classified, never a
+                // symlink's target.
+                let meta = entry
+                    .metadata()
+                    .map_err(|e| error::io_error(e.to_string()))?;
+                if meta.file_type().is_symlink() {
+                    return Err(error::invalid_argument(
+                        "a symlink cannot be duplicated through this call",
+                    ));
+                }
+                if meta.is_dir() {
+                    root_dir.create_dir(&dst_child).map_err(map_dir_error)?;
+                    stack.push((src_child, dst_child));
+                } else if meta.is_file() {
+                    duplicate_file(root_dir, &src_child, &dst_child)?;
+                } else {
+                    return Err(error::invalid_argument("path is not a regular file"));
+                }
+            }
+        }
+        Ok(())
+    })();
+    if failed.is_err() {
+        let _ = root_dir.remove_dir_all(to_path);
+    }
+    failed
+}
+
+/// Byte-preserving duplicate of one workspace entry from `from` to `to`.
+/// Files stream verbatim (no size cap, no text decoding); directories copy
+/// recursively. The destination must not exist — the probe below reports a
+/// plain collision as `invalid_argument`, and the exclusive creates in
+/// `duplicate_file`/`duplicate_dir_all` keep a lost creation race from ever
+/// overwriting. Destination parents are created like `rename_path` does.
+/// A destination inside the source's own subtree is refused up front (it
+/// would recurse forever); symlinks — as the source itself or nested in a
+/// copied tree — are refused with a clear error rather than resolved, so a
+/// duplicate can never leak bytes from outside the root or plant an
+/// escaping link inside it.
+pub(crate) fn duplicate_path(root: &Path, from: &str, to: &str) -> Result<(), RpcError> {
+    validate_rel(from)?;
+    validate_rel(to)?;
+    if from.is_empty() || to.is_empty() {
+        return Err(error::invalid_argument("path must not be empty"));
+    }
+    if from == to {
+        return Err(error::invalid_argument(
+            "source and destination paths are identical",
+        ));
+    }
+    if to.starts_with(&format!("{from}/")) {
+        return Err(error::invalid_argument(
+            "destination must not be inside the source directory",
+        ));
+    }
+    let root_dir = open_root_dir(root)?;
+    let (from_path, to_path) = (Path::new(from), Path::new(to));
+    // `symlink_metadata` never follows the final component: a symlink
+    // source is classified here, never resolved through.
+    let source_meta = root_dir
+        .symlink_metadata(from_path)
+        .map_err(|e| map_lookup_error(e, "source path not found"))?;
+    if source_meta.file_type().is_symlink() {
+        return Err(error::invalid_argument(
+            "a symlink cannot be duplicated through this call",
+        ));
+    }
+    // Same probe shape as `rename_path`: an existing destination of ANY
+    // kind (a dangling symlink still counts) is a collision, never an
+    // overwrite-through.
+    match root_dir.symlink_metadata(to_path) {
+        Ok(_) => {
+            return Err(error::invalid_argument("destination path already exists"));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(map_lookup_error(e, "destination path not found")),
+    }
+    ensure_parent_dirs(&root_dir, to_path)?;
+    if source_meta.is_dir() {
+        duplicate_dir_all(&root_dir, from_path, to_path)
+    } else if source_meta.is_file() {
+        duplicate_file(&root_dir, from_path, to_path)
+    } else {
+        Err(error::invalid_argument("path is not a regular file"))
+    }
+}
+
 /// Permanently deletes each path in order and returns the deleted paths.
 /// Directories go with their contents (`remove_dir_all` through the open
 /// `Dir`, so inner traversal stays sandboxed); a symlink deletes the LINK

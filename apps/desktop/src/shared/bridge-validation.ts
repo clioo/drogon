@@ -51,6 +51,7 @@ export const bridgeSchemas = {
   // call, so the two never drift apart.
   fileCreate: z.object({}).passthrough(),
   fileRename: z.object({}).passthrough(),
+  fileDuplicate: z.object({}).passthrough(),
   fileDelete: z.object({}).passthrough(),
   // Bounded quick-open search (R12-B): the channel gate only admits an
   // object here; main/file-bridge.ts re-validates the shape strictly
@@ -107,6 +108,15 @@ export const bridgeSchemas = {
   ]),
   read: identity.extend({
     cursor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  }),
+  // PERF-01 push channel: same identity/cursor gate as `read`, plus an
+  // optional hold. `waitMs` caps at the daemon's 30 s clamp; the pane
+  // passes 8 s so a held request never outlives main's 10 s idle socket
+  // timeout (`native-client.ts` is not ours to change). Absent `waitMs`
+  // degrades to one immediate read, exactly like `read`.
+  readOutput: identity.extend({
+    cursor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    waitMs: z.number().int().nonnegative().max(30_000).optional(),
   }),
   write: identity.extend({ text: z.string().max(65536) }),
   resize: identity.extend({

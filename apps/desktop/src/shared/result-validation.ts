@@ -28,6 +28,11 @@ const session = z.object({
   args: z.array(z.string()),
   cols: z.number().int().min(1).max(1000),
   rows: z.number().int().min(1).max(1000),
+  // Additive (#605): the ring offset `cols`x`rows` took effect at, so a
+  // terminal can switch grids at the exact byte the pty did. Optional so an
+  // older service without it still validates; absent reads as 0, i.e. "this
+  // grid has been in force for every byte retained".
+  gridCursor: z.number().int().nonnegative().optional(),
   verdict: z.enum(["live", "unverifiable", "exited"]),
   exitCode: z.number().int().nullable(),
   createdAt: z.string(),
@@ -40,6 +45,10 @@ const session = z.object({
   // validates; absent reads as `unknown` at the call sites.
   agentState: z.enum(["working", "idle", "needs_input", "exited", "unknown"]).optional(),
   agentStateAt: z.string().nullable().optional(),
+  // Activity authority (additive): the turn proof behind `agentState`.
+  // Optional+nullable so a response from an older service without the field
+  // still validates; absent reads as "no proof claimed" at the call sites.
+  agentStateAuthority: z.enum(["hook", "activity"]).nullable().optional(),
   agentPromptPreview: z.string().max(2048).nullable().optional(),
   cacheIdleAt: z.string().nullable().optional(),
   // Sidebar lineage (#359): the daemon reports the orchestrator-spawned
@@ -58,8 +67,47 @@ const session = z.object({
   agentSessionTranscriptPath: z.string().max(4096).nullable().optional(),
   // `harness.start` replies only: how a resume request actually landed.
   agentResume: z.enum(["resumed", "continued", "fresh"]).optional(),
+  // Issue #333: the daemon reports a live foreground child on live session
+  // rows; optional so a response from an older service without it still
+  // validates, and absent reads as idle at the call sites.
+  hasForegroundChild: z.boolean().optional(),
+  // Issue #622: the daemon reports the harness id observed in the session
+  // PTY's foreground process group with its stamp (session-contract.ts);
+  // optional so a response from an older service without them still
+  // validates, and absent reads as "nothing observed" at the call sites.
+  observedHarnessId: z.string().nullable().optional(),
+  observedHarnessAt: z.string().nullable().optional(),
 });
 const cursor = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+// PERF-01 push channel: `session.output` answers the exact `session.read`
+// shape (same cursor/page protocol), so one schema validates both methods.
+const sessionOutputPage = z
+  .object({
+    session,
+    dataBase64: z
+      .string()
+      .max(87384)
+      .regex(
+        /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
+      ),
+    startCursor: cursor,
+    nextCursor: cursor,
+    truncated: z.boolean(),
+    // Additive (#605): every grid this page spans. Bounded by the daemon's
+    // own retention (GRID_HISTORY_LIMIT), so a bounded array here is not a
+    // new constraint on the service, just an honest one.
+    gridChanges: z
+      .array(
+        z.object({
+          cursor: cursor,
+          cols: z.number().int().min(1).max(1000),
+          rows: z.number().int().min(1).max(1000),
+        }),
+      )
+      .max(128)
+      .optional(),
+  })
+  .refine((value) => value.nextCursor >= value.startCursor);
 const harness = z
   .object({
     harnessId: id,
@@ -109,20 +157,12 @@ export const resultSchemas: Record<string, z.ZodType> = {
   "ports.kill": workspacePortKillResultSchema,
   "session.start": session,
   "session.list": z.object({ sessions: z.array(session) }),
-  "session.read": z
-    .object({
-      session,
-      dataBase64: z
-        .string()
-        .max(87384)
-        .regex(
-          /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
-        ),
-      startCursor: cursor,
-      nextCursor: cursor,
-      truncated: z.boolean(),
-    })
-    .refine((value) => value.nextCursor >= value.startCursor),
+  "session.read": sessionOutputPage,
+  // PERF-01: the long-poll twin of `session.read` — same wire shape, so an
+  // old reader that only knows `session.read` still validates (main's
+  // `callNative` looks this method up by name; without this entry the push
+  // answer would fail the contract at the socket).
+  "session.output": sessionOutputPage,
   "session.write": z.object({ acceptedBytes: z.number().int().nonnegative() }),
   "session.resize": session,
   "session.stop": session,

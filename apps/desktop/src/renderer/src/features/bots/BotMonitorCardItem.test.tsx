@@ -60,11 +60,57 @@ describe("BotMonitorCardItem", () => {
     // case — and the SOURCE cell names the case.
     expect(screen.getByText("clioo/drogon")).toBeTruthy();
     expect(
-      screen.getByText("clioo/drogon · case: assigned (clioo)"),
+      screen.getByText("clioo/drogon · pull requests, case: assigned (clioo)"),
     ).toBeTruthy();
     // The very build that ships the kind must never disown it.
     expect(screen.queryByText(/Unsupported rule kind/)).toBeNull();
     expect(screen.queryByText("github_pr.v1")).toBeNull();
+  });
+
+  it("discloses a parked ISSUE watch as an issue watch, never a raw kind", () => {
+    // The approval disclosure names exactly what arming the rule will do.
+    // A `github_issue.v1` watch that fell through to the generic branch
+    // would have told the user it was approving "a github_issue.v1 watch".
+    render(
+      <BotMonitorCardItem
+        monitor={monitor({
+          ruleKind: "github_issue.v1",
+          resource: undefined,
+          repo: "clioo/drogon",
+          filter: "opened",
+          approved: false,
+          health: "needs_approval",
+        })}
+        botDisplayName="Triager"
+      />,
+    );
+    const disclosure = screen.getByText(/Parked at needs-approval/);
+    expect(disclosure.textContent).toContain("an issue watch on clioo/drogon");
+    expect(disclosure.textContent).not.toContain("a github_issue.v1 watch");
+    expect(disclosure.textContent).not.toContain("pull-request");
+    expect(screen.queryByText(/Unsupported rule kind/)).toBeNull();
+  });
+
+  it("still discloses a parked PULL-REQUEST watch as a pull-request watch", () => {
+    render(
+      <BotMonitorCardItem
+        monitor={monitor({
+          ruleKind: "github_pr.v1",
+          resource: undefined,
+          repo: "clioo/drogon",
+          filter: "assigned",
+          login: "clioo",
+          approved: false,
+          health: "needs_approval",
+        })}
+        botDisplayName="Reviewer"
+      />,
+    );
+    const disclosure = screen.getByText(/Parked at needs-approval/);
+    expect(disclosure.textContent).toContain(
+      "a pull-request watch on clioo/drogon (assigned, clioo)",
+    );
+    expect(disclosure.textContent).not.toContain("an issue watch");
   });
 
   it("renders a baseline seed as an informational notice, never a red error", () => {

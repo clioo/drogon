@@ -52,6 +52,69 @@ describe("sidebarSessionView", () => {
     expect(view[0]!.verdict).toBe("live");
   });
 
+  test("selected copy carries the admitted observation value", () => {
+    const hostWide = [
+      session({
+        id: "a",
+        harnessId: null,
+        observedHarnessId: "pi",
+        observedHarnessAt: "2026-01-01T00:01:00Z",
+        hasForegroundChild: true,
+        cols: 80,
+      }),
+    ];
+    const scoped = [
+      session({
+        id: "a",
+        harnessId: null,
+        observedHarnessId: "pi",
+        observedHarnessAt: "2026-01-01T00:01:00Z",
+        hasForegroundChild: true,
+        cols: 132,
+      }),
+    ];
+    const view = sidebarSessionView(hostWide, scoped, new Set());
+    expect(view).toHaveLength(1);
+    expect(view[0]!.observedHarnessId).toBe("pi");
+    expect(view[0]!.observedHarnessAt).toBe("2026-01-01T00:01:00Z");
+    expect(view[0]!.hasForegroundChild).toBe(true);
+    // The selected copy still owns local/session fields.
+    expect(view[0]!.cols).toBe(132);
+  });
+
+  test("older poll observation proof does not overlay a newer selected clear", () => {
+    const hostWide = [
+      session({
+        id: "a",
+        harnessId: null,
+        observedHarnessId: "pi",
+        observedHarnessAt: "2026-01-01T00:01:00Z",
+        hasForegroundChild: true,
+      }),
+    ];
+    const scoped = [
+      session({
+        id: "a",
+        harnessId: null,
+        observedHarnessId: null,
+        observedHarnessAt: null,
+        hasForegroundChild: false,
+      }),
+    ];
+    const view = sidebarSessionView(hostWide, scoped, new Set());
+    expect(view).toHaveLength(1);
+    expect(view[0]!.observedHarnessId ?? null).toBeNull();
+    expect(view[0]!.observedHarnessAt ?? null).toBeNull();
+    expect(view[0]!.hasForegroundChild).toBe(false);
+  });
+
+  test("retained host-wide observations do not override the selected copy", () => {
+    const hostWide = [session({ id: "a", harnessId: null, observedHarnessId: "pi" })];
+    const scoped = [session({ id: "a", harnessId: null })];
+    const view = sidebarSessionView(hostWide, scoped, new Set());
+    expect(view[0]!.observedHarnessId ?? null).toBeNull();
+  });
+
   test("split second panes never become sidebar rows", () => {
     const hostWide = [session({ id: "root" }), session({ id: "second" })];
     const view = sidebarSessionView(hostWide, [session({ id: "second" })], new Set(["second"]));

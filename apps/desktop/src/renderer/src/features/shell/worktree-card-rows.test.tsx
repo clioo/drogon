@@ -88,6 +88,7 @@ describe("WorktreeCard nested session rows", () => {
           id: "s-1",
           agentState: "working",
           harnessId: "claude",
+          agentStateAuthority: "hook",
           createdAt: "2026-09-08T11:00:00.000Z",
         }),
         session({
@@ -101,8 +102,15 @@ describe("WorktreeCard nested session rows", () => {
       "s-1",
     );
     try {
-      // Harness session row: tab title + harness identity.
-      expect(screen.getByRole("button", { name: /Terminal 1.*Claude/ })).toBeTruthy();
+      // Harness session row: the harness label is the primary title now
+      // (issue #622: the row reads what the session runs, not Terminal N),
+      // and the owner's design appends the row's own state. The sidebar
+      // reads the owner-authorized "Claude Code" branding, so the
+      // accessible name carries it too (label-in-name: it must contain the
+      // visible text).
+      expect(
+        screen.getByRole("button", { name: "Claude Code - Working" }),
+      ).toBeTruthy();
       // Fallback row for the session that never reported: tab title plus
       // the fork's freshness copy, never a bare missing row.
       expect(
@@ -127,8 +135,11 @@ describe("WorktreeCard nested session rows", () => {
   test("focused highlight follows the active tab and summary matches rows", () => {
     const { container, unmount } = renderCard(
       [
-        session({ id: "s-1", agentState: "working" }),
-        session({ id: "s-2", agentState: "idle" }),
+        // Launched agents on a current daemon: hook turn states carry the
+        // hook proof (R1) — harness-less `working` wire is the old-daemon
+        // false positive, never an agent turn.
+        session({ id: "s-1", agentState: "working", harnessId: "pi", agentStateAuthority: "hook" }),
+        session({ id: "s-2", agentState: "idle", harnessId: "pi", agentStateAuthority: "hook" }),
       ],
       "s-2",
     );
@@ -145,6 +156,88 @@ describe("WorktreeCard nested session rows", () => {
       expect(surface?.getAttribute("aria-label") ?? "").toContain(
         "1 working, 1 idle",
       );
+    } finally {
+      unmount();
+    }
+  });
+
+  test("an observed-only session reads the harness with its icon; a plain shell reads Terminal N - zsh with the terminal glyph", () => {
+    const { container, unmount } = renderCard(
+      [
+        session({
+          id: "s-1",
+          agentState: "working",
+          harnessId: null,
+          observedHarnessId: "claude",
+          command: "/bin/zsh",
+          createdAt: "2026-09-08T11:00:00.000Z",
+        }),
+        session({
+          id: "s-2",
+          agentState: "working",
+          harnessId: null,
+          command: "/bin/zsh",
+          createdAt: "2026-09-08T11:30:00.000Z",
+        }),
+        // F1 sidebar truth (regression, explained): only a `harness.start`
+        // turn is proven work. The observed and shell sessions above keep
+        // their identity but state their agent silence (an idle repaint
+        // without hooks proves no turn), so the lane's working spinner
+        // rides on this launched session.
+        session({
+          id: "s-3",
+          agentState: "working",
+          harnessId: "pi",
+          agentStateAuthority: "hook",
+          command: "pi",
+          createdAt: "2026-09-08T11:45:00.000Z",
+        }),
+      ],
+      "",
+    );
+    try {
+      // No `Claude - zsh`, never `Claude - Claude`: the harness label is
+      // the whole row text for the observed session, followed by the state
+      // the owner's design puts on every row (here: the agent silence —
+      // recognition is not turn evidence). Sidebar branding reads
+      // "Claude Code" (owner-authorized), carried in the accessible name
+      // per label-in-name.
+      expect(
+        screen.getByRole("button", { name: /Claude Code - No update in/ }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: /Terminal 2 - .*No update in/ }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Pi - Working" }),
+      ).toBeTruthy();
+      const observedRow = container.querySelector(
+        '[data-worktree-agent-row="s-1"]',
+      ) as HTMLElement;
+      const shellRow = container.querySelector(
+        '[data-worktree-agent-row="s-2"]',
+      ) as HTMLElement;
+      // The observed session draws the harness mark (no lucide terminal
+      // glyph) with the harness title; the plain shell draws the terminal
+      // glyph with the Shell title.
+      expect(
+        observedRow.querySelector('[title="Claude"] svg:not(.lucide)'),
+      ).not.toBeNull();
+      expect(observedRow.querySelector("svg.lucide-terminal")).toBeNull();
+      expect(
+        shellRow.querySelector('[title="Shell"] svg.lucide-terminal'),
+      ).not.toBeNull();
+      // The card lane draws the workspace status ring (no status set here:
+      // the dashed neutral ring, never a status the owner did not choose).
+      expect(
+        container.querySelector('[role="img"][aria-label="No status"]'),
+      ).not.toBeNull();
+      // The live activity glyph beside it is the working spinner.
+      expect(
+        container.querySelector(
+          '[data-worktree-card-status-slot] [aria-label="Working"]',
+        ),
+      ).not.toBeNull();
     } finally {
       unmount();
     }

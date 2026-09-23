@@ -60,7 +60,8 @@ import {
 } from "./sealed-model-fixture-lifecycle.mjs";
 import { waitForTerminalText } from "./acceptance-terminal-text.mjs";
 import { probeSessionNavigation } from "./probe-session-navigation.mjs";
-import { probeTerminalInputLayout } from "./probe-terminal-input-layout.mjs";
+import { probeTerminalEchoLatency, probeTerminalInputLayout } from "./probe-terminal-input-layout.mjs";
+import { probeTerminalResizeGhost } from "./probe-terminal-resize-ghost.mjs";
 import { installPrivateAcceptanceEnvironment } from "./acceptance-private-environment.mjs";
 import { PI_PROVIDER, PI_MODEL_ID } from "./sealed-model-route.mjs";
 import {
@@ -547,10 +548,20 @@ try {
   await folderRowComposer.waitFor({ state: "detached" });
   report.checks.push("folder-project-header-create-control-opens-preselected-composer");
   // New-workspace composer (Projects header "+"): for a folder project
-  // the composer opens the implicit workspace straight away. The project
+  // the composer creates an additional named workspace sharing the folder
+  // path (issue #579 — its own section with its own sessions), not the
+  // implicit workspace the Add Project flow registered. The project
   // picker is the fork's type-ahead combobox; "Blank Terminal" keeps the
   // journey sessionless (the composer auto-picks an available agent, so an
   // explicit blank pick keeps this fixture from launching a real one).
+  // The workspace under test is the one this composer run adds: snapshot
+  // ids first and take the set difference, never workspaces[0] (that is
+  // the older implicit row, whose session list is honestly empty).
+  const workspaceIdsBefore = await page.evaluate(async () => {
+    const response = await window.drogon.workspaces();
+    if (!response.ok) throw new Error(response.error.message);
+    return response.result.workspaces.map((item) => item.id);
+  });
   await page.getByRole("button", { name: "New workspace", exact: true }).click();
   const composer = page.getByRole("dialog", { name: "Create workspace" });
   await composer.getByRole("combobox", { name: "Project" }).click();
@@ -559,12 +570,37 @@ try {
   await page.getByRole("option", { name: "Blank Terminal" }).click();
   await composer.getByRole("button", { name: "Create workspace" }).click();
   await page.getByRole("heading", { name: "Start a session" }).waitFor();
-  report.checks.push("composer-opens-folder-implicit-workspace");
-  registered = await page.evaluate(async () => {
-    const response = await window.drogon.workspaces();
-    if (!response.ok) throw new Error(response.error.message);
-    return response.result.workspaces[0];
-  });
+  report.checks.push("composer-creates-named-folder-workspace");
+  registered = null;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const created = await page.evaluate(async (known) => {
+      const response = await window.drogon.workspaces();
+      if (!response.ok) throw new Error(response.error.message);
+      return response.result.workspaces.filter((item) => !known.includes(item.id));
+    }, workspaceIdsBefore);
+    if (created.length === 1) {
+      registered = created[0];
+      break;
+    }
+    await delay(100);
+  }
+  assert.equal(
+    (registered ? 1 : 0),
+    1,
+    "the composer must add exactly one workspace for the folder project",
+  );
+  // The Add Project flow registered exactly one workspace before the
+  // composer ran: the implicit folder row. Probes that open tabs in the
+  // selected workspace while querying status by workspace id must address
+  // the tab's own workspace (the orchestrator run is filed under the
+  // tab's workspace id, not the folder path), so the implicit row's id is
+  // pinned here for those probes.
+  assert.equal(
+    workspaceIdsBefore.length,
+    1,
+    "exactly one workspace (the implicit folder row) must exist before the composer runs",
+  );
+  const implicitWorkspaceId = workspaceIdsBefore[0];
   report.checks.push("isolated-renderer-and-real-folder-registration");
   const mentuCli = packaged
     ? packaged.cli
@@ -667,9 +703,24 @@ try {
   assert.ok(original?.incarnation);
   if (process.platform !== "win32") {
     report.checks.push(...await probeTerminalInputLayout({ page, session: original, output, expectedHome: privateEnvironment.home, dataDir }));
+    // #605: an agent TUI redrawing its input zone while the pane is resized
+    // must not strand the frames it already replaced. Shell fixture, no
+    // provider inference — the bug is in the pane/pty grid handshake and is
+    // the same for every harness.
+    report.checks.push(...await probeTerminalResizeGhost({ page, session: original, output }));
+    // PERF-01 keystroke -> echo latency (additive): types a unique token
+    // per keystroke and polls the xterm buffer via CDP for the echo,
+    // reporting p50/p95. Numbers land in terminal-echo-latency.json; the
+    // check name records that the probe ran, never a latency gate.
+    // PERF-01d: missed samples degrade (dropped=N, nulls for the phases
+    // that missed) instead of failing the run; only a total echo
+    // blackout rejects, with phase and buffer tail in the message.
+    const echo = await probeTerminalEchoLatency({ page, session: original, output });
+    console.log(`[perf-01] echo hot p50=${echo.hot.p50?.toFixed(1)}ms p95=${echo.hot.p95?.toFixed(1)}ms cold=${echo.coldMs?.toFixed(1)}ms burst=${echo.burstMs?.toFixed(0)}ms dropped=${echo.dropped ?? 0}`);
+    report.checks.push("terminal-echo-latency-measured");
   }
   report.checks.push(await probeSessionNavigation({
-    page, workspaceId: registered.id, session: original, marker,
+    page, workspaceId: registered.id, workspaceName: registered.name, session: original, marker,
   }));
   await page.reload();
   await waitForTerminalText(page, marker);
@@ -873,6 +924,7 @@ try {
     await mentuSetting.screenshot({
       path: path.join(output, "settings-optional-mentu.png"),
       animations: "disabled",
+      timeout: 120_000,
     });
     await page.getByRole("button", { name: "Back to app", exact: true }).click({ timeout: 10000 });
     await settings.waitFor({ state: "hidden", timeout: 10000 });
@@ -891,6 +943,7 @@ try {
   await page.screenshot({
     path: path.join(output, "narrow.png"),
     animations: "disabled",
+    timeout: 120_000,
   });
   report.checks.push("narrow-no-document-overflow");
   await page.getByRole("button", { name: /Close .* session/ }).click();
@@ -1085,9 +1138,20 @@ try {
     report.checks.push(
       ...(await probeRenderedTabs({ page, workspace, output })),
     );
-    // The orchestrator probe runs FIRST: it needs a workspace with NO
-    // .drogon/graph.json (the honest initial state and the configure-and-run
-    // journey). The Mentu tab probe below then writes its own fixture graph.
+    // The orchestrator probe needs a workspace with NO .drogon/graph.json
+    // (the honest initial state and the configure-and-run journey). The
+    // Mentu tab probe below then writes its own fixture graph. The run the
+    // tab starts is filed under the tab's workspace id, so the tab must
+    // open in the implicit workspace AND the status query must address
+    // that same id — the composer's added workspace (registered.id) shares
+    // the folder path but owns no run. Selecting the implicit card first
+    // is a no-op when it is already selected.
+    await page.getByRole("button", { name: "Select folder", exact: true }).click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[aria-label="Select folder"]')?.getAttribute("aria-current") ===
+        "page",
+    );
     report.checks.push(
       ...(await probeOrchestrator({
         page,
@@ -1095,7 +1159,7 @@ try {
         output,
         cli: packaged?.cli ?? path.join(root, "target", "debug", "drogon-cli"),
         dataDir,
-        workspaceId: registered.id,
+        workspaceId: implicitWorkspaceId,
       })),
     );
     // Mentu-as-tab: the reported bug (the "+" menu's Mentu entry used to
@@ -1243,6 +1307,18 @@ try {
       })),
     );
   }
+  // The restart probes below create terminals through the UI in the
+  // SELECTED workspace but assert on registered.id: select the composer's
+  // workspace card first (a no-op when it is already selected). Without
+  // this, whichever card the sealed journeys left selected receives the
+  // post-restart terminal and the probes read the wrong workspace.
+  await page.getByRole("button", { name: `Select ${registered.name}`, exact: true }).click();
+  await page.waitForFunction(
+    (label) =>
+      document.querySelector(`[aria-label="${label}"]`)?.getAttribute("aria-current") ===
+      "page",
+    `Select ${registered.name}`,
+  );
   if (!packaged) {
     // R16-AL (fixes #222): kill -9 ONLY the owned daemon mid-session,
     // restart it over the same data dir, and prove the session list still
@@ -1538,7 +1614,7 @@ try {
       );
       assert.equal(worktrees.ok, true);
       assert.ok(worktrees.result.worktrees.length >= 3, "seeded worktrees must survive");
-      await page.screenshot({ path: path.join(output, "upgrade-from-previous-build-after.png") });
+      await page.screenshot({ path: path.join(output, "upgrade-from-previous-build-after.png"), timeout: 120_000 });
       report.checks.push("upgrade-from-previous-build-data-survives");
     } finally {
       if (browser) await browser.close().catch(() => {});
@@ -1575,7 +1651,7 @@ try {
         dialogText.includes("is newer than") && dialogText.includes(upgradeDataDir),
         `refusal dialog must name the marker and the data dir, got: ${dialogText.slice(0, 400)}`,
       );
-      await page.screenshot({ path: path.join(output, "upgrade-from-previous-build-refusal.png") });
+      await page.screenshot({ path: path.join(output, "upgrade-from-previous-build-refusal.png"), timeout: 120_000 });
       report.checks.push("upgrade-from-previous-build-downgrade-refusal-dialog");
     } finally {
       if (browser) await browser.close().catch(() => {});

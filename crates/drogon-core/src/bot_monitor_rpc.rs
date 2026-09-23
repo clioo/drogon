@@ -68,9 +68,10 @@ fn parse_scope(params: &Value, method: &str) -> Result<MonitorScope, RpcError> {
             // Manual monitor the tick skips.
             "cron",
             "manual",
-            // `github_pr.v1` (v3): the watch's repository, the case it
-            // names, its credential REFERENCE, the Enterprise API base, and
-            // the dispatch choices the case carries (harness + skills).
+            // `github_pr.v1` (v3) / `github_issue.v1` (v4): the watch's
+            // repository, the case it names, its credential REFERENCE, the
+            // Enterprise API base, and the dispatch choices the case
+            // carries (harness + skills).
             "kind",
             "repo",
             "filter",
@@ -217,9 +218,10 @@ pub(crate) fn create_monitor_in_tx(
     let (folder, workspace_id) = resolve_bot_scope(tx, derived_host_id, &scope)?;
     let object = params.as_object().expect("parse_scope checked object");
     // Rule kind dispatch. The default is unchanged (the file digest the
-    // redesigned Bots form creates); `github_pr.v1` is the owner's headline
-    // case — a pull request watched in the project workspace the Bot lives
-    // in, so the session it releases opens in that project's worktree.
+    // redesigned Bots form creates); `github_pr.v1` and `github_issue.v1`
+    // are the GitHub cases — a pull request (or an issue) watched in the
+    // project workspace the Bot lives in, so the session each releases
+    // opens in that project's worktree.
     let kind = object
         .get("kind")
         .and_then(Value::as_str)
@@ -336,6 +338,14 @@ pub(crate) fn create_monitor_in_tx(
     let rule = match kind {
         crate::bots::monitors::rule::RULE_KIND_GITHUB_PR => MonitorRule::GithubPr(
             crate::bots::monitors::rule::github_pr_rule_from_wire(
+                derived_host_id,
+                &workspace_id,
+                object,
+            )
+            .map_err(|e| invalid_argument(format!("bot.monitor_create: {e}")))?,
+        ),
+        crate::bots::monitors::rule::RULE_KIND_GITHUB_ISSUE => MonitorRule::GithubIssue(
+            crate::bots::monitors::rule::github_issue_rule_from_wire(
                 derived_host_id,
                 &workspace_id,
                 object,

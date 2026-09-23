@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { runAcceptanceProcess } from "./acceptance-process.mjs";
 import {
-  runAcceptanceProcess,
-  startAcceptanceProcess,
-  waitAcceptanceExit,
-} from "./acceptance-process.mjs";
+  killOwnedDaemon,
+  spawnRestartDaemon,
+  waitForRestartedDaemon,
+} from "./acceptance-daemon-restart.mjs";
 import { waitForBridgeObservation } from "./acceptance-bridge-observation.mjs";
 
 // What "the session list still renders honestly after a daemon restart"
@@ -51,20 +51,6 @@ async function bridgeStop(page, identity) {
     if (!response.ok) throw new Error(response.error.message);
     return response.result;
   }, identity);
-}
-
-async function waitForDaemon(cliBin, dataDir) {
-  const deadline = Date.now() + 15000;
-  for (;;) {
-    try {
-      const status = await cliJson(cliBin, dataDir, ["status"]);
-      if (status.ok) return;
-    } catch {
-      // Not up yet.
-    }
-    if (Date.now() >= deadline) throw new Error("restarted daemon never came up");
-    await delay(100);
-  }
 }
 
 // Seeds rows straight into SQLite while the daemon is down, so the probe
@@ -123,10 +109,10 @@ export async function probeRenderedSessionRestart({
       incarnation: item.incarnation,
     });
   }
-  // Kill -9 ONLY the daemon PID, exactly like the issue report.
-  daemon.kill("SIGKILL");
-  const observed = await waitAcceptanceExit(daemon, 10000);
-  assert.equal(observed.verdict, "exited");
+  // Kill -9 ONLY the daemon PID, exactly like the issue report — and
+  // prove it died, so a later readiness failure can never be a kill that
+  // never landed (PERF-01e).
+  await killOwnedDaemon(daemon);
   const db = path.join(dataDir, "drogon.sqlite3");
   const now = new Date().toISOString();
   await runAcceptanceProcess("python3", [
@@ -144,12 +130,12 @@ export async function probeRenderedSessionRestart({
   // row written by a pre-fix daemon (#222) that kept its stale wait stamp
   // past the exit. Post-fix daemons clear the stamp on exit, but rows
   // written before the fix must still list without a wipe.
-  const next = startAcceptanceProcess(daemonBin, ["--data-dir", dataDir], {
-    stdio: "ignore",
-    env: { ...process.env },
-  });
-  adoptDaemon(next);
-  await waitForDaemon(cliBin, dataDir);
+  // The replacement's stderr is captured (not ignored): a startup
+  // refusal names itself in the readiness error instead of polling a dead
+  // process for 15 s (PERF-01e).
+  const restarted = spawnRestartDaemon(daemonBin, dataDir);
+  adoptDaemon(restarted.child);
+  await waitForRestartedDaemon(cliBin, dataDir, restarted);
   // The exact #222 symptom: `terminal list` must succeed after the restart.
   const listed = await cliJson(cliBin, dataDir, ["terminal", "list"]);
   assert.equal(listed.ok, true);

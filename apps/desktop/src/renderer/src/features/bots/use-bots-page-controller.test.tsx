@@ -120,7 +120,7 @@ function fakeBridge(initial: BotsPanelBot[]) {
       bots.push(created);
       return { ok: true as const, result: created };
     },
-    botResponsibilityCreate: async () => ({
+    botResponsibilityCreate: async (_input: unknown) => ({
       ok: true as const,
       result: {
         ...scope,
@@ -129,7 +129,7 @@ function fakeBridge(initial: BotsPanelBot[]) {
         automationId: "auto-new",
       },
     }),
-    botResponsibilityDelete: async () => ({
+    botResponsibilityDelete: async (_input: unknown) => ({
       ok: true as const,
       result: {
         ...scope,
@@ -139,7 +139,7 @@ function fakeBridge(initial: BotsPanelBot[]) {
         automationId: "auto-1",
       },
     }),
-    botDelete: async () => {
+    botDelete: async (_input: unknown) => {
       const index = bots.findIndex((entry) => entry.id === "bot-1");
       if (index >= 0) bots.splice(index, 1);
       return {
@@ -430,13 +430,27 @@ describe("use-bots-page-controller", () => {
     );
   });
 
-  it("adds a responsibility from the selected card and reloads", async () => {
+  it("adds a responsibility from the selected card through app-global owner resolution and reloads", async () => {
     const fake = fakeBridge([bot()]);
+    const responsibilityCalls: unknown[] = [];
+    fake.bridge.botResponsibilityCreate = async (input: unknown) => {
+      responsibilityCalls.push(input);
+      return {
+        ok: true as const,
+        result: {
+          ...scope,
+          workspaceId: "owner-workspace",
+          botId: "bot-1",
+          responsibilityId: "resp-new",
+          automationId: "auto-new",
+        },
+      };
+    };
     render(
       <BotsPanel
         snapshot={{ bots: [bot()], history: [] }}
         bridge={fake.bridge}
-        scope={scope}
+        scope={{ ...scope, workspaceId: "foreign-selected-workspace" }}
       />,
     );
     fireEvent.click(await screen.findByTestId("open-session-bot-1"));
@@ -457,23 +471,49 @@ describe("use-bots-page-controller", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("responsibility-form")).toBeNull(),
     );
+    expect(responsibilityCalls).toHaveLength(1);
+    expect(responsibilityCalls[0]).toMatchObject({
+      hostId: scope.hostId,
+      workspaceId: "",
+      botId: "bot-1",
+      name: "Nightly review",
+    });
     // Mount load + the post-mutation reload.
     expect(fake.snapshots()).toBe(2);
   });
 
-  it("deletes the bot immediately, like the source, and reloads (#348)", async () => {
+  it("deletes an existing bot through app-global owner resolution and reloads (#348)", async () => {
     // Fork parity: the header Delete acts immediately — the pre-parity
     // confirm dialog was invented UI and is gone.
     const fake = fakeBridge([bot()]);
+    const deleteCalls: unknown[] = [];
+    fake.bridge.botDelete = async (input: unknown) => {
+      deleteCalls.push(input);
+      return {
+        ok: true as const,
+        result: {
+          ...scope,
+          workspaceId: "owner-workspace",
+          botId: "bot-1",
+          removed: true,
+          automationIds: [],
+        },
+      };
+    };
     render(
       <BotsPanel
         snapshot={{ bots: [bot()], history: [] }}
         bridge={fake.bridge}
-        scope={scope}
+        scope={{ ...scope, workspaceId: "foreign-selected-workspace" }}
       />,
     );
     fireEvent.click(await screen.findByTestId("delete-bot-bot-1"));
-    await waitFor(() => expect(screen.getByTestId("bots-empty")).toBeTruthy());
+    await waitFor(() => expect(deleteCalls).toHaveLength(1));
+    expect(deleteCalls[0]).toMatchObject({
+      hostId: scope.hostId,
+      workspaceId: "",
+      botId: "bot-1",
+    });
     // Mount load + the post-delete reload.
     expect(fake.snapshots()).toBe(2);
   });
@@ -629,7 +669,51 @@ describe("use-bots-page-controller: design column side reads", () => {
     expect(screen.getByText("3 consecutive errors")).toBeTruthy();
   });
 
-  it("keeps the columns honest when a side read fails or is absent", async () => {
+  it("approves a parked monitor through app-global owner resolution", async () => {
+    const monitorApprove = vi.fn(async () => ({ ok: true as const }));
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [bot({ responsibilities: [responsibility()] })],
+          history: [],
+        }}
+        scope={{ ...scope, workspaceId: "foreign-selected-workspace" }}
+        monitorList={async () => ({
+          ok: true as const,
+          result: {
+            monitors: [
+              {
+                ...monitorView(),
+                ruleKind: "github_pr.v1",
+                approved: false,
+                health: "needs_approval",
+                repo: "clioo/drogon",
+                filter: "review_requested",
+                login: "clioo",
+                responsibilityId: "resp-1",
+              },
+            ],
+            workspaceId: "owner-workspace",
+          },
+        })}
+        monitorApprove={monitorApprove}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Approve this watch" }));
+    await waitFor(() => expect(monitorApprove).toHaveBeenCalledTimes(1));
+    expect(monitorApprove).toHaveBeenCalledWith({
+      hostId: scope.hostId,
+      workspaceId: "",
+      botId: "bot-1",
+      monitorId: "mon-1",
+    });
+  });
+
+  it("names the REASON a monitor read failed instead of blaming the bridge", async () => {
+    // #608: the daemon can answer `bot.monitor_list` perfectly well, but a
+    // contract mismatch made the read fail — and the page reported that as
+    // "the daemon bridge does not expose the monitor read", which is wrong
+    // about the capability AND throws away the only diagnosis there is.
     render(
       <BotsPanel
         snapshot={{
@@ -638,17 +722,177 @@ describe("use-bots-page-controller: design column side reads", () => {
         }}
         scope={scope}
         automationList={async () => ({ ok: false as const })}
+        monitorList={async () => ({
+          ok: false as const,
+          error: {
+            message:
+              "The service response does not match the expected contract.",
+          },
+        })}
+      />,
+    );
+    expect(
+      await screen.findByText(
+        /Could not read this Bot's monitors: The service response does not match the expected contract\./,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/bridge does not expose/)).toBeNull();
+    // ...and the count is not asserted as zero when nothing could be read.
+    expect(screen.getByText("unknown")).toBeTruthy();
+    expect(screen.queryByText("0 watching")).toBeNull();
+    // Failed automation join: the card stays, the schedule reads as a dash.
+    expect(screen.getAllByText("Review duty").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("No runs yet")).toBeTruthy();
+  });
+
+  it("never presents a bot with an unread monitor list as 'nothing configured'", async () => {
+    // The collapsed row is the last place the old conflation survived: a
+    // bot with no responsibilities whose monitor read FAILED counted as
+    // zero monitors, collapsed by default, and the muted line asserted
+    // "No automations or monitors yet" — an absence nobody verified.
+    render(
+      <BotsPanel
+        snapshot={{ bots: [bot({ responsibilities: [] })], history: [] }}
+        scope={scope}
+        monitorList={async () => ({
+          ok: false as const,
+          error: { message: "The monitor read failed." },
+        })}
+      />,
+    );
+    // The card no longer collapses into the design's "nothing configured"
+    // row off an unknown count: it stays expanded and states the failure.
+    expect(
+      await screen.findByText(/Could not read this Bot's monitors/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/No automations or monitors yet/)).toBeNull();
+    // ...and the status pill does not claim "Idle" off an unknown count.
+    expect(screen.queryByText("Idle")).toBeNull();
+  });
+
+  it("counts a failed-read bot in the header chip and keeps its card expanded", async () => {
+    // The header's "N active" was the last surface reading an unknown
+    // monitor count as zero: the bot showed "Ready for a purpose" on its
+    // own card yet was excluded from the count as if it were idle.
+    render(
+      <BotsPanel
+        snapshot={{ bots: [bot({ responsibilities: [] })], history: [] }}
+        scope={scope}
+        monitorList={async () => ({
+          ok: false as const,
+          error: { message: "The monitor read failed." },
+        })}
+      />,
+    );
+    await screen.findByText(/Could not read this Bot's monitors/);
+    // Scoped to the chip itself: other cases in this file render their own
+    // panels, so a bare text query is not a statement about this one.
+    expect(
+      screen.getByTestId("bots-active-count").textContent,
+    ).toContain("1 active");
+  });
+
+  it("collapses on the FIRST click for a failed-read bot, because it starts expanded", async () => {
+    // The chevron flips the card's EFFECTIVE state. A failed-read bot is
+    // not "nothing configured", so it renders expanded; if the toggle
+    // still assumed the collapsed default, the first click would compute
+    // "expand" and nothing would visibly happen.
+    render(
+      <BotsPanel
+        snapshot={{ bots: [bot({ responsibilities: [] })], history: [] }}
+        scope={scope}
+        monitorList={async () => ({
+          ok: false as const,
+          error: { message: "The monitor read failed." },
+        })}
+      />,
+    );
+    await screen.findByText(/Could not read this Bot's monitors/);
+    fireEvent.click(screen.getByTestId("bot-expand-bot-1"));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Could not read this Bot's monitors/),
+      ).toBeNull(),
+    );
+  });
+
+  it("falls back to an honest line when a failed read carries no reason", async () => {
+    render(
+      <BotsPanel
+        snapshot={{ bots: [bot({ responsibilities: [] })], history: [] }}
+        scope={scope}
         monitorList={async () => ({ ok: false as const })}
       />,
     );
-    // Failed monitor read: the unavailable note, never an empty claim.
+    // No invented cause, and never silence: the column still says the
+    // read failed rather than presenting the bot as having no monitors.
     expect(
-      await screen.findByText(/Monitor details are unavailable/),
+      await screen.findByText(
+        /Could not read this Bot's monitors: The monitor read failed\./,
+      ),
     ).toBeTruthy();
-    // Failed automation join: the card stays, the schedule reads as a dash.
-    expect(screen.getAllByText("Review duty").length).toBeGreaterThanOrEqual(1);
-    // No automation summary → no "Active" chip of invented state.
-    expect(screen.getByText("No runs yet")).toBeTruthy();
+  });
+
+  it("says there is no monitor source when the bridge supplies none", async () => {
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [bot({ responsibilities: [responsibility()] })],
+          history: [],
+        }}
+        scope={scope}
+        automationList={async () => ({ ok: false as const })}
+      />,
+    );
+    // A DIFFERENT fact from a failed read, and it gets different words.
+    expect(
+      await screen.findByText(/no monitor data source/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Could not read this Bot's monitors/)).toBeNull();
+  });
+
+  it("keeps a monitor read that a newer daemon verdict would once have broken", async () => {
+    // The whole `bot.monitor_list` result used to be rejected when a bot's
+    // newest firing carried a verdict this build had no name for; every
+    // monitor the bot owned then vanished from the page.
+    const monitorList = vi.fn(async () => ({
+      ok: true as const,
+      result: {
+        monitors: [
+          {
+            ...monitorView(),
+            firing: {
+              lastEventId: "mev_1",
+              lastOutcome: "dispatch_failed",
+              lastRunId: null,
+              lastDetail: "harness.start refused: not_found: no such harness",
+              lastResource: "issue/608",
+              lastAtMs: Date.now(),
+              countToday: 1,
+            },
+          },
+        ],
+        workspaceId: scope.workspaceId,
+      },
+    }));
+    render(
+      <BotsPanel
+        snapshot={{
+          bots: [bot({ responsibilities: [responsibility()] })],
+          history: [],
+        }}
+        scope={scope}
+        monitorList={monitorList}
+      />,
+    );
+    // The monitor is still rendered, and the refusal is named as a refusal
+    // — never as a dispatch that worked, never as "Never fired".
+    expect(await screen.findByText(/Dispatch failed/)).toBeTruthy();
+    expect(screen.queryByText("Never fired")).toBeNull();
+    expect(screen.queryByText(/bridge does not expose/)).toBeNull();
+    expect(
+      screen.getByText(/harness.start refused: not_found: no such harness/),
+    ).toBeTruthy();
   });
 });
 

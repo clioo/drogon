@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use drogon_protocol::git::{
     GitCommitParams, GitDiffParams, GitDiscardParams, GitFetchParams, GitLineCountsParams,
-    GitPrCreateParams, GitPullParams, GitPushParams, GitScope, GitStageParams, GitStatusParams,
-    GitUnstageParams, MAX_GIT_DIFF_BYTES,
+    GitPrCreateParams, GitPullParams, GitPushMode, GitPushParams, GitScope, GitStageParams,
+    GitStatusParams, GitUnstageParams, MAX_GIT_DIFF_BYTES,
 };
 use drogon_protocol::{MAX_FRAME_BYTES, RpcError};
 use serde::de::DeserializeOwned;
@@ -159,9 +159,16 @@ impl Engine {
     pub(super) fn do_git_push(&self, value: &Value) -> Result<Value, RpcError> {
         let params: GitPushParams = decode(value)?;
         let root = self.git_workspace_root(&params.scope)?;
+        // #332: omitted mode is the historical plain push; unknown wire
+        // modes never reach here (`decode` rejects them as invalid_argument).
+        let mode = match params.mode {
+            None => None,
+            Some(GitPushMode::ForceWithLease) => Some(git_process::PushMode::ForceWithLease),
+            Some(GitPushMode::Publish) => Some(git_process::PushMode::Publish),
+        };
         let output = git_process::run_git_mutation(
             &root,
-            &git_process::GitMutation::Push,
+            &git_process::GitMutation::Push { mode },
             &git_process::git_mutation_budget(),
         )?;
         let mut result = scope_result(&params.scope);

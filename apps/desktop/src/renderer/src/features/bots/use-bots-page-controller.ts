@@ -132,6 +132,28 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function ownerResolvingScope(scope: BotScope & { locale: string }): BotScope & { locale: string } {
+  return { ...scope, workspaceId: "" };
+}
+
+/** The daemon's own reason a monitor read failed.
+ *
+ *  The injectable `monitorList` dep type declares only `{ ok, result }` —
+ *  the minimum a test double must supply — while the real gated bridge
+ *  answers with the full `Result` union, whose failures carry
+ *  `error.message`. Reading it structurally keeps the dep contract small
+ *  and still surfaces the true reason; a failure with no message at all
+ *  gets an honest generic line, never an invented cause. */
+function monitorReadFailure(listed: {
+  ok: boolean;
+  error?: { message?: string };
+}): string {
+  const message = listed.error?.message?.trim();
+  return message && message.length > 0
+    ? message
+    : "The monitor read failed.";
+}
+
 export function useBotsPageController(deps: BotsPageControllerDeps) {
   const {
     snapshot,
@@ -185,6 +207,13 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     string,
     BotMonitorView[]
   > | null>(null);
+  // Why a bot's monitor read produced nothing, keyed by bot id. A failed
+  // read is NOT the same as an absent bridge, and conflating the two is
+  // what made a contract mismatch look like "monitors are not exposed at
+  // all" (#608). The reason is the daemon's own, never invented here.
+  const [monitorReadErrorByBotId, setMonitorReadErrorByBotId] = useState<
+    Record<string, string>
+  >({});
   // Per-bot card expansion. Unset means "the design's default": configured
   // bots render expanded, bots with nothing configured render as the
   // compact collapsed row. Explicit toggles win over the default and are
@@ -268,16 +297,33 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
         }),
       );
       const nextMonitors: Record<string, BotMonitorView[]> = {};
+      const nextErrors: Record<string, string> = {};
       let sawSource = false;
-      for (const result of results) {
-        if (result.status !== "fulfilled") continue;
+      for (const [index, result] of results.entries()) {
+        const bot = bots[index];
+        if (result.status !== "fulfilled") {
+          // The bridge call itself threw (no IPC handler, a serialization
+          // failure). That is a real failure with a real reason — record
+          // it instead of dropping the bot silently.
+          if (bot) nextErrors[bot.id] = errorMessage(result.reason);
+          continue;
+        }
         sawSource = true;
         const { botId, listed } = result.value;
         if (listed.ok && listed.result) {
           nextMonitors[botId] = listed.result.monitors;
+        } else {
+          nextErrors[botId] = monitorReadFailure(listed);
         }
       }
-      if (!cancelled && sawSource) setMonitorsByBotId(nextMonitors);
+      if (cancelled) return;
+      setMonitorReadErrorByBotId(nextErrors);
+      // Any settled call at all means the source exists: from here the
+      // column distinguishes "no rows" from "this bot's read failed",
+      // instead of reporting both as a missing bridge.
+      if (sawSource || Object.keys(nextErrors).length > 0) {
+        setMonitorsByBotId(nextMonitors);
+      }
     })();
     return () => {
       cancelled = true;
@@ -381,7 +427,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       setActionError(null);
       try {
         const response = await bridge.botResponsibilityCreate({
-          ...scope,
+          ...ownerResolvingScope(scope),
           requestId: mintRequestId("bot-responsibility"),
           botId,
           name: responsibilityForm.name.trim(),
@@ -416,7 +462,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       setActionError(null);
       try {
         const response = await bridge.botDelete({
-          ...scope,
+          ...ownerResolvingScope(scope),
           requestId: mintRequestId("bot-delete"),
           botId,
         });
@@ -455,7 +501,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
       try {
         const response = await monitorApprove({
           hostId: scope.hostId,
-          workspaceId: scope.workspaceId,
+          workspaceId: "",
           botId,
           monitorId,
         });
@@ -732,13 +778,13 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
   // written to the persisted envelope before the state update so a reload
   // mid-flight cannot lose it.
   const toggleExpanded = useCallback(
-    (botId: string): void => {
+    (botId: string, monitorsUnread = false): void => {
       const bot = (localSnapshot ?? snapshot).bots.find(
         (candidate) => candidate.id === botId,
       );
       const monitorCount = monitorsByBotId?.[botId]?.length ?? 0;
       const defaultExpanded = bot
-        ? !isBotUnconfigured(bot, monitorCount)
+        ? !isBotUnconfigured(bot, monitorCount, monitorsUnread)
         : true;
       const next = {
         ...expandedOverrides,
@@ -776,6 +822,7 @@ export function useBotsPageController(deps: BotsPageControllerDeps) {
     approveMonitor,
     automationSummaries,
     monitorsByBotId,
+    monitorReadErrorByBotId,
     expandedOverrides,
     toggleExpanded,
     filterQuery,

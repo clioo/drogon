@@ -33,9 +33,9 @@ RPC to the running daemon; prefer `--json` for agent-driven calls.
 ## Read The Workspace Policy Before Delegating
 
 Before a main agent creates a run or dispatches a worker, it MUST read the
-workspace's native Drogon state. Simple read-only questions, repository
-lookups, `gh` commands, and bounded changes should be handled directly without
-creating a run:
+workspace's native Drogon state. Handle simple read-only questions, repository
+lookups, and ordinary `gh` commands directly without creating a run. Those are
+coordination chores, not implementation:
 
 ```text
 drogon-cli graph read --workspace <WORKSPACE_ID> --json
@@ -46,21 +46,42 @@ Use `.drogon/graph.json` to choose the execution mode and approved/fallback
 runtimes. Use the Evidence and Usage ledgers to avoid repeating work already
 reported by agents. Do not infer policy from the UI or from memory.
 
-The execution modes are mutually exclusive:
+This guide owns the execution-mode definitions used by Drogon's bundled
+guides. The stored mode selectors are mutually exclusive, but Adversarial
+**semantically includes delegation**: `policy.adversarial.enabled: true` requires
+`policy.delegate: false` because Adversarial already means Delegate plus the
+critique/correction loop. It never means "implement directly."
 
-- Both Delegate and Adversarial OFF: work directly; do not proactively create
-  workers, though an explicit user request may authorize delegation.
-- Delegate ON: delegation is available, not mandatory. Work directly by default
-  and use depth-one children only when independent work benefits from
-  parallelism or specialization. A user request to make changes always permits
-  the main agent to edit directly. Do not add testers.
-- Adversarial ON: implement directly unless an independent subtask benefits
-  from a depth-one worker. Drogon launches the bounded whole-workflow test and
-  review sessions after the main work settles; do not dispatch duplicate
-  testers yourself.
+- Both Delegate and Adversarial OFF: implement the task directly; do not
+  proactively create workers, though an explicit user request may authorize
+  delegation.
+- Delegate ON: lead only. Split implementation into features or teams, dispatch
+  depth-one implementation workers, direct them, and check their reports. Never
+  implement their assigned work yourself. Do not add the adversarial
+  critique/correction loop.
+- Adversarial ON: lead only, with all Delegate behavior plus the bounded
+  adversarial loop below. The leader delegates implementation, directs and
+  checks workers, critiques results, and delegates corrections; the leader does
+  not implement product changes.
 
-Every worker brief must say that it cannot dispatch another worker. All
-workers remain at depth one.
+In either delegated mode, the leader still performs simple lookups, repository
+discovery, and ordinary `gh` commands directly when needed to coordinate the
+work. Every implementation, test, and correction brief must say that its worker
+cannot dispatch another worker. All children remain siblings at depth one.
+
+### Adversarial critique/correction loop
+
+For every depth-one implementation worker, dispatch a separate depth-one tester
+as soon as that worker's final report arrives; do not wait for all implementation
+workers before testing completed work. Read and critique the tester's report.
+
+- If a test/review round finds nothing adversarial, that stream is complete:
+  stop the loop immediately even when iterations remain.
+- If it finds problems, dispatch a sibling correction worker, then dispatch a
+  fresh tester for the corrected result.
+- Continue only until a round finds nothing adversarial or the saved
+  `maxIterations` bound is reached. At the bound, report unresolved findings
+  honestly instead of starting another correction round.
 
 A Drogon-launched harness receives this context on its first turn, without a
 new `AGENTS.md` or `CLAUDE.md` in an unconfigured workspace: delegation goes
@@ -68,22 +89,25 @@ through the `drogon-cli` on its managed `PATH`, and the Work Graph policy is
 authoritative for child runtimes. Read the policy's provider and model as one
 pair; never resolve an ambiguous model id by guessing.
 
-## The Loop
+## Native Coordination Loop
 
 Create a run, create a task, dispatch a worker, wait for its report:
 
-Run `drogon-cli orchestration run-create --objective <TEXT>` to open a run
-bound to a fresh coordinator binding, then
-`drogon-cli orchestration task-create --run <ID> --coordinator-id <ID> --consumer-generation 3 --instructions <TEXT>`
+Run `drogon-cli orchestration run-create --objective <TEXT> --json` to open a
+run bound to a fresh coordinator binding. Save the returned `runId`,
+`coordinatorId`, and `consumerGeneration`. In every command below, replace
+`<GENERATION>` with the `consumerGeneration` returned by that `run-create`;
+never copy a generation from another run. Then run
+`drogon-cli orchestration task-create --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --instructions <TEXT>`
 to record the work. Title it when it helps triage:
-`drogon-cli orchestration task-create --run <ID> --coordinator-id <ID> --consumer-generation 3 --instructions <TEXT> --title <TITLE>`.
+`drogon-cli orchestration task-create --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --instructions <TEXT> --title <TITLE>`.
 List ready work with
-`drogon-cli orchestration task-list --run <ID> --coordinator-id <ID> --consumer-generation 3 --ready --json`
+`drogon-cli orchestration task-list --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --ready --json`
 and inspect one task with
-`drogon-cli orchestration task-show --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID>`.
+`drogon-cli orchestration task-show --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --task <ID>`.
 
 Dispatch the task through the Work Graph policy with
-`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID>`.
+`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --task <ID> --workspace <ID>`.
 This records the exact provider+model selected from the ordered approved
 runtimes, then the fallback. If the workspace has no configured runtime, this
 form refuses instead of inventing a model or copying a developer-only default.
@@ -92,21 +116,21 @@ explicitly with `--retry-of <DISPATCH-ID>`; the next policy runtime is chosen
 without the coordinator hand-picking a provider. A coordinator may override
 that policy when the user explicitly requests a runtime and it deliberately
 supplies the full fresh launch pair:
-`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID> --harness <HARNESS> --provider <PROVIDER> --model <MODEL>`.
+`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --task <ID> --workspace <ID> --harness <HARNESS> --provider <PROVIDER> --model <MODEL>`.
 To attach an existing session explicitly, use
-`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <ID> --workspace <ID> --reuse-session <SESSION> --reuse-incarnation <TOKEN>`.
+`drogon-cli orchestration worker-start --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --task <ID> --workspace <ID> --reuse-session <SESSION> --reuse-incarnation <TOKEN>`.
 Watch it with
-`drogon-cli orchestration worker-show --run <ID> --coordinator-id <ID> --consumer-generation 3 --dispatch <ID>`
+`drogon-cli orchestration worker-show --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --dispatch <ID>`
 and read bounded output with
-`drogon-cli orchestration worker-read --run <ID> --coordinator-id <ID> --consumer-generation 3 --dispatch <ID> --limit 50`.
+`drogon-cli orchestration worker-read --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --dispatch <ID> --limit 50`.
 Stop a worker with
-`drogon-cli orchestration worker-stop --run <ID> --coordinator-id <ID> --consumer-generation 3 --dispatch <ID>`.
+`drogon-cli orchestration worker-stop --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --dispatch <ID>`.
 
 Wait for completion with a bounded blocking check:
-`drogon-cli orchestration check --run <ID> --coordinator-id <ID> --consumer-generation 3 --wait --timeout-ms 60000`.
+`drogon-cli orchestration check --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --wait --timeout-ms 60000`.
 Always pass `--timeout-ms` (1 to 900000) with `--wait`. Peek without
 consuming with
-`drogon-cli orchestration check --run <ID> --coordinator-id <ID> --consumer-generation 3 --peek --json`.
+`drogon-cli orchestration check --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --peek --json`.
 
 ## Worker Reports And Mail
 
@@ -129,20 +153,20 @@ refused. The final body must name the outcome, modified files, and any
 artifact path; a PTY line alone is not a completion report.
 
 Coordinators send with explicit scope instead. Post a status note home with
-`drogon-cli orchestration send --run <ID> --coordinator-id <ID> --consumer-generation 3 --kind status --subject <TEXT> --to run-home`,
+`drogon-cli orchestration send --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --kind status --subject <TEXT> --to run-home`,
 and ask a worker a direct question with
-`drogon-cli orchestration send --run <ID> --coordinator-id <ID> --consumer-generation 3 --kind question --subject <TEXT> --to dispatch:<ID>`.
+`drogon-cli orchestration send --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --kind question --subject <TEXT> --to dispatch:<ID>`.
 Targets are `run-home`, `dispatch:<ID>` or `group:<NAME>`.
 
 ## Ask And Reply
 
 Ask blocks for an answer inside one bounded budget:
-`drogon-cli orchestration ask --run <ID> --coordinator-id <ID> --consumer-generation 3 --question <TEXT> --timeout-ms 60000`.
+`drogon-cli orchestration ask --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --question <TEXT> --timeout-ms 60000`.
 A worker asks from its own terminal with
 `drogon-cli orchestration ask --task <ID> --dispatch <ID> --question <TEXT> --timeout-ms 60000`
 when it needs the coordinator, and a coordinator answers a pending
 question with
-`drogon-cli orchestration reply --run <ID> --coordinator-id <ID> --consumer-generation 3 --question <MSG> --body <TEXT>`.
+`drogon-cli orchestration reply --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --question <MSG> --body <TEXT>`.
 Answer with `reply`, never with a second `ask`: the question id keeps the
 correlation. Resume a pending ask by its message id rather than opening a
 duplicate. Without `--timeout-ms`, the budget is ten minutes; larger explicit
@@ -155,17 +179,17 @@ A pending or cancelled wait exits 1; a timeout never closes the question.
 
 ## Task Status And Decision Gates
 
-`drogon-cli orchestration task-update --run <ID> --coordinator-id <ID> --consumer-generation 3 --id <TASK> --status completed --result <TEXT>`
+`drogon-cli orchestration task-update --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --id <TASK> --status completed --result <TEXT>`
 updates a task after its active worker has settled or stopped. Omitting
 `--result` preserves the previous result. Completing prerequisites promotes
 their eligible dependent tasks; a status label never proves process exit.
 
-`drogon-cli orchestration gate-create --run <ID> --coordinator-id <ID> --consumer-generation 3 --task <TASK> --question <TEXT>`
+`drogon-cli orchestration gate-create --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --task <TASK> --question <TEXT>`
 creates a durable decision gate and blocks the task. Gate `--options` is a JSON
 array of strings, unlike ask's CSV form.
-`drogon-cli orchestration gate-list --run <ID> --coordinator-id <ID> --consumer-generation 3 --status pending`
+`drogon-cli orchestration gate-list --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --status pending`
 lists pending gates, optionally filtered by `--task`.
-`drogon-cli orchestration gate-resolve --run <ID> --coordinator-id <ID> --consumer-generation 3 --id <GATE> --resolution <TEXT>`
+`drogon-cli orchestration gate-resolve --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --id <GATE> --resolution <TEXT>`
 resolves a gate and returns its task to ready. Creation and resolution refuse
 an active supervised worker rather than silently discarding its assignment.
 
@@ -203,7 +227,7 @@ the dispatch binding (`--task`, `--dispatch`); a dispatched worker's own
 terminal fills missing dispatch fields from scoped hints. Explicit worker
 fields must agree with those hints. Coordinator-only verbs refuse a worker credential
 outright. Take over a run explicitly with
-`drogon-cli orchestration run-use --run <ID> --coordinator-id <ID> --consumer-generation 3 --takeover`.
+`drogon-cli orchestration run-use --run <ID> --coordinator-id <ID> --consumer-generation <GENERATION> --takeover`.
 
 ## Liveness
 

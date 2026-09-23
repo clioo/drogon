@@ -56,6 +56,7 @@ describe("applySessionStatePush", () => {
       ...items[1],
       agentState: "idle",
       agentStateAt: "2026-09-08T07:00:00Z",
+      agentStateAuthority: null,
     });
   });
 
@@ -137,5 +138,46 @@ describe("applySessionStatePush", () => {
     });
     expect(outcome.applied).toBe(true);
     expect(outcome.sessions[0]?.agentState).toBe("idle");
+  });
+
+  it("applies an authority-only move instead of discarding it as same-state", () => {
+    // Proof gained (or lost) with the state unchanged flips the rendered
+    // dot, so poll and push must agree on it — never a sameSessions no-op.
+    const items = [row("a", "working", "2026-09-08T07:00:05Z")];
+    const proven = applySessionStatePush(items, {
+      sessionId: "a",
+      workspaceId: "w-1",
+      agentState: "working",
+      agentStateAt: "2026-09-08T07:00:05Z",
+      agentStateAuthority: "hook",
+    });
+    expect(proven.applied).toBe(true);
+    expect(proven.sessions[0]?.agentStateAuthority).toBe("hook");
+    expect(
+      applySessionStatePush(proven.sessions, {
+        sessionId: "a",
+        workspaceId: "w-1",
+        agentState: "working",
+        agentStateAt: "2026-09-08T07:00:05Z",
+        agentStateAuthority: "hook",
+      }).applied,
+    ).toBe(false);
+  });
+
+  it("an old push without metadata clears stored proof instead of inheriting it", () => {
+    // An old daemon's push carries no authority field: applying it over a
+    // hook-proven row must drop the proof, never lend the old state a
+    // spinner it did not report.
+    const items = [
+      { ...row("a", "working", "2026-09-08T07:00:05Z"), agentStateAuthority: "hook" as const },
+    ];
+    const outcome = applySessionStatePush(items, {
+      sessionId: "a",
+      workspaceId: "w-1",
+      agentState: "working",
+      agentStateAt: "2026-09-08T07:00:05Z",
+    });
+    expect(outcome.applied).toBe(true);
+    expect(outcome.sessions[0]?.agentStateAuthority).toBeNull();
   });
 });

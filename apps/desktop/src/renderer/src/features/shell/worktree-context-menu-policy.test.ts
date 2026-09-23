@@ -3,6 +3,7 @@ import {
   getFileManagerLabel,
   getWorktreeDeleteLabel,
   getWorktreeDeleteShortcutLabel,
+  getWorktreePinLabel,
   isPrimaryCheckoutWorktree,
   isWorktreeRenamable,
   shouldSuppressContextMenuFollowUpClick,
@@ -85,5 +86,10 @@ describe("worktree context menu policy", () => {
     expect(shouldSuppressContextMenuFollowUpClick(1000, 1200)).toBe(true);
     expect(shouldSuppressContextMenuFollowUpClick(1000, 1600)).toBe(false);
     expect(shouldSuppressContextMenuFollowUpClick(1000, 999)).toBe(false);
+  });
+
+  test("pin row labels the toggle, not the state (#331)", () => {
+    expect(getWorktreePinLabel(false)).toBe("Pin");
+    expect(getWorktreePinLabel(true)).toBe("Unpin");
   });
 });

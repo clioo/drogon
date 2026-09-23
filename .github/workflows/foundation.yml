@@ -70,14 +70,51 @@ jobs:
       # step after enough files have completed. Run four independent shards so
       # each step stays below the observed threshold and a failure is localized
       # to one shard.
-      - run: pnpm --filter @drogon/desktop test --shard=1/4
+      #
+      # Phase 1 CI: each shard also records v8 coverage into a per-shard blob
+      # report, merged into the ratchet input below. Coverage is measured over
+      # the sharded run because an unsharded full-suite run is NOT reliable:
+      # with `isolate: false` + `pool: "threads"` (see vitest.config.ts) one
+      # process reuses workers across files and pre-existing cross-file
+      # pollution turns the run red (TerminalSplitHost.test.tsx `matchMedia`
+      # failures plus daemon-banner assertion failures). That pollution is an
+      # open defect (lead: `installRadixJsdomStubs` in
+      # renderer/src/components/ui/radix-jsdom-stubs.ts and the ordering of
+      # MentuPanel.test.tsx); sharding is how CI already runs the suite, not a
+      # fix for the pollution.
+      #
+      # `--reporter=default` keeps the usual console output (a red shard still
+      # fails the step exactly as before, with its failures printed);
+      # `--reporter=blob` additionally records the shard for the merge. One
+      # blob file per shard via `--outputFile.blob`: the default blob path is
+      # a single file, so concurrent/sequential shards would overwrite each
+      # other. No `if: always()` anywhere below: a red shard stops the job
+      # before the merge, so a failure can never be swallowed.
+      - run: pnpm --filter @drogon/desktop test --shard=1/4 --coverage --reporter=default --reporter=blob --outputFile.blob=.vitest/blob/shard-1.json
         timeout-minutes: 15
-      - run: pnpm --filter @drogon/desktop test --shard=2/4
+      - run: pnpm --filter @drogon/desktop test --shard=2/4 --coverage --reporter=default --reporter=blob --outputFile.blob=.vitest/blob/shard-2.json
         timeout-minutes: 15
-      - run: pnpm --filter @drogon/desktop test --shard=3/4
+      - run: pnpm --filter @drogon/desktop test --shard=3/4 --coverage --reporter=default --reporter=blob --outputFile.blob=.vitest/blob/shard-3.json
         timeout-minutes: 15
-      - run: pnpm --filter @drogon/desktop test --shard=4/4
+      - run: pnpm --filter @drogon/desktop test --shard=4/4 --coverage --reporter=default --reporter=blob --outputFile.blob=.vitest/blob/shard-4.json
         timeout-minutes: 15
+      # Phase 1 CI: merge the four per-shard blob reports into the
+      # `json-summary` the ratchet reads (`vitest --mergeReports` replays the
+      # blobs without running tests; `--coverage` regenerates the coverage
+      # reports the config already selects). Steps here, not a separate job:
+      # the suite needs the debug daemon from `cargo build` above (two
+      # native-client tests fail without target/debug/drogond), and a
+      # standalone job would pay a second full dependency install plus a
+      # second Rust build. Ubuntu-only: the unit suite is
+      # platform-independent and the macOS leg is already the long pole, so
+      # don't tax it twice.
+      - name: Merge shard coverage reports
+        if: matrix.os == 'ubuntu-22.04'
+        run: pnpm --filter @drogon/desktop exec vitest --mergeReports .vitest/blob --coverage
+        timeout-minutes: 15
+      - name: Check coverage against the committed baseline
+        if: matrix.os == 'ubuntu-22.04'
+        run: node scripts/coverage-baseline.mjs --check apps/desktop/coverage-baseline.json
       # The production bundle (Monaco + renderer) exceeds the default Node
       # heap on macos-14 runners: raise it for this step only.
       - run: pnpm --filter @drogon/desktop build
@@ -89,6 +126,124 @@ jobs:
           node --test scripts/live-child-crash-fixture.test.mjs
           node scripts/accept-live-child-crash.mjs
       - run: pnpm check:hygiene
+
+  # Phase 2 lane 1: the rendered CDP acceptance plus the journey runner become
+  # a machine gate. Ubuntu + xvfb-run hosts Electron: hidden background
+  # windows still need a display server, and xvfb is the cheapest leg that
+  # provides one (preinstalled on ubuntu-22.04 images, while macos-14 minutes
+  # cost an order of magnitude more and the macOS native leg is already the
+  # long pole). No continue-on-error anywhere below: a red journey blocks.
+  journeys:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      # Same Electron-binary cache as the native job: the binary comes from
+      # GitHub's release CDN, which has 504'd before and red-dened innocent
+      # runs.
+      - name: Cache the Electron binary
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/.cache/electron
+            ~\AppData\Local\electron\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
+      - name: Install pinned tools
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component clippy --component rustfmt
+          rustup override set 1.98.0
+          npm install --global pnpm@11.19.0
+      - run: pnpm install --frozen-lockfile
+      - run: cargo build --workspace --locked
+      # The dev desktop acceptance launches Electron against the built
+      # renderer/main bundles (apps/desktop/out), so build them first. Same
+      # raised heap as the native job: the Monaco bundle exceeds the
+      # default Node heap.
+      - run: pnpm --filter @drogon/desktop build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+      # Bare ubuntu-22.04 runners ship almost no fonts, so the renderer's
+      # font set never finishes loading and page.screenshot (which waits
+      # for fonts) times out at 15s. Install the desktop font set before
+      # the journeys run; the screenshot checks themselves stay strict.
+      - name: Install renderer fonts for screenshots
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-liberation fonts-noto-core
+      # First the runner proves it discriminates (failing/hung journeys fail
+      # it); then the journey itself runs directly; then the runner drives
+      # the full manifest list. Each journey gets its own fresh
+      # DROGON_DATA_DIR/DROGON_ELECTRON_PROFILE from the runner, always
+      # with DROGON_BACKGROUND_WINDOW=1.
+      - name: Prove the journey runner discriminates
+        run: node --test scripts/run-journeys.test.mjs
+        timeout-minutes: 10
+      # HELD OUT of the manifest (2026-09-20, PR #633 fourth pass; reasons
+      # also recorded per-entry in scripts/journeys.manifest.json `heldOut`
+      # and in the PR body):
+      # - screenshot/compositor stall (page.screenshot times out with fonts
+      #   loaded; headless GPU/compositor path, not slowness): desktop-files
+      #   (29 checks then the workspace-properties shot never completes),
+      #   bot-session-honesty, session-resume-by-id, workspace-session-restart,
+      #   plus orchestrator and durable-orchestrator (second CI round: stall
+      #   persists WITH the DROGON_SOFTWARE_RENDERING attempt active, so per
+      #   the brief the chase stops here).
+      # - missing host prerequisite: meetings (no Notes folder on the
+      #   runner; needs a macOS leg or a seeded Notes corpus), repro-demo
+      #   and mentu-run-delegation (pinned mentu-recipes runtime,
+      #   gitignored, not provisioned on the runner).
+      # - genuine behavioural difference (a FINDING, not an environment
+      #   excuse): bot-session-restart (text paste through the real chord
+      #   must reach the session) — the follow-up most worth doing.
+      # Honest requires: skips stay in the manifest: bot-monitors (no pi),
+      # backup-restore (no bundle), orchestrator-modes (no pi). The runner
+      # counts skips separately and fails when zero journeys run.
+      # The manifest holds the union of the lanes (14 run, 10 held out):
+      # the sequential gate needs room for all of them on one runner.
+      # Shard this job if the wall time grows teeth; do not drop entries
+      # to fit.
+      - name: Run the journey gate
+        run: xvfb-run -a node scripts/run-journeys.mjs
+        timeout-minutes: 330
+        env:
+          # One bounded round at the compositor stall: every Electron
+          # launch via scripts/acceptance-process.mjs gets
+          # --disable-gpu --disable-gpu-compositing (software compositor)
+          # while this is set. Journeys-job-only; default-off everywhere
+          # else. Screenshot checks stay strict: if shots still stall,
+          # the hold-outs above stand and this env stays as documentation
+          # of the attempt.
+          DROGON_SOFTWARE_RENDERING: "1"
+
+  discrimination:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Fetch the PR base ref
+        run: git fetch origin ${{ github.base_ref }} --depth=50
+      # The gate itself needs only node builtins + git, but renderer test
+      # files run through the workspace vitest, so install dependencies
+      # without lifecycle scripts (skips the Electron binary download).
+      - name: Install pinned JavaScript dependencies
+        run: |
+          npm install --global pnpm@11.19.0
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Run the test-discrimination gate
+        run: node scripts/check-test-discrimination.mjs --base origin/${{ github.base_ref }}
 
   windows-compilation:
     runs-on: windows-2022

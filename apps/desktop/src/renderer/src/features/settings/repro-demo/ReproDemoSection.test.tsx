@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ReproDemoSection } from "./ReproDemoSection";
 import { resetReproDemo, type ReproDemoBridge } from "./use-repro-demo";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // The suite shares one jsdom window across files: a catalog left here
+  // becomes another file's bridge.
+  delete (window as { drogon?: unknown }).drogon;
+});
 // The demo's run state outlives this component on purpose (the tour unmounts
 // the panel mid-run), so each case starts from a cleared store — and from a
 // window with no harness catalog until a case installs one.

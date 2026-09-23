@@ -108,11 +108,34 @@ async function runProbe(owner: number): Promise<void> {
   probing = false;
   if (reason === null) {
     failedStreak = 0;
+    const lastConnectedAt = deps.now();
+    // PERF-04: a steady-state heartbeat success carries no new information
+    // beyond freshness — no consumer renders lastConnectedAt, so refresh
+    // the snapshot WITHOUT notifying listeners instead of re-rendering
+    // the banner, status segment and panes every 10s idle. Freshness stays
+    // observable through getSnapshot; every real transition below still
+    // emits.
+    if (
+      snapshot.state === "connected" &&
+      snapshot.attempt === 0 &&
+      snapshot.lastError === null
+    ) {
+      snapshot = { ...snapshot, lastConnectedAt };
+      clearTimer();
+      timer = setTimeout(() => {
+        timer = null;
+        if (owner === generation && !probing) {
+          probing = true;
+          void runProbe(owner);
+        }
+      }, DAEMON_HEARTBEAT_INTERVAL_MS);
+      return;
+    }
     emit({
       state: "connected",
       attempt: 0,
       lastError: null,
-      lastConnectedAt: deps.now(),
+      lastConnectedAt,
     });
     // Steady-state heartbeat: a connected monitor keeps proving it, since
     // nothing pushes a daemon death to the renderer.

@@ -96,7 +96,12 @@ function design2Policy(): GraphPolicy {
 }
 
 describe("SubagentPolicyPanel", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    // The suite shares one jsdom window across files: a bridge left here
+    // becomes another file's environment.
+    delete (window as { drogon?: unknown }).drogon;
+  });
 
   it("renders design-1's exact summary when nothing optional is enabled", () => {
     stubDrogon();

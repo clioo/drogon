@@ -3,10 +3,12 @@
 //! Guide-writing contract (kept in sync with `skills.rs`): any single-backtick
 //! span that starts with `drogon-cli ` must be a complete, literally parseable
 //! invocation against the real clap grammar — concrete values for numeric
-//! flags (`--timeout-ms 60000`, `--consumer-generation 3`) and value enums
-//! (`--for exited`, `--kind final-report`), single-token placeholders
-//! (`<ID>`, `<TEXT>`) elsewhere, no `--help`/`--version` (clap answers those
-//! with a help error, not a parse success). Prose names without the
+//! flags (`--timeout-ms 60000`) and value enums (`--for exited`, `--kind
+//! final-report`), single-token placeholders (`<ID>`, `<TEXT>`) elsewhere.
+//! `<GENERATION>` is replaced with a valid number only for parse validation
+//! because the guide requires callers to use `run-create`'s returned value
+//! rather than publishing a stale numeric example. No `--help`/`--version`
+//! (clap answers those with a help error, not a parse success). Prose names without the
 //! `drogon-cli ` prefix (`` `terminal wait` ``, `` `--timeout-ms` ``, bare
 //! `` `drogon-cli` ``) are ignored by the extractor. Fenced blocks show only
 //! output samples, but a fenced line starting with `drogon-cli ` is validated
@@ -76,8 +78,16 @@ fn fenced_cli_lines(markdown: &str) -> Vec<String> {
 }
 
 fn expect_parse(invocation: &str) {
-    let args: Vec<&str> = std::iter::once("drogon-cli")
-        .chain(invocation.split_whitespace().skip(1))
+    let args: Vec<String> = std::iter::once("drogon-cli".to_string())
+        .chain(
+            invocation
+                .split_whitespace()
+                .skip(1)
+                .map(|token| match token {
+                    "<GENERATION>" => "1".to_string(),
+                    other => other.to_string(),
+                }),
+        )
         .collect();
     Cli::try_parse_from(&args)
         .unwrap_or_else(|err| panic!("guide invocation does not parse: {invocation:?}: {err}"));
@@ -220,6 +230,105 @@ fn guides_cover_the_contracted_surface() {
             "orchestration guide is missing {needle:?}"
         );
     }
+}
+
+#[test]
+fn orchestration_owns_delegate_and_adversarial_semantics() {
+    let guides = canonical_guides();
+    let cli = guides.iter().find(|g| g.name == "drogon-cli").unwrap();
+    let orch = guides.iter().find(|g| g.name == "orchestration").unwrap();
+
+    for required in [
+        "This guide owns the execution-mode definitions",
+        "**semantically includes delegation**",
+        "implement their assigned work yourself",
+        "not implement product changes",
+        "stop the loop immediately even when iterations remain",
+        "sibling correction worker",
+        "`maxIterations` bound",
+    ] {
+        assert!(
+            orch.markdown.contains(required),
+            "orchestration guide is missing canonical semantic {required:?}"
+        );
+    }
+    for required in [
+        "drogon-cli skills get --topic orchestration",
+        "Adversarial means Delegate plus the critique/correction loop",
+        "The leader does\nnot implement in either delegated mode",
+        "exits as soon as a\nround finds nothing adversarial",
+    ] {
+        assert!(
+            cli.markdown.contains(required),
+            "drogon-cli guide is missing its canonical-guide link or invariant {required:?}"
+        );
+    }
+    for contradiction in [
+        "implement directly unless",
+        "bounded whole-workflow test and review sessions after the main work settles",
+        "Delegation is available, not mandatory",
+    ] {
+        assert!(
+            !orch.markdown.contains(contradiction) && !cli.markdown.contains(contradiction),
+            "bundled guides retain the old contradictory rule {contradiction:?}"
+        );
+    }
+}
+
+fn json_fence_after<'a>(markdown: &'a str, marker: &str) -> &'a str {
+    let tail = markdown
+        .split_once(marker)
+        .unwrap_or_else(|| panic!("guide is missing marker {marker:?}"))
+        .1;
+    tail.split_once("```json\n")
+        .unwrap_or_else(|| panic!("guide marker {marker:?} has no JSON fence"))
+        .1
+        .split_once("\n```")
+        .unwrap_or_else(|| panic!("guide marker {marker:?} has no closing fence"))
+        .0
+}
+
+#[test]
+fn work_graph_payload_examples_match_the_wire_contract() {
+    let guides = canonical_guides();
+    let guide = guides.iter().find(|g| g.name == "drogon-cli").unwrap();
+
+    let intent_json = json_fence_after(
+        guide.markdown,
+        "For example, `graph-intent.json` can contain:",
+    );
+    let intent: drogon_protocol::graph::GraphIntent =
+        serde_json::from_str(intent_json).expect("graph-intent.json example parses");
+    intent
+        .validate()
+        .expect("graph-intent.json example validates");
+    assert!(intent.policy.adversarial.enabled);
+    assert!(!intent.policy.delegate);
+    assert_eq!(intent.policy.approved_runtimes.len(), 1);
+
+    let main_json = json_fence_after(
+        guide.markdown,
+        "For example,\n`main-task.json` can contain:",
+    );
+    let main: drogon_protocol::graph::GraphNodeIntent =
+        serde_json::from_str(main_json).expect("main-task.json example parses");
+    main.validate().expect("main-task.json example validates");
+    assert!(main.enabled);
+    assert!(main.depends_on.is_empty());
+}
+
+#[test]
+fn policy_runtime_and_generation_examples_do_not_invent_values() {
+    let guides = canonical_guides();
+    let corpus = guides
+        .iter()
+        .map(|guide| guide.markdown)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!corpus.contains("--consumer-generation 3"));
+    assert!(corpus.contains("replace\n`<GENERATION>` with the `consumerGeneration` returned"));
+    assert!(corpus.contains("Each runtime entry stores only\n`harness`, `provider`, and `model`"));
+    assert!(corpus.contains("There is currently no effort field"));
 }
 
 #[test]

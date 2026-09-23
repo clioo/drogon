@@ -67,10 +67,13 @@ mod ports;
 mod ring;
 mod session;
 mod session_env;
+mod session_foreground;
+mod terminal_modes;
 mod worker_brief;
 mod workspace;
 mod workspace_file_rpc;
 mod workspace_files;
+mod workspace_session_settle;
 mod worktree_issues;
 mod worktree_rpc;
 
@@ -89,6 +92,9 @@ mod dispatch_authenticated_tests;
 
 #[cfg(test)]
 mod session_stop_tests;
+
+#[cfg(test)]
+mod session_output_tests;
 
 /// The on-disk SQLite filename under a data directory, exposed so
 /// integration tests (a separate crate that only sees `pub` items) can open
@@ -134,6 +140,11 @@ const CAPABILITIES: &[&str] = &[
     drogon_protocol::worktree_issues::CAPABILITY,
     drogon_protocol::tasks::TASKS_CAPABILITY,
     "session.agent-state.v1",
+    // PERF-01 push channel: `session.output` (held long-poll for PTY bytes).
+    // A daemon predating this string has no such method; the renderer gates
+    // on exactly this capability and keeps the 24/120 ms `session.read`
+    // poll as its reconciliation fallback there.
+    "session.output-push.v1",
     // R2-S: the Bots page (list/create/chat/history) is real end-to-end as
     // of this capability landing; desktop's `isBotsAvailable` gate
     // (apps/desktop/src/renderer/src/bots-mount.ts) has referenced this
@@ -535,6 +546,7 @@ impl Engine {
             "files.write" => self.mutating(request, Self::do_files_write),
             "files.create" => self.mutating(request, Self::do_files_create),
             "files.rename" => self.mutating(request, Self::do_files_rename),
+            "files.duplicate" => self.mutating(request, Self::do_files_duplicate),
             "files.delete" => self.mutating(request, Self::do_files_delete),
             "desktop.commands.poll" => self.desktop_commands_poll(&request.params),
             "desktop.commands.complete" => self.desktop_commands_complete(&request.params),
@@ -568,6 +580,10 @@ impl Engine {
             "session.start" => self.mutating(request, Self::do_session_start),
             "session.list" => self.do_session_list(&request.params),
             "session.read" => self.do_session_read(&request.params),
+            // PERF-01 push channel: long-poll twin of `session.read` (see
+            // `session::read_long_poll`). Read-only like `session.read`, so
+            // it bypasses the ledger and the quiescence gate the same way.
+            "session.output" => self.do_session_output(&request.params),
             "session.write" => self.mutating(request, Self::do_session_write),
             "session.resize" => self.mutating(request, Self::do_session_resize),
             "session.stop" => self.mutating(request, Self::do_session_stop),
@@ -961,28 +977,45 @@ impl Engine {
     }
 
     fn do_session_list(&self, params: &Value) -> Result<Value, RpcError> {
-        let workspace_filter = optional_str(params, "workspaceId")?;
-        let conn = self.db.lock().unwrap();
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at, caused_by_event_id, agent_session_id, agent_session_transcript_path FROM sessions ORDER BY created_at",
-            )
-            .map_err(error::from_sqlite)?;
-        let rows: Vec<_> = stmt
-            .query_map([], row_to_session_json)
-            .map_err(error::from_sqlite)?
-            .collect();
-        drop(stmt);
+        let workspace_filter = optional_str(params, "workspaceId")?.map(str::to_owned);
+        // The workspace filter and the `created_at` ordering live in SQL so
+        // a workspace-scoped poll reads only its own rows in index order
+        // through the `sessions_workspace_created_at` composite index
+        // instead of materializing the whole table and filtering in Rust.
+        // Output shape and ordering match the unfiltered path exactly.
+        let rows: Vec<(String, Value)> = {
+            let conn = self.db.lock().unwrap();
+            if let Some(workspace) = workspace_filter.as_deref() {
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "{SESSION_LIST_SELECT} WHERE workspace_id = ?1 ORDER BY created_at"
+                    ))
+                    .map_err(error::from_sqlite)?;
+                stmt.query_map(rusqlite::params![workspace], row_to_session_json)
+                    .map_err(error::from_sqlite)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(error::from_sqlite)?
+            } else {
+                let mut stmt = conn
+                    .prepare(&format!("{SESSION_LIST_SELECT} ORDER BY created_at"))
+                    .map_err(error::from_sqlite)?;
+                stmt.query_map([], row_to_session_json)
+                    .map_err(error::from_sqlite)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(error::from_sqlite)?
+            }
+        };
+        // The db lock is released before consulting the live-handle map, so
+        // a 3 s poll no longer serializes every other db RPC behind it.
         let sessions_guard = self.sessions.lock().unwrap();
-        let mut sessions = Vec::new();
-        for row in rows {
-            let (id, mut value) = row.map_err(error::from_sqlite)?;
+        let mut sessions = Vec::with_capacity(rows.len());
+        for (id, mut value) in rows {
+            // Live handles overlay their fresh snapshot; every other row
+            // keeps its durable JSON — snapshots run only for live ids.
             if let Some(handle) = sessions_guard.get(&id) {
                 value = session::snapshot(handle);
             }
-            if workspace_filter.is_none_or(|w| value["workspaceId"] == w) {
-                sessions.push(value);
-            }
+            sessions.push(value);
         }
         Ok(json!({ "sessions": sessions }))
     }
@@ -1018,12 +1051,48 @@ impl Engine {
         session::read(&handle, cursor, limit as usize)
     }
 
+    /// PERF-01 push channel: `{"sessionId", "incarnation", "cursor",
+    /// "waitMs?", "limitBytes?"}` → the exact `session.read` shape, held
+    /// until bytes exist, the child exits, or the wait expires. `waitMs`
+    /// clamps to 30 s like `session.events.poll`; zero degrades to one
+    /// immediate read. Identity and cursor errors answer at once, never
+    /// held: an unknown id is `not_found`, a wrong incarnation is
+    /// `stale_incarnation`, a future cursor is `invalid_argument` — the
+    /// same codes `session.read` reports, so old clients keep their
+    /// meaning and new ones can gate on the `session.output-push.v1`
+    /// capability instead of probing.
+    fn do_session_output(&self, params: &Value) -> Result<Value, RpcError> {
+        let (handle, _) = self.require_session_with_incarnation(params)?;
+        let cursor = optional_u64(params, "cursor", 0)?;
+        let limit = optional_u64(params, "limitBytes", 65_536)?;
+        if !(1..=65_536).contains(&limit) {
+            return Err(error::invalid_argument("limitBytes must be 1..=65536"));
+        }
+        let wait_ms = optional_u64(params, "waitMs", 20_000)?;
+        session::read_long_poll(&handle, cursor, limit as usize, wait_ms)
+    }
+
+    /// Issue #625 made this additive: `submitEnter` says the payload ends
+    /// with the Return that submits it, and asks for that Return to be
+    /// delivered as a discrete keypress (its own write, after the body and
+    /// after any paste frame) instead of fused into one burst a
+    /// paste-detecting TUI swallows whole. Omitting it keeps the verbatim
+    /// single write byte for byte, so an older client — and every
+    /// non-message writer, from harness prompt delivery to a shell
+    /// command — is untouched. `acceptedBytes` counts the caller's payload
+    /// either way; `enterDelivery` and `bracketedPaste` report what the
+    /// PTY actually got.
     fn do_session_write(&self, params: &Value) -> Result<Value, RpcError> {
         let (handle, _) = self.require_session_with_incarnation(params)?;
         let data_b64 = require_str(params, "dataBase64")?;
         let bytes = session::base64_decode(data_b64)?;
-        let accepted = session::write(&handle, &bytes)?;
-        Ok(json!({ "acceptedBytes": accepted }))
+        let submit_enter = optional_bool(params, "submitEnter", false)?;
+        let outcome = session::write_parts(&handle, &bytes, submit_enter)?;
+        Ok(json!({
+            "acceptedBytes": outcome.accepted,
+            "enterDelivery": outcome.enter_delivery,
+            "bracketedPaste": outcome.bracketed,
+        }))
     }
 
     fn do_session_resize(&self, params: &Value) -> Result<Value, RpcError> {
@@ -1157,6 +1226,11 @@ fn default_session_command() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
 }
 
+/// The `session.list` row projection, shared by the filtered and unfiltered
+/// queries in [`Engine::do_session_list`] so both paths return byte-identical
+/// shapes. Column order matches `row_to_session_json`'s positional reads.
+const SESSION_LIST_SELECT: &str = "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at, caused_by_event_id, agent_session_id, agent_session_transcript_path FROM sessions";
+
 fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
     let id: String = r.get(0)?;
     let args_json: String = r.get(5)?;
@@ -1172,17 +1246,18 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
     let needs_input_at: Option<String> = r.get(12)?;
     let turn_fact: Option<String> = r.get(14)?;
     let turn_fact_at: Option<String> = r.get(15)?;
-    let (agent_state, agent_state_at) = if verdict == "exited" {
-        ("exited", needs_input_at.clone())
-    } else if needs_input_at.is_some() {
-        ("needs_input", needs_input_at.clone())
-    } else if turn_fact.as_deref() == Some(session::TURN_ACTIVE_WIRE) {
-        ("working", turn_fact_at.clone())
-    } else if turn_fact.as_deref() == Some(session::TURN_ENDED_WIRE) {
-        ("idle", turn_fact_at.clone())
-    } else {
-        ("unknown", None)
-    };
+    let (agent_state, agent_state_at, agent_state_authority): (&str, Option<String>, Option<&str>) =
+        if verdict == "exited" {
+            ("exited", needs_input_at.clone(), None)
+        } else if needs_input_at.is_some() {
+            ("needs_input", needs_input_at.clone(), Some("hook"))
+        } else if turn_fact.as_deref() == Some(session::TURN_ACTIVE_WIRE) {
+            ("working", turn_fact_at.clone(), Some("hook"))
+        } else if turn_fact.as_deref() == Some(session::TURN_ENDED_WIRE) {
+            ("idle", turn_fact_at.clone(), Some("hook"))
+        } else {
+            ("unknown", None, None)
+        };
     Ok((
         id.clone(),
         json!({
@@ -1199,6 +1274,12 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             "createdAt": r.get::<_, String>(10)?,
             "agentState": agent_state,
             "agentStateAt": agent_state_at,
+            // The turn proof behind `agentState`: hook-reported states
+            // re-report their `hook` authority from the durable fact, so a
+            // restored row keeps its spinner/idle honestly; anything else
+            // (and every pre-field row) carries null — no proof, never a
+            // spinner downstream.
+            "agentStateAuthority": agent_state_authority,
             "agentPromptPreview": null,
             "cacheIdleAt": null,
             "harnessId": r.get::<_, Option<String>>(11)?,
@@ -1212,6 +1293,11 @@ fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
             // entrypoint (never a pretend continuation).
             "agentSessionId": r.get::<_, Option<String>>(17)?,
             "agentSessionTranscriptPath": r.get::<_, Option<String>>(18)?,
+            // Additive (issue #622): foreground-agent observation is
+            // in-memory only, never persisted. Rows read straight from
+            // SQLite carry nulls; live handles overlay their snapshot.
+            "observedHarnessId": null,
+            "observedHarnessAt": null,
         }),
     ))
 }
@@ -1251,6 +1337,18 @@ fn optional_u64(params: &Value, field: &str, default: u64) -> Result<u64, RpcErr
     }
 }
 
+/// Same present-but-invalid-is-an-error rule as `optional_u64`: a caller
+/// who spells a flag wrong must see the error, never silently get the
+/// default behaviour they were trying to opt out of.
+fn optional_bool(params: &Value, field: &str, default: bool) -> Result<bool, RpcError> {
+    match params.get(field) {
+        None | Some(Value::Null) => Ok(default),
+        Some(value) => value
+            .as_bool()
+            .ok_or_else(|| error::invalid_argument(format!("{field} must be a boolean"))),
+    }
+}
+
 /// Same present-but-invalid-is-an-error rule as `optional_u64`, for a
 /// filter field: a caller who mistypes `workspaceId`'s type must see an
 /// error, never a silently unfiltered (broader) result set.
@@ -1276,4 +1374,349 @@ fn require_dimension(params: &Value, field: &str, default: u16) -> Result<u16, R
         return Err(error::invalid_argument(format!("{field} must be 1..=1000")));
     }
     Ok(n as u16)
+}
+
+/// PERF-06/06b: `session.list` pushes the workspace filter and the
+/// `created_at` ordering into SQL and reads through the
+/// `sessions_workspace_created_at` composite index (which serves the ORDER
+/// BY from the index — no temp B-tree). PTY-free: rows are seeded with
+/// plain SQL (there is no `workspace_id` foreign key, so arbitrary
+/// workspace ids are fine) and read back through the public `dispatch`
+/// surface.
+#[cfg(test)]
+mod session_list_workspace_index_tests {
+    use super::*;
+
+    fn call(engine: &Engine, id: &str, method: &str, params: Value) -> Value {
+        let response = engine.dispatch(Request {
+            protocol: PROTOCOL_VERSION,
+            request_id: id.into(),
+            auth: None,
+            method: method.into(),
+            params,
+        });
+        assert!(response.ok, "{method} failed: {:?}", response.error);
+        response.result.unwrap()
+    }
+
+    fn seed_session(conn: &Connection, id: &str, workspace: &str, created_at: &str) {
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at) VALUES (?1, ?2, 'host-test', 'inc-1', '/bin/sh', '[\"-l\"]', 80, 24, 'exited', 0, ?3)",
+            rusqlite::params![id, workspace, created_at],
+        )
+        .unwrap();
+    }
+
+    fn list_ids(engine: &Engine, id: &str, params: Value) -> Vec<String> {
+        call(engine, id, "session.list", params)["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// Insert order is deliberately NOT `created_at` order: the reply order
+    /// must come from SQL's ORDER BY either way.
+    fn seed_two_workspaces(dir: &tempfile::TempDir) -> Engine {
+        let engine = Engine::open(dir.path()).unwrap();
+        let db = Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
+        seed_session(&db, "s-b1", "ws-b", "2026-09-10T00:00:05Z");
+        seed_session(&db, "s-a1", "ws-a", "2026-09-10T00:00:01Z");
+        seed_session(&db, "s-b2", "ws-b", "2026-09-10T00:00:02Z");
+        seed_session(&db, "s-a2", "ws-a", "2026-09-10T00:00:04Z");
+        seed_session(&db, "s-a3", "ws-a", "2026-09-10T00:00:03Z");
+        drop(db);
+        engine
+    }
+
+    #[test]
+    fn workspace_filter_returns_only_its_rows_in_created_at_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = seed_two_workspaces(&dir);
+
+        assert_eq!(
+            list_ids(&engine, "list-a", json!({ "workspaceId": "ws-a" })),
+            vec!["s-a1", "s-a3", "s-a2"],
+            "ws-a rows in created_at order, no ws-b leakage",
+        );
+        assert_eq!(
+            list_ids(&engine, "list-b", json!({ "workspaceId": "ws-b" })),
+            vec!["s-b2", "s-b1"],
+            "ws-b rows in created_at order, no ws-a leakage",
+        );
+        assert_eq!(
+            list_ids(&engine, "list-all", json!({})),
+            vec!["s-a1", "s-b2", "s-a3", "s-a2", "s-b1"],
+            "unfiltered list keeps the global created_at order",
+        );
+        assert!(
+            list_ids(&engine, "list-nope", json!({ "workspaceId": "ws-nope" })).is_empty(),
+            "unknown workspace lists nothing, never a neighbor",
+        );
+    }
+
+    #[test]
+    fn sql_filter_matches_client_side_filtering_row_for_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = seed_two_workspaces(&dir);
+
+        let all = call(&engine, "list-all", "session.list", json!({}));
+        let expected: Vec<Value> = all["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s["workspaceId"] == "ws-a")
+            .cloned()
+            .collect();
+        let got = call(
+            &engine,
+            "list-a",
+            "session.list",
+            json!({ "workspaceId": "ws-a" }),
+        );
+        assert_eq!(
+            got["sessions"],
+            Value::Array(expected),
+            "SQL pushdown must return rows identical to filtering in Rust",
+        );
+
+        let row = &got["sessions"][0];
+        let mut keys: Vec<&str> = row
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec![
+                "agentPromptPreview",
+                "agentSessionId",
+                "agentSessionTranscriptPath",
+                "agentState",
+                "agentStateAt",
+                // Additive (R1 activity authority): the turn proof behind
+                // `agentState`; older clients ignore the unknown key.
+                "agentStateAuthority",
+                "args",
+                "cacheIdleAt",
+                "causedByEventId",
+                "cols",
+                "command",
+                "createdAt",
+                "exitCode",
+                "harnessId",
+                "hostId",
+                "id",
+                "incarnation",
+                "observedHarnessAt",
+                "observedHarnessId",
+                "parentSessionId",
+                "rows",
+                "verdict",
+                "workspaceId",
+            ],
+            "RPC output shape carries exactly the pinned keys",
+        );
+        assert_eq!(row["workspaceId"], "ws-a");
+        assert_eq!(row["createdAt"], "2026-09-10T00:00:01Z");
+        assert_eq!(row["verdict"], "exited");
+        assert_eq!(row["exitCode"], 0);
+        assert_eq!(row["args"], json!(["-l"]));
+    }
+
+    #[test]
+    fn filtered_list_seeks_the_composite_index_without_sorting() {
+        let dir = tempfile::tempdir().unwrap();
+        let _engine = Engine::open(dir.path()).unwrap();
+        let db = Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
+        let index: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace_created_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            index, 1,
+            "fresh Engine::open must create sessions_workspace_created_at"
+        );
+        let mut stmt = db
+            .prepare(&format!(
+                "EXPLAIN QUERY PLAN {SESSION_LIST_SELECT} WHERE workspace_id = ?1 ORDER BY created_at"
+            ))
+            .unwrap();
+        let plan: Vec<String> = stmt
+            .query_map(["ws-a"], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let plan = plan.join(" | ");
+        assert!(
+            plan.contains("USING INDEX sessions_workspace_created_at"),
+            "filtered list must seek the composite index, got: {plan}",
+        );
+        assert!(
+            !plan.contains("TEMP B-TREE"),
+            "composite index must serve the ORDER BY from the index, got: {plan}",
+        );
+    }
+
+    #[test]
+    fn legacy_sessions_table_gains_the_index_without_losing_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        Connection::open(dir.path().join(DB_FILE_NAME))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    host_id TEXT NOT NULL,
+                    incarnation TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    args_json TEXT NOT NULL,
+                    cols INTEGER NOT NULL,
+                    rows INTEGER NOT NULL,
+                    verdict TEXT NOT NULL,
+                    exit_code INTEGER,
+                    created_at TEXT NOT NULL
+                );
+                INSERT INTO sessions (id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at)
+                VALUES ('sess-legacy', 'ws-legacy', 'host-seed', 'inc-1', '/bin/sh', '[\"-l\"]', 80, 24, 'exited', 0, '2026-09-08T00:00:00Z');",
+            )
+            .unwrap();
+        let engine = Engine::open(dir.path()).unwrap();
+        assert_eq!(
+            list_ids(
+                &engine,
+                "list-legacy",
+                json!({ "workspaceId": "ws-legacy" })
+            ),
+            vec!["sess-legacy"],
+            "pre-index row survives the additive migration and stays listable",
+        );
+        let db = Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
+        let index: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace_created_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            index, 1,
+            "migration must add sessions_workspace_created_at to old data dirs"
+        );
+        drop(db);
+        drop(engine);
+        // Reopening is a no-op: the migration is idempotent.
+        let again = Engine::open(dir.path()).unwrap();
+        assert_eq!(
+            list_ids(&again, "list-again", json!({ "workspaceId": "ws-legacy" })),
+            vec!["sess-legacy"],
+        );
+    }
+
+    #[test]
+    fn perf06_single_column_index_migrates_to_the_composite() {
+        // A data dir migrated by PERF-06 carries the single-column
+        // `sessions_workspace` predecessor. Opening it with this build must
+        // swap in the composite (which serves the ORDER BY from the index)
+        // and drop the redundant predecessor, without losing rows.
+        let dir = tempfile::tempdir().unwrap();
+        Connection::open(dir.path().join(DB_FILE_NAME))
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    host_id TEXT NOT NULL,
+                    incarnation TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    args_json TEXT NOT NULL,
+                    cols INTEGER NOT NULL,
+                    rows INTEGER NOT NULL,
+                    verdict TEXT NOT NULL,
+                    exit_code INTEGER,
+                    created_at TEXT NOT NULL,
+                    harness_id TEXT,
+                    needs_input_at TEXT,
+                    parent_session_id TEXT,
+                    turn_fact TEXT,
+                    turn_fact_at TEXT,
+                    caused_by_event_id TEXT,
+                    agent_session_id TEXT,
+                    agent_session_transcript_path TEXT
+                );
+                CREATE INDEX sessions_workspace ON sessions(workspace_id);
+                INSERT INTO sessions (id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at)
+                VALUES ('sess-b', 'ws-era', 'host-seed', 'inc-1', '/bin/sh', '[\"-l\"]', 80, 24, 'exited', 0, '2026-09-08T00:00:02Z'),
+                       ('sess-a', 'ws-era', 'host-seed', 'inc-1', '/bin/sh', '[\"-l\"]', 80, 24, 'exited', 0, '2026-09-08T00:00:01Z');",
+            )
+            .unwrap();
+        let engine = Engine::open(dir.path()).unwrap();
+        assert_eq!(
+            list_ids(&engine, "list-era", json!({ "workspaceId": "ws-era" })),
+            vec!["sess-a", "sess-b"],
+            "pre-composite rows stay listable in created_at order",
+        );
+        let db = Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
+        let composite: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace_created_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let predecessor: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            composite, 1,
+            "migration must add the composite index to PERF-06-era data dirs"
+        );
+        assert_eq!(
+            predecessor, 0,
+            "the redundant single-column predecessor must go, not linger beside the composite"
+        );
+        let plan = {
+            let mut stmt = db
+                .prepare(&format!(
+                    "EXPLAIN QUERY PLAN {SESSION_LIST_SELECT} WHERE workspace_id = ?1 ORDER BY created_at"
+                ))
+                .unwrap();
+            stmt.query_map(["ws-era"], |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .join(" | ")
+        };
+        assert!(
+            !plan.contains("TEMP B-TREE"),
+            "migrated data dir must serve ORDER BY from the index, got: {plan}",
+        );
+        drop(db);
+        drop(engine);
+        // Reopening an already-migrated data dir is a no-op.
+        let again = Engine::open(dir.path()).unwrap();
+        assert_eq!(
+            list_ids(&again, "list-again", json!({ "workspaceId": "ws-era" })),
+            vec!["sess-a", "sess-b"],
+        );
+        let db = Connection::open(dir.path().join(DB_FILE_NAME)).unwrap();
+        let composite: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'sessions_workspace_created_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(composite, 1, "reopen must keep the composite index");
+    }
 }
