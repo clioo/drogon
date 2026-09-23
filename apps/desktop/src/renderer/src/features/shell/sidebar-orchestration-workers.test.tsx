@@ -92,6 +92,11 @@ function session(
     createdAt: "2026-09-21T20:00:00.000Z",
     agentState: "working",
     agentStateAt: "2026-09-21T20:59:00.000Z",
+    // A live run on a current daemon: hook turn states carry the hook
+    // proof (R1) — the coordinator shell, the owner's idle Pi tab and
+    // the worker are all hook-proven, so the card reads them as
+    // working/idle instead of unknown.
+    agentStateAuthority: "hook",
     harnessId: null,
     parentSessionId: null,
     ...overrides,
