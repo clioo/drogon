@@ -1204,10 +1204,10 @@ export async function probePackagedSurfaces({
     await page.getByRole("button", { name: /changes-wt/ }).first().click();
   }
   await page.waitForFunction(
-    () => {
-      const header = document.querySelector("header.session-header strong");
-      return header?.textContent?.includes("changes-wt") ?? false;
-    },
+    () =>
+      document
+        .querySelector('button[aria-label="Select changes-wt"]')
+        ?.getAttribute("aria-current") === "page",
     null,
     { timeout: 15000 },
   );
