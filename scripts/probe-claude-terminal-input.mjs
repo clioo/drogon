@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { mkdir, writeFile, realpath, access } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
 import { runAcceptanceProcess } from "./acceptance-process.mjs";
 
 // Null on hosts without the maintainer's Claude TUI (a clean Mac): the
@@ -42,23 +41,23 @@ export async function seedPrivateClaudeKeyboard({ home, fixtureBin, workspace, b
 }
 
 export async function probeClaudeTerminalInput({ page, workspaceId, output }) {
-  const reply = await page.evaluate((input) => window.drogon.startHarness(input), {
-    workspaceId, harnessId: "claude", model: "drogon-acceptance-only", permissionMode: "inherit", requestId: randomUUID(),
-  });
-  assert.equal(reply.ok, true, JSON.stringify(reply));
-  const session = reply.result;
-  assert.equal(session.harnessId, "claude");
+  // Exercise the real create-menu launch path so App records and selects the
+  // session as well as the daemon creating it. A raw bridge launch leaves the
+  // renderer's active-tab model untouched and cannot mount a terminal tab.
+  const tabs = page.locator('[role="tablist"][aria-label="Sessions"] [role="tab"]');
+  const previousTabCount = await tabs.count();
+  const createMenu = page.getByRole("button", { name: "New tab", exact: true });
+  await createMenu.click();
+  await page.getByRole("menuitem", { name: /^Claude Code\b/ }).click();
+  await page.waitForFunction((before) => {
+    return document.querySelectorAll('[role="tablist"][aria-label="Sessions"] [role="tab"]').length > before;
+  }, previousTabCount);
+  const tab = tabs.last();
+  const sessionId = await tab.getAttribute("data-tab-id");
+  assert.ok(sessionId, "the launched Claude session must own a session tab");
+  const session = { id: sessionId, harnessId: "claude" };
   let stage = "startup";
   try {
-    // The bridge launch creates a daemon session but intentionally does not
-    // select a renderer tab. Activate the visible sidebar row as a user would
-    // before probing keyboard input; otherwise this waits on a tab the shell
-    // has no reason to mount.
-    const sidebarSession = page.locator(`[data-worktree-agent-row="${session.id}"]`);
-    await sidebarSession.waitFor();
-    await sidebarSession.click();
-    const tab = page.locator(`[role="tab"][data-tab-id="${session.id}"]`);
-    await tab.waitFor();
     await tab.click();
     await page.waitForFunction((id) => {
       const terminal = window.__drogonTerminals?.get(id);
