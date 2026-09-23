@@ -1501,7 +1501,8 @@ export async function probeBotPresetManualRun({
     assert.equal(nativeSessions.ok, true, JSON.stringify(nativeSessions));
     const ownedRuns = nativeSessions.result.sessions.filter((session) => session.args.some((arg) => arg.includes(marker)));
     assert.equal(ownedRuns.length, 1, "exactly one real bot process must carry this request marker");
-    assert.equal(ownedRuns[0].workspaceId, workspaceId);
+    assert.equal(ownedRuns[0].workspaceId, automationWorkspaceId, "the bot run must execute in the owning automation's workspace");
+    assert.notEqual(ownedRuns[0].workspaceId, foreign.workspaceId);
     assert.equal(ownedRuns[0].verdict, "exited");
     return [
       "bots-cross-workspace-responsibility-and-run-retain-canonical-owner",
