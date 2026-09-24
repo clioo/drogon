@@ -12,6 +12,7 @@ import {
   Bot,
   CalendarClock,
   CalendarDays,
+  KanbanSquare,
   Search,
   Smartphone,
   SquareTerminal,
@@ -19,6 +20,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { BOTS_ROUTE_ID } from "../../bots-mount";
 import { MEETINGS_ROUTE_ID } from "../../meetings-mount";
+import { WORK_ROUTE_ID } from "../../work-mount";
 import { AUTOMATIONS_ROUTE_ID } from "../../automations-mount";
 import { TASKS_ROUTE_ID } from "../../tasks-mount";
 import { ShortcutKeyCombo } from "../../components/ShortcutKeyCombo";
@@ -122,6 +124,14 @@ export function SidebarNav({
             icon={SquareTerminal}
             onClick={() => onSelectRoute(null)}
           />
+          {isDrogonProductSurfaceVisible("work") ? (
+            <ProductNavButton
+              label="Work"
+              active={route === WORK_ROUTE_ID}
+              icon={KanbanSquare}
+              onClick={() => onSelectRoute(WORK_ROUTE_ID)}
+            />
+          ) : null}
           {isDrogonProductSurfaceVisible("bots") ? (
             <ProductNavButton
               label="Bots"

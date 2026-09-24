@@ -8,6 +8,7 @@
 import { AUTOMATIONS_ROUTE_ID } from "../../automations-mount";
 import { BOTS_ROUTE_ID } from "../../bots-mount";
 import { MEETINGS_ROUTE_ID } from "../../meetings-mount";
+import { WORK_ROUTE_ID } from "../../work-mount";
 import { TASKS_ROUTE_ID } from "../tasks/TasksPage";
 
 /** True for the routes that render as standalone pages, like the fork's
@@ -20,7 +21,9 @@ export function isFullPageRoute(route: string | null): boolean {
     // Meetings replaces the session view like the other standalone pages:
     // its notes live outside any workspace, so nothing in the session chrome
     // applies to it.
-    route === MEETINGS_ROUTE_ID
+    route === MEETINGS_ROUTE_ID ||
+    // Work: the host-wide ticket board.
+    route === WORK_ROUTE_ID
   );
 }
 

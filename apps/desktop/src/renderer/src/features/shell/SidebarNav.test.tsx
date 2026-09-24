@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SidebarNav } from "./SidebarNav";
 import { MEETINGS_ROUTE_ID } from "../../meetings-mount";
+import { WORK_ROUTE_ID } from "../../work-mount";
 import { isDrogonProductSurfaceVisible } from "./product-mode";
 
 afterEach(cleanup);
@@ -46,5 +47,22 @@ describe("SidebarNav Meetings row", () => {
     expect(
       screen.getByRole("button", { name: "Bots" }).getAttribute("aria-current"),
     ).toBeNull();
+  });
+});
+
+describe("SidebarNav Work row", () => {
+  it("sits right under Sessions and routes to the Work board", () => {
+    expect(isDrogonProductSurfaceVisible("work")).toBe(true);
+    const onSelectRoute = vi.fn();
+    render(<SidebarNav route={null} onSelectRoute={onSelectRoute} onOpenPalette={() => {}} />);
+    const labels = screen.getAllByRole("button").map((b) => b.textContent?.trim());
+    expect(labels.indexOf("Work")).toBe(labels.indexOf("Sessions") + 1);
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
+    expect(onSelectRoute).toHaveBeenCalledWith(WORK_ROUTE_ID);
+  });
+
+  it("marks the row current while the board is open", () => {
+    render(<SidebarNav route={WORK_ROUTE_ID} onSelectRoute={() => {}} onOpenPalette={() => {}} />);
+    expect(screen.getByRole("button", { name: "Work" }).getAttribute("aria-current")).toBe("page");
   });
 });

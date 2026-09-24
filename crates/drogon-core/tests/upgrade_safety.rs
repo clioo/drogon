@@ -33,6 +33,7 @@ const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("coordination_access", 1, &[]),
     ("orchestration_mail", 1, &[]),
     ("orchestration_attempts", 1, &[]),
+    ("work", 1, &[]),
 ];
 
 /// Same cap as `db::PRE_MIGRATION_BACKUP_RETENTION`.

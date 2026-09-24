@@ -55,6 +55,7 @@ import { isolateSessionList } from "./session-bridge";
 import { registerAutomationIpc } from "./automation-bridge";
 // Meetings (additive): read-only index of the owner's Write That Down notes.
 import { registerMeetingsIpc } from "./meetings-bridge";
+import { registerWorkIpc } from "./work-bridge";
 import { dispatchFileRequest } from "./file-bridge";
 import { registerGitBridge } from "./git-bridge";
 import { registerProjectBridge } from "./project-bridge";
@@ -986,6 +987,12 @@ if (!holdsSingleInstanceLock) {
         event.senderFrame === window.webContents.mainFrame,
     );
     registerMeetingsIpc(
+      (event) =>
+        window !== null &&
+        event.sender === window.webContents &&
+        event.senderFrame === window.webContents.mainFrame,
+    );
+    registerWorkIpc(
       (event) =>
         window !== null &&
         event.sender === window.webContents &&

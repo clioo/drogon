@@ -258,6 +258,13 @@ import {
   isMeetingsAvailable,
   windowMeetingsBridge,
 } from "./meetings-mount";
+import { WorkPage, type WorkSessionTarget } from "./features/work";
+import {
+  WORK_PAGE_HOST_TESTID,
+  WORK_ROUTE_ID,
+  isWorkAvailable,
+  windowWorkBridge,
+} from "./work-mount";
 import type { BotsPanelProps } from "../../shared/bot-contract";
 import { dispatchOpenBotSession } from "./features/bots/bot-session-open";
 import { mergeSessionsForBots } from "./features/bots/bot-session-visibility";
@@ -2497,6 +2504,7 @@ export function App() {
   const portsSectionRef = useRef<HTMLElement>(null);
   const botsSectionRef = useRef<HTMLElement>(null);
   const meetingsSectionRef = useRef<HTMLElement>(null);
+  const workSectionRef = useRef<HTMLElement>(null);
   const automationsSectionRef = useRef<HTMLElement>(null);
   const tasksSectionRef = useRef<HTMLElement>(null);
   const prevRouteRef = useRef<string | null>(null);
@@ -2512,7 +2520,9 @@ export function App() {
             ? tasksSectionRef.current
             : route === MEETINGS_ROUTE_ID
               ? meetingsSectionRef.current
-              : null;
+              : route === WORK_ROUTE_ID
+                ? workSectionRef.current
+                : null;
     if (route !== null && target && prevRouteRef.current !== route) {
       applyPanelFocus(
         resolveRoute(
@@ -2581,6 +2591,16 @@ export function App() {
     meetingsAliveRef.current = true;
   else if (meetingsExplicitWithhold) meetingsAliveRef.current = false;
   const meetingsAlive = meetingsAliveRef.current;
+  // Work keep-alive mirrors Meetings: the board is host-wide (tickets span
+  // projects), so it mounts without a selected workspace and unmounts only
+  // on an explicit capability withhold.
+  const workAvailable = isWorkAvailable(liveCapabilities);
+  const workExplicitWithhold = status !== null && !workAvailable;
+  const workAliveRef = useRef(false);
+  if (route === WORK_ROUTE_ID && workAvailable) workAliveRef.current = true;
+  else if (workExplicitWithhold) workAliveRef.current = false;
+  const workAlive = workAliveRef.current;
+  const workBridge = useMemo(() => windowWorkBridge(), []);
   // Browser tab strip mirror: workspace-scoped pages from the host. The
   // strip selection below (not the host verdict) decides what the tab area
   // shows; the pane reports bounds for the selected page, which activates
@@ -2749,9 +2769,14 @@ export function App() {
     route === AUTOMATIONS_ROUTE_ID && automationsAlive && filesProps !== null;
   const tasksPageActive = route === TASKS_ROUTE_ID && tasksAlive;
   const meetingsPageActive = route === MEETINGS_ROUTE_ID && meetingsAlive;
+  const workPageActive = route === WORK_ROUTE_ID && workAlive;
   const fullPageActive =
     isFullPageRoute(route) &&
-    (botsPageActive || automationsPageActive || tasksPageActive || meetingsPageActive);
+    (botsPageActive ||
+      automationsPageActive ||
+      tasksPageActive ||
+      meetingsPageActive ||
+      workPageActive);
   const noWorkspaceCopy = noWorkspacePageCopy(route);
   const checked = <T,>(value: Result<T>): T => {
     if (!value.ok) throw new Error(value.error.message);
@@ -3568,6 +3593,27 @@ export function App() {
       );
     }
   }, [sessions, botFocusRequest]);
+  // A session opened from a Work ticket: select its workspace, leave the
+  // page, and activate its tab as soon as that workspace's list delivers it
+  // (a just-resumed session is not listed yet when the open call returns).
+  const pendingWorkSessionRef = useRef<WorkSessionTarget | null>(null);
+  const [workFocusRequest, setWorkFocusRequest] = useState(0);
+  const openWorkSession = (target: WorkSessionTarget) => {
+    pendingWorkSessionRef.current = target;
+    setSelected(target.workspaceId);
+    setRevision((value) => value + 1);
+    setWorkFocusRequest((value) => value + 1);
+  };
+  useEffect(() => {
+    const pending = pendingWorkSessionRef.current;
+    if (!pending) return;
+    if (!sessions.some((item) => item.id === pending.sessionId)) return;
+    pendingWorkSessionRef.current = null;
+    setSelected(pending.workspaceId);
+    selectSessionTab(pending.sessionId);
+    // selectSessionTab is a stable callback declared further down.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, workFocusRequest]);
   // The freshest copy wins per session id: `sessions` (the CURRENTLY
   // selected workspace's own push-updated list) overrides the host-wide
   // poll for any id both contain, so the workspace you are actually
@@ -6144,7 +6190,9 @@ export function App() {
             // Meetings reads the owner's notes off disk: it is workspace-
             // independent, so a first-run install with no project must still
             // reach it instead of the Landing page.
-            route !== MEETINGS_ROUTE_ID ? (
+            route !== MEETINGS_ROUTE_ID &&
+            // Work is host-wide too: tickets exist before any workspace.
+            route !== WORK_ROUTE_ID ? (
             noWorkspaceCopy ? (
               <NoWorkspacePage
                 title={noWorkspaceCopy.title}
@@ -6238,7 +6286,8 @@ export function App() {
                   // (and the first-run landing) rather than sitting in a
                   // column beside it, which is what made it read as a sidebar
                   // panel.
-                  (route === MEETINGS_ROUTE_ID && meetingsAlive)
+                  (route === MEETINGS_ROUTE_ID && meetingsAlive) ||
+                  (route === WORK_ROUTE_ID && workAlive)
                     ? "none"
                     : undefined,
               }}
@@ -6685,6 +6734,30 @@ export function App() {
                   <MeetingsPage
                     bridge={meetingsGatedBridge}
                     onClose={() => closePageRoute(MEETINGS_ROUTE_ID)}
+                  />
+                )}
+              </section>
+            ) : null}
+            {workAlive || route === WORK_ROUTE_ID ? (
+              // No aria-label: the Work page root is already `<main>`.
+              <section
+                ref={workSectionRef}
+                tabIndex={-1}
+                className="terminal-column"
+                data-testid={WORK_PAGE_HOST_TESTID}
+                style={{ display: route === WORK_ROUTE_ID ? undefined : "none" }}
+              >
+                {!workAvailable ? (
+                  <div className="empty-state">
+                    <ServiceCapabilityNotice feature="Work" connected={status !== null} />
+                  </div>
+                ) : (
+                  <WorkPage
+                    bridge={workBridge}
+                    active={route === WORK_ROUTE_ID}
+                    workspaces={workspaces.map((w) => ({ id: w.id, name: w.name }))}
+                    onOpenSession={openWorkSession}
+                    onClose={() => closePageRoute(WORK_ROUTE_ID)}
                   />
                 )}
               </section>

@@ -73,6 +73,8 @@ mod terminal_modes;
 mod worker_brief;
 mod workspace;
 mod workspace_file_rpc;
+// Work: the ticket board and its per-column session prompts (work.v1).
+mod work;
 mod workspace_files;
 mod workspace_session_settle;
 mod worktree_issues;
@@ -161,6 +163,9 @@ const CAPABILITIES: &[&str] = &[
     // R5-S: Mentu (recipes, content-bound approval, execution through the
     // pinned mentu-recipes runtime, run evidence, retry).
     drogon_protocol::mentu::MENTU_CAPABILITY,
+    // Work: Drogon tickets on a configurable board; columns type prompts
+    // into the sessions linked to their tickets (enter / cron / PR change).
+    work::WORK_CAPABILITY,
     // The work graph (`.drogon/graph.json`): the two-halves store, the
     // graph→recipe compiler and node-level resume/retry. The graph replaces
     // the Mentu tab as the authoring surface; the runtime underneath is
@@ -687,6 +692,23 @@ impl Engine {
             "jira.addComment" => self.jira_add_comment(&request.params),
             "jira.startIssue" => self.mutating(request, Self::jira_start_issue),
             "tasks.remotes" => self.do_tasks_remotes(&request.params),
+            "work.board" => self.work_board(&request.params),
+            "work.ticket_show" => self.work_ticket_show(&request.params),
+            "work.sends" => self.work_sends(&request.params),
+            "work.column_preview" => self.work_column_preview(&request.params),
+            "work.column_create" => self.mutating(request, Self::do_work_column_create),
+            "work.column_update" => self.mutating(request, Self::do_work_column_update),
+            "work.column_delete" => self.mutating(request, Self::do_work_column_delete),
+            "work.column_send" => self.mutating(request, Self::do_work_column_send),
+            "work.ticket_create" => self.mutating(request, Self::do_work_ticket_create),
+            "work.ticket_update" => self.mutating(request, Self::do_work_ticket_update),
+            "work.ticket_move" => self.mutating(request, Self::do_work_ticket_move),
+            "work.ticket_delete" => self.mutating(request, Self::do_work_ticket_delete),
+            "work.ticket_link_session" => self.mutating(request, Self::do_work_ticket_link_session),
+            "work.ticket_unlink_session" => {
+                self.mutating(request, Self::do_work_ticket_unlink_session)
+            }
+            "work.session_open" => self.mutating(request, Self::do_work_session_open),
             "mentu.recipes" => self.mentu_recipes(&request.params),
             "mentu.recipe" => self.mentu_recipe(&request.params),
             "mentu.recipe_save" => self.mentu_recipe_save(request),

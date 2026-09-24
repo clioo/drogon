@@ -660,6 +660,22 @@ impl Engine {
             }
         }
 
+        // Work tickets keep following a resumed conversation: the
+        // replacement takes the prior session's place on every ticket.
+        if requested_resume
+            && !request.headless
+            && let Some(prior_session_id) = resume_session_id.as_deref()
+        {
+            let conn = self.db.lock().unwrap();
+            if let Err(relink_error) =
+                crate::work::relink_resumed_session(&conn, prior_session_id, &session_id)
+            {
+                eprintln!(
+                    "[work] could not relink resumed session {prior_session_id}: {relink_error}"
+                );
+            }
+        }
+
         let mut value = crate::session::snapshot(&handle);
         value["agentResume"] = json!(agent_resume);
         Ok(value)

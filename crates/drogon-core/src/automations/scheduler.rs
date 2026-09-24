@@ -573,6 +573,9 @@ pub fn tick_once(engine: &Engine, now_ms: f64) -> TickSummary {
     // P3: drain the monitor-event outbox into Bot responsibility
     // dispatches (best-effort; never fails the tick above).
     drain_delegations(engine, now_ms, &mut summary);
+    // Work board: scheduled column sends and pull-request watches ride the
+    // same tick (best-effort, never fails the automation tick).
+    engine.tick_work(now_ms);
     summary
 }
 

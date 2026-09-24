@@ -1,0 +1,271 @@
+// The column's prompt panel ("Review · Prompt"): when the column sends, what
+// it types into the sessions linked to its tickets, who receives it, and the
+// Preview / Send now controls. Toggles save immediately; the message saves
+// on blur and before any preview or send, so what is sent is what is shown.
+import { useEffect, useState } from "react";
+import { X } from "lucide-react";
+import { Button } from "../../components/ui/button";
+import { Checkbox } from "../../components/ui/checkbox";
+import { Textarea } from "../../components/ui/textarea";
+import {
+  WORK_HARNESSES,
+  type WorkBoard,
+  type WorkBridge,
+  type WorkColumn,
+  type WorkColumnUpdate,
+  type WorkPreview,
+} from "../../../../shared/work-contract";
+import type { WorkBoardState } from "./use-work-board";
+import { deliverySummary, formatClock, scheduleLabel, WORK_SCHEDULES } from "./work-format";
+
+const PLACEHOLDERS = "{ticket.id} {ticket.title} {ticket.pr} {ticket.url} {ticket.next} {ticket.project}";
+
+export function WorkColumnPanel({
+  column,
+  board,
+  state,
+  bridge,
+  onClose,
+  onNotice,
+}: {
+  column: WorkColumn;
+  board: WorkBoard;
+  state: WorkBoardState;
+  bridge: WorkBridge;
+  onClose: () => void;
+  onNotice: (message: string, kind?: "error" | "success") => void;
+}) {
+  const [message, setMessage] = useState(column.message);
+  const [preview, setPreview] = useState<WorkPreview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [customCron, setCustomCron] = useState(
+    column.cron && !WORK_SCHEDULES.some((s) => s.value === column.cron) ? column.cron : "",
+  );
+  // A different column, or a message changed elsewhere (CLI), resets the draft.
+  useEffect(() => {
+    setMessage(column.message);
+    setPreview(null);
+  }, [column.id, column.message]);
+
+  const tickets = board.tickets.filter((t) => t.columnId === column.id);
+  const linkedSessions = tickets.reduce((n, t) => n + t.sessions.length, 0);
+
+  const save = async (update: Omit<WorkColumnUpdate, "columnId">): Promise<boolean> => {
+    const result = await state.run(() => bridge.columnUpdate({ columnId: column.id, ...update }));
+    if (!result.ok) onNotice(result.error, "error");
+    return result.ok;
+  };
+  const saveMessage = async (): Promise<boolean> =>
+    message === column.message ? true : save({ message });
+
+  const scheduleValue = column.cron
+    ? WORK_SCHEDULES.some((s) => s.value === column.cron)
+      ? column.cron
+      : "custom"
+    : "";
+
+  return (
+    <aside
+      className="flex w-[380px] shrink-0 flex-col border-l border-border bg-background"
+      aria-label={`${column.name} prompt`}
+      data-testid="work-column-panel"
+    >
+      <header className="flex items-start gap-2 border-b border-border px-5 py-4">
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-base font-semibold text-foreground">
+            {column.name} · Prompt
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            For sessions linked to tickets in this column
+          </p>
+        </div>
+        <Button variant="ghost" size="icon-xs" aria-label="Close prompt panel" onClick={onClose}>
+          <X />
+        </Button>
+      </header>
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4">
+        <section className="space-y-3" aria-label="Send when">
+          <h3 className="text-sm font-semibold text-foreground">Send when</h3>
+          <label className="flex items-center gap-2.5 text-sm">
+            <Checkbox
+              checked={column.sendOnEnter}
+              aria-label={`Ticket enters ${column.name}`}
+              onCheckedChange={(checked) => void save({ sendOnEnter: checked === true })}
+            />
+            Ticket enters {column.name}
+          </label>
+          <label className="flex items-center gap-2.5 text-sm">
+            <Checkbox
+              checked={column.prWatch}
+              aria-label="Pull request changes"
+              onCheckedChange={(checked) => void save({ prWatch: checked === true })}
+            />
+            Pull request changes
+          </label>
+          <div className="flex items-center gap-2.5 text-sm">
+            <Checkbox
+              checked={column.cron !== null}
+              aria-label="On a schedule"
+              onCheckedChange={(checked) =>
+                void save({ cron: checked === true ? (column.cron ?? "*/15 * * * *") : null })
+              }
+            />
+            <span>On a schedule</span>
+            <select
+              aria-label="Schedule"
+              className="ml-auto h-7 rounded-md border border-input bg-transparent px-2 text-xs"
+              value={scheduleValue}
+              disabled={column.cron === null}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value === "custom") {
+                  setCustomCron(column.cron ?? "*/10 * * * *");
+                  return;
+                }
+                void save({ cron: value || null });
+              }}
+            >
+              {column.cron === null ? <option value="">off</option> : null}
+              {WORK_SCHEDULES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+              <option value="custom">custom cron…</option>
+            </select>
+          </div>
+          {scheduleValue === "custom" || customCron ? (
+            <input
+              aria-label="Custom cron (UTC)"
+              className="h-7 w-full rounded-md border border-input bg-transparent px-2 font-mono text-xs"
+              value={customCron}
+              placeholder="*/10 * * * *"
+              onChange={(event) => setCustomCron(event.target.value)}
+              onBlur={() => {
+                if (customCron.trim() && customCron !== column.cron) void save({ cron: customCron.trim() });
+              }}
+            />
+          ) : null}
+          {column.cron && column.nextRunAt ? (
+            <p className="text-xs text-muted-foreground">
+              Next scheduled send {formatClock(column.nextRunAt)} ({scheduleLabel(column.cron)}, UTC)
+            </p>
+          ) : null}
+        </section>
+
+        <section className="flex min-h-0 flex-col gap-2" aria-label="Message to sessions">
+          <h3 className="text-sm font-semibold text-foreground">Message to sessions</h3>
+          <Textarea
+            aria-label="Message to sessions"
+            className="min-h-[200px] text-sm leading-6"
+            value={message}
+            placeholder={`What should the sessions do when a ticket is in ${column.name}?`}
+            onChange={(event) => setMessage(event.target.value)}
+            onBlur={() => void saveMessage()}
+          />
+          <p className="text-[11px] text-muted-foreground">Placeholders: {PLACEHOLDERS}</p>
+        </section>
+
+        <section className="space-y-2" aria-label="Recipients">
+          <h3 className="text-sm font-semibold text-foreground">Recipients</h3>
+          <select
+            aria-label="Recipients"
+            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+            value={column.recipients}
+            onChange={(event) => void save({ recipients: event.target.value as "all" | "primary" })}
+          >
+            <option value="all">All linked sessions ({linkedSessions})</option>
+            <option value="primary">Primary session only</option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Live sessions are typed into right away; a session that is no longer running is
+            resumed; a ticket with nothing to resume gets a new session.
+          </p>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            New sessions start with
+            <select
+              aria-label="Harness for new sessions"
+              className="ml-auto h-7 rounded-md border border-input bg-transparent px-2 text-xs text-foreground"
+              value={column.harnessId ?? ""}
+              onChange={(event) => void save({ harnessId: event.target.value || null })}
+            >
+              <option value="">the default agent</option>
+              {WORK_HARNESSES.map((h) => (
+                <option key={h} value={h}>
+                  {h === "claude" ? "Claude Code" : h === "opencode" ? "OpenCode" : h === "pi" ? "Pi" : h === "codex" ? "Codex" : "Antigravity"}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
+
+        {preview ? (
+          <section className="space-y-2" aria-label="Preview" data-testid="work-column-preview">
+            <h3 className="text-sm font-semibold text-foreground">Preview</h3>
+            {preview.previews.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No tickets in this column: a send does nothing.</p>
+            ) : (
+              preview.previews.map((p) => (
+                <div key={p.ticketId} className="rounded-md border border-border p-2 text-xs">
+                  <div className="mb-1 font-medium text-foreground">
+                    {p.ticketKey} →{" "}
+                    {p.recipients
+                      .map((r) => `${r.action}${r.sessionId ? ` ${r.sessionId.slice(0, 8)}` : ""}`)
+                      .join(", ")}
+                  </div>
+                  <pre className="whitespace-pre-wrap font-sans text-muted-foreground">{p.message}</pre>
+                </div>
+              ))
+            )}
+          </section>
+        ) : null}
+      </div>
+      <footer className="space-y-2 border-t border-border px-5 py-4">
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                if (!(await saveMessage())) return;
+                const result = await state.run(() => bridge.preview({ columnId: column.id }));
+                if (result.ok) setPreview(result.value);
+                else onNotice(result.error, "error");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Preview
+          </Button>
+          <Button
+            disabled={busy || !message.trim() || tickets.length === 0}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                if (!(await saveMessage())) return;
+                const result = await state.run(() => bridge.columnSend({ columnId: column.id }));
+                if (result.ok) {
+                  const all = result.value.sends.flatMap((s) => s.results);
+                  onNotice(`Sent to ${column.name}: ${deliverySummary(all) || "nothing"}`, "success");
+                } else {
+                  onNotice(result.error, "error");
+                }
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Send now
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground" data-testid="work-column-last-sent">
+          {column.lastSentAt
+            ? `Last sent ${formatClock(column.lastSentAt)} · ${column.lastSentCount} ${column.lastSentCount === 1 ? "session" : "sessions"}`
+            : "Not sent yet"}
+        </p>
+      </footer>
+    </aside>
+  );
+}

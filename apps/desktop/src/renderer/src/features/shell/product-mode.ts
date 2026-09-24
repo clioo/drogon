@@ -4,12 +4,14 @@
    of the meetings surface landing (the row was already ported, dark); Mobile
    exists in the source but stays out of the MVP, hidden behind this gate. */
 
-export type DrogonProductSurface = "sessions" | "bots" | "meetings" | "mobile";
+export type DrogonProductSurface = "sessions" | "work" | "bots" | "meetings" | "mobile";
 
 export const DROGON_PRODUCT_SURFACE_VISIBILITY: Readonly<
   Record<DrogonProductSurface, boolean>
 > = {
   sessions: true,
+  // The Work board: Drogon tickets whose columns prompt linked sessions.
+  work: true,
   bots: true,
   // The owner's own Write That Down notes are a real surface now: the row
   // routes to the Meetings page and reports honest states instead of

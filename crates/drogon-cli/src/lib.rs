@@ -55,3 +55,4 @@ pub mod skills_agents;
 pub mod terminal_send;
 pub mod transport;
 pub mod wire;
+pub mod work_cli;

@@ -156,6 +156,15 @@ pub enum Command {
         #[command(subcommand)]
         action: MeetingAction,
     },
+    /// Work: Drogon tickets on a board of configurable columns; a column
+    /// types its prompt into the sessions linked to its tickets when a
+    /// ticket enters it, on a schedule, or when the ticket's pull request
+    /// changes, resuming or starting sessions as needed (requires the
+    /// service capability work.v1).
+    Work {
+        #[command(subcommand)]
+        action: crate::work_cli::WorkAction,
+    },
     /// Integration secrets: seal a value into the daemon's 0600 store or
     /// list configured names (user-only; values are read from stdin for
     /// `set`, never echoed, and never appear in argv; requires the service
@@ -1669,6 +1678,7 @@ impl Cli {
             // and `analyze` need a non-empty id. Every bound is refused
             // here, before any transport work, so a typo never reaches the
             // daemon.
+            Command::Work { action } => crate::work_cli::validate(action)?,
             Command::Meeting { action } => match action {
                 MeetingAction::List {
                     limit,

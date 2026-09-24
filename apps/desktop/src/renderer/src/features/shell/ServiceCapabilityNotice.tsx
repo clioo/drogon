@@ -1,6 +1,6 @@
 /** Feature names the notice can name. `Meetings` is additive: the notes
  *  surface gates on meetings.v1 like the others. */
-export type ServiceCapabilityFeature = "Bots" | "Agent settings" | "Meetings";
+export type ServiceCapabilityFeature = "Bots" | "Agent settings" | "Meetings" | "Work";
 
 export function ServiceCapabilityNotice({ feature, connected = true }: {
   feature: ServiceCapabilityFeature;

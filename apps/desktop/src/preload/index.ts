@@ -26,6 +26,8 @@ import { ui } from "./workspace-ui-preferences";
 import { skills } from "./skills";
 // Meetings (additive): read-only Write That Down notes namespace.
 import { meetings } from "./meetings";
+// Work board (additive): tickets, columns and their session prompts.
+import { work } from "./work";
 // Work-graph authoring (additive): the designer's graph.* seam — the ONLY
 // renderer path to graph.write_intent/graph.compile/graph.run, each of
 // which the daemon gates behind the graph.v1 capability and its
@@ -148,6 +150,8 @@ Object.assign(
   { ui, skills },
   // Additive: meetings (read-only notes index).
   { meetings },
+  // Work board (additive).
+  { work },
   // Work-graph authoring (additive): the designer's graph.* namespace.
   { graph },
   // Install-resilience P6 (additive): backups list/restore for the

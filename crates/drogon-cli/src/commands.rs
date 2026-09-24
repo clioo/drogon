@@ -119,6 +119,7 @@ pub async fn run(cli: &Cli) -> Result<RunOutcome, CliError> {
         Command::Harness { action } => harness(&client, &request_id, json, action).await,
         Command::Automation { action } => automation(&client, &request_id, json, action).await,
         Command::Meeting { action } => meeting(&client, &request_id, json, action).await,
+        Command::Work { action } => crate::work_cli::run(&client, &request_id, json, action).await,
         Command::Bot { action } => match action {
             BotAction::Whoami => bot_whoami(&client, &request_id, json).await,
             // User-only secret-grant verbs: no Bot-actor scope is asserted
@@ -1115,6 +1116,27 @@ fn hook_payload(bytes: &[u8]) -> HookPayload {
 
 /// Read-only status negotiation. The preflight request id is distinct from
 /// the operation's; any failure is re-keyed onto the operation id.
+/// [`capability_preflight`] for command modules outside this file.
+pub(crate) async fn require_capability(
+    client: &Client,
+    request_id: &str,
+    capability: &str,
+    feature: &str,
+) -> Result<(), CliError> {
+    capability_preflight(client, request_id, capability, feature)
+        .await
+        .map(|_| ())
+}
+
+/// [`emit`] for command modules outside this file.
+pub(crate) fn emit_call(
+    call: CallOk,
+    json: bool,
+    human: impl FnOnce() -> String,
+) -> Result<RunOutcome, CliError> {
+    emit(call, json, human, 0, None)
+}
+
 async fn capability_preflight(
     client: &Client,
     operation_request_id: &str,
