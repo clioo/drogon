@@ -14,13 +14,16 @@ import type {
   WorkColumn,
   WorkTicket,
 } from "../../../../shared/work-contract";
-import { WorkPage } from "./WorkPage";
+import { resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
 import { TooltipProvider } from "../../components/ui/tooltip";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 beforeAll(() => installRadixJsdomStubs());
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  resetWorkViewMemoryForTests();
+});
 
 function column(overrides: Partial<WorkColumn>): WorkColumn {
   return {
@@ -378,5 +381,18 @@ describe("Work board", () => {
     const jira = screen.getByRole("region", { name: "Jira sources" });
     expect(within(jira).getByText("Improve Jira resume")).toBeTruthy();
     expect(screen.getByTestId("work-sources").textContent).toContain("1 ticket has no source link.");
+  });
+
+  test("the open panel and tab survive the page remounting", async () => {
+    const first = await mount();
+    fireEvent.click(screen.getByRole("button", { name: "Open DRG-42: Improve Jira resume" }));
+    await screen.findByRole("complementary", { name: "Ticket DRG-42" });
+    first.view.unmount();
+    await mount();
+    expect(await screen.findByRole("complementary", { name: "Ticket DRG-42" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "list" }));
+    cleanup();
+    await mount().catch(() => {});
+    expect(screen.getByRole("tab", { name: "list" }).getAttribute("aria-selected")).toBe("true");
   });
 });

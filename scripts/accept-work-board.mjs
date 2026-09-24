@@ -31,6 +31,7 @@ import {
   runAcceptanceProcess,
 } from "./acceptance-process.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
+import { selectSettingsTheme } from "./acceptance-theme.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
@@ -131,15 +132,11 @@ async function ticket(key) {
   return cli(["work", "ticket", "show", "--ticket", key]);
 }
 
+/** A dark capture of the current view (the fixture's default theme). */
 async function shot(name) {
-  for (const scheme of ["dark", "light"]) {
-    await page.emulateMedia({ colorScheme: scheme });
-    await delay(300);
-    const file = `${name}-${scheme}.png`;
-    await page.screenshot({ path: path.join(output, file), animations: "disabled" });
-    report.screenshots.push(file);
-  }
-  await page.emulateMedia({ colorScheme: "dark" });
+  const file = `${name}-dark.png`;
+  await page.screenshot({ path: path.join(output, file), animations: "disabled" });
+  report.screenshots.push(file);
 }
 
 async function activeSessionTab() {
@@ -340,6 +337,27 @@ try {
   await shot("sources");
   await page.getByRole("tab", { name: "board" }).click();
   check("list-and-sources-views-show-the-ticket");
+
+  // Light theme, chosen through the real Settings pane (the app's theme does
+  // not follow an emulated color scheme): the board and both panels.
+  await selectSettingsTheme(page, "light");
+  await page.getByRole("button", { name: "Work", exact: true }).click();
+  await page.getByTestId("work-board").waitFor();
+  const light = async (file) => {
+    await delay(300);
+    await page.screenshot({ path: path.join(output, file), animations: "disabled" });
+    report.screenshots.push(file);
+  };
+  await light("board-light.png");
+  await page.getByRole("button", { name: "Review column actions" }).click();
+  await page.getByRole("menuitem", { name: "Configure prompt…" }).click();
+  await columnPanel.waitFor();
+  await light("column-panel-light.png");
+  await page.getByRole("button", { name: "Open DRG-1: Improve Jira resume" }).click();
+  await ticketPanel.waitFor();
+  await light("ticket-panel-light.png");
+  assert.equal(await page.evaluate(() => document.documentElement.classList.contains("dark")), false);
+  check("board-and-panels-render-in-the-light-theme");
   report.status = "PASSED";
 } catch (error) {
   report.status = "FAILED";

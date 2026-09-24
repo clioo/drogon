@@ -75,6 +75,16 @@ type Tab = "board" | "list" | "sources";
 
 export type WorkSessionTarget = { workspaceId: string; sessionId: string };
 
+/** The view the page returns to after a remount (Settings, a reload of the
+ *  shell): the tab and the open panel, for this renderer's lifetime. */
+const lastView: { tab: Tab; panel: Panel } = { tab: "board", panel: null };
+
+/** Test seam: forget the remembered view. */
+export function resetWorkViewMemoryForTests(): void {
+  lastView.tab = "board";
+  lastView.panel = null;
+}
+
 export function WorkPage({
   bridge,
   active = true,
@@ -96,11 +106,19 @@ export function WorkPage({
   onClose?: () => void;
 }) {
   const state = useWorkBoard(bridge, active);
-  const [tab, setTab] = useState<Tab>("board");
+  const [tab, setTabState] = useState<Tab>(lastView.tab);
+  const setTab = (next: Tab) => {
+    lastView.tab = next;
+    setTabState(next);
+  };
   const [project, setProject] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<WorkFilter>("all");
-  const [panel, setPanel] = useState<Panel>(null);
+  const [panel, setPanelState] = useState<Panel>(lastView.panel);
+  const setPanel = (next: Panel) => {
+    lastView.panel = next;
+    setPanelState(next);
+  };
   const [newTicketColumn, setNewTicketColumn] = useState<string | null>(null);
   const [newColumnOpen, setNewColumnOpen] = useState(false);
 

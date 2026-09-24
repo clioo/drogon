@@ -74,6 +74,7 @@ task, its context, and its outcome within reach.
 - **Keep agents and terminals together.** Work with Claude Code, Pi, or OpenCode in terminal tabs. Daemon-owned sessions survive renderer restarts, with agent activity and input notifications surfaced in the desktop.
 - **Review where the work happens.** Browse and edit files, inspect diffs, stage changes, commit, push, and create pull requests through GitHub CLI.
 - **Move from issue to workspace.** Browse GitHub Issues in Tasks and start a worktree and session from an issue.
+- **Run the work from a board.** Work keeps Drogon tickets (`DRG-41`) on columns you configure. Link a ticket to the issue it tracks elsewhere, its pull request and the sessions working on it; a column types its prompt into those sessions when a ticket enters it, on a schedule, or when the PR changes — resuming a session that stopped, or starting one when there is nothing to resume. Click a linked session to jump to it. Everything is scriptable with `drogon-cli work`.
 - **Preview without leaving the task.** Open the embedded browser alongside your work. Agents can navigate, inspect, click, and fill through `drogon-cli` while the desktop is connected.
 - **Make recurring work explicit.** Schedule automations, give bots responsibilities and the monitors that wake them, and inspect every run. Design the work itself in the Work Graph: nodes with their own harness and model, an approved-runtime order to fall back through, and an optional bounded adversarial review before anything is called done.
 
