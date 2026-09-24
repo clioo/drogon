@@ -5,11 +5,14 @@ description: >-
   status and capabilities, manage workspaces, projects and worktrees,
   operate terminals (create, list, send, read, wait, close) and the embedded
   browser pane (open, navigate, snapshot, click, fill, tabs), launch
-  harnesses, create and run cron automations, manage Bots and their
-  self-managed automations, monitors and monitor actions, seal and grant
-  integration secrets, and list and restore pre-migration backups. Use for
-  terminal control, lightweight prompts and shell commands. Use the
-  orchestration guide for supervised multi-agent coordination.
+  harnesses, create and run cron automations, work the Work board (Drogon
+  tickets such as DRG-41, their columns and the prompts a column types into
+  the sessions linked to its tickets: create, link, move, configure, send),
+  manage Bots and their self-managed automations, monitors and monitor
+  actions, seal and grant integration secrets, and list and restore
+  pre-migration backups. Use for terminal control, lightweight prompts and
+  shell commands. Use the orchestration guide for supervised multi-agent
+  coordination.
 ---
 
 # Drogon CLI
@@ -211,6 +214,93 @@ missed-run catch-up), list them with `drogon-cli automation list --json`,
 fire one immediately with `drogon-cli automation run --id <ID>`, and read
 an automation's past runs with `drogon-cli automation history --id <ID>
 --json`.
+
+## Work (tickets, columns and their prompts)
+
+The Work board (service capability `work.v1`) is where the owner tracks
+work across projects. A **ticket** is a Drogon record with its own key
+(`DRG-41`: the project's initials, `WRK-n` without a project). It can link
+the issue it tracks in another system (`--source <URL>`: GitHub, Jira,
+Linear…), a pull request (`--pr <URL|#N>`), a workspace, and the
+**sessions** working on it. Tickets sit in **columns** (To do, In progress,
+Review, QA, Done by default; all configurable), and a column can type a
+**prompt** into the sessions linked to its tickets:
+
+- when a ticket **enters** the column (moved there, or created in it);
+- on a **schedule** (`15m`, `2h`, `1d` or a UTC cron): every ticket in it;
+- when the ticket's **pull request changes** (state, review, checks,
+  updates; polled through `gh` every 5 minutes);
+- on demand (`work column send`, the board's "Send now").
+
+Delivery follows one rule per linked session: a **live** session is typed
+into right away (a normal user turn in its composer); a session that is
+**no longer live** is resumed with the prompt as its first turn (or started
+fresh when the harness has nothing to resume); a ticket with **no** session
+gets a new one in its workspace (else its project's), with the column's
+harness or the default agent. A replacement session takes the old one's
+place on the ticket, including when the terminal pane restarts it. Every
+send is recorded with what happened to each session.
+
+Read the board, and find the ticket you are working on:
+
+```text
+drogon-cli work board --json
+drogon-cli work ticket list --column Review
+drogon-cli work ticket show --ticket DRG-42 --json
+```
+
+When you start on a ticket, link the session you are in, so the column's
+prompts reach you (inside a Drogon terminal `DROGON_SESSION_ID` names it):
+
+```text
+drogon-cli work ticket link --ticket DRG-42 --session <SESSION_ID>
+```
+
+When your part is done, move the ticket to the column that owns the next
+step. Entering a column with an on-enter prompt sends it at once; the reply's
+`delivery` says which sessions got it and how (`sent`, `resumed`, `started`,
+`skipped`, `failed`):
+
+```text
+drogon-cli work ticket move --ticket DRG-42 --column QA --json
+```
+
+Create tickets (keys are assigned; quote a title with spaces), edit them
+(`none` clears a link), open a ticket's session (resumed if it is no longer
+running), detach a session, or delete a ticket (its sessions keep running):
+
+```text
+drogon-cli work ticket create --title <TITLE> --project Drogon --column Review --pr 648 --source https://jira.example.com/browse/DRG-9 --session <SESSION_ID>
+drogon-cli work ticket update --ticket DRG-42 --next <TEXT> --pr none
+drogon-cli work ticket open --ticket DRG-42 --session <SESSION_ID>
+drogon-cli work ticket unlink --ticket DRG-42 --session <SESSION_ID>
+drogon-cli work ticket delete --ticket DRG-42
+```
+
+Configure a column. The prompt (`--message <TEXT>`, or `--message-file`
+for a longer one) supports `{ticket.id}` `{ticket.title}` `{ticket.pr}`
+`{ticket.pr_number}` `{ticket.url}` `{ticket.description}` `{ticket.next}`
+`{ticket.project}` `{ticket.column}`; `--recipients primary` sends only to
+the first linked session. Write prompts that say what "done" means and how
+to hand the ticket on, because the receiving agent acts on exactly that
+text. A Review prompt, for example: "Review {ticket.pr} for {ticket.id}.
+Check new feedback, approvals and required checks. When GitHub confirms the
+merge, run `drogon-cli work ticket move --ticket {ticket.id} --column QA`."
+
+```text
+drogon-cli work column list --json
+drogon-cli work column update --column Review --on-enter true --pr-watch true --schedule 15m --message-file review-prompt.md
+drogon-cli work column create --name Blocked --icon blocked --index 2
+drogon-cli work column preview --column Review
+drogon-cli work column send --column Review --ticket DRG-42
+drogon-cli work column delete --column Blocked --move-to Review
+drogon-cli work sends --ticket DRG-42
+```
+
+Preview first when unsure: it changes nothing and names the action per
+session (`send`, `resume`, `start`). A column that still holds tickets is
+deleted only with `--move-to <COLUMN>`. Do not send the same prompt again
+to "make sure": check `work sends` and read the session instead.
 
 ## Bots (self-management)
 
@@ -797,7 +887,9 @@ never established). Only an observed exit is an exit.
 Confirm `drogon-cli status --json` unless already checked this turn, then
 choose the narrowest command: `workspace list`, `project list`,
 `worktree list --project <ID>`, `terminal list`, `terminal read`, or
-`terminal wait`. To give a Bot a purpose that fires on change, bind a monitor action with
+`terminal wait`. For tracked work, start from `work board --json`: link
+your session to its ticket and move the ticket when your step is done.
+To give a Bot a purpose that fires on change, bind a monitor action with
 `drogon-cli bot bind-monitor --bot <ID> --workspace <ID> --monitor <ID>
 --expected-rev 3 --responsibility-name <NAME>`. When discovering flags
 from scratch, prefer

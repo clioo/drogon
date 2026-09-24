@@ -264,6 +264,9 @@ pub enum WorkTicketAction {
     },
 }
 
+/// One daemon call: the method, its params and the human renderer.
+type WorkCall = (&'static str, Value, fn(&Value) -> String);
+
 fn usage(message: impl Into<String>) -> CliError {
     CliError::Usage(message.into())
 }
@@ -405,9 +408,7 @@ pub async fn run(
     crate::commands::emit_call(call, json_mode, move || human(&result))
 }
 
-fn column_call(
-    action: &WorkColumnAction,
-) -> Result<(&'static str, Value, fn(&Value) -> String), CliError> {
+fn column_call(action: &WorkColumnAction) -> Result<WorkCall, CliError> {
     Ok(match action {
         WorkColumnAction::List => ("work.board", json!({}), render_columns),
         WorkColumnAction::Create { name, icon, index } => {
@@ -528,9 +529,7 @@ fn column_call(
     })
 }
 
-fn ticket_call(
-    action: &WorkTicketAction,
-) -> Result<(&'static str, Value, fn(&Value) -> String), CliError> {
+fn ticket_call(action: &WorkTicketAction) -> Result<WorkCall, CliError> {
     Ok(match action {
         WorkTicketAction::List { project, .. } => {
             let mut params = json!({});

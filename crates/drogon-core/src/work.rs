@@ -396,10 +396,10 @@ fn parse_pr(value: &str) -> Result<(Option<String>, Option<i64>), RpcError> {
         return Ok((None, None));
     }
     let bare = trimmed.trim_start_matches('#');
-    if let Ok(number) = bare.parse::<i64>() {
-        if number > 0 {
-            return Ok((None, Some(number)));
-        }
+    if let Ok(number) = bare.parse::<i64>()
+        && number > 0
+    {
+        return Ok((None, Some(number)));
     }
     let url = validate_url(trimmed, "pr")?;
     let number = url::Url::parse(&url)

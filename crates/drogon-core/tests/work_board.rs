@@ -584,7 +584,7 @@ fn a_session_that_is_no_longer_live_is_resumed_with_the_prompt_and_relinked() {
         "work.ticket_show",
         json!({"ticketId": ticket["id"]}),
     );
-    assert_eq!(linked_ids(&after), [replacement_id.clone()]);
+    assert_eq!(linked_ids(&after), std::slice::from_ref(&replacement_id));
     assert_eq!(after["sessions"][0]["verdict"], "live");
 }
 
