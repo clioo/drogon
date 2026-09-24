@@ -453,3 +453,287 @@ fn work_is_configured_and_driven_from_the_cli() {
         opened["session"]["incarnation"].as_str().unwrap(),
     ]);
 }
+
+/// The stateful fake Jira (`scripts/fixtures/jira`, agile dataset): no
+/// network beyond 127.0.0.1, no real credentials.
+struct FakeJira {
+    child: Child,
+    url: String,
+}
+
+impl FakeJira {
+    fn start() -> Self {
+        use std::io::BufRead as _;
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let script = root.join("scripts/fixtures/jira/fake-jira-server.mjs");
+        let data = root.join("scripts/fixtures/jira/data/agile-site.json");
+        let mut child =
+            Command::new(std::env::var("DROGON_TEST_NODE").unwrap_or_else(|_| "node".into()))
+                .arg(&script)
+                .args(["--port", "0", "--data"])
+                .arg(&data)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn the fake Jira (node on PATH or DROGON_TEST_NODE)");
+        let line = std::io::BufReader::new(child.stdout.take().unwrap())
+            .lines()
+            .next()
+            .expect("LISTEN line")
+            .expect("LISTEN read");
+        let port = line
+            .trim()
+            .strip_prefix("LISTEN ")
+            .expect("LISTEN")
+            .to_string();
+        FakeJira {
+            child,
+            url: format!("http://127.0.0.1:{port}"),
+        }
+    }
+
+    /// A teammate's change in "Jira".
+    fn control(&self, path: &str, body: &str) {
+        let status = Command::new("curl")
+            .args([
+                "-sS",
+                "-f",
+                "-o",
+                "/dev/null",
+                "-X",
+                "POST",
+                "-H",
+                "content-type: application/json",
+                "-d",
+                body,
+            ])
+            .arg(format!("{}/__fixture/{path}", self.url))
+            .status()
+            .expect("curl");
+        assert!(status.success(), "fixture control {path}");
+    }
+}
+
+impl Drop for FakeJira {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn a_jira_board_is_imported_synced_and_pushed_from_the_cli() {
+    let fx = Fixture::start();
+    let jira = FakeJira::start();
+    let status = fx.json(&["status"]);
+    assert!(
+        status["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c == "work.boards.v1"),
+        "the drogond next to drogon-cli predates work.boards.v1"
+    );
+    // Not connected yet: the CLI surfaces the daemon's instruction.
+    let refused = fx.command(&["work", "import", "boards"]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(
+        stderr(&refused).contains("Connect it from the Tasks page"),
+        "{}",
+        stderr(&refused)
+    );
+    let connect = format!(
+        "{{\"siteUrl\":\"{}\",\"email\":\"carlos@example.com\",\"apiToken\":\"fixture-token\"}}",
+        jira.url
+    );
+    fx.json(&["rpc", "jira.connect", "--params", &connect]);
+    fx.json(&["project", "add", project_path(&fx).to_str().unwrap()]);
+
+    let boards = fx.text(&["work", "import", "boards"]);
+    assert!(
+        boards.contains("7  Platform Delivery (scrum)  project APP"),
+        "{boards}"
+    );
+    let preview = fx.text(&[
+        "work",
+        "import",
+        "preview",
+        "--board",
+        "7",
+        "--scope",
+        "sprint:25",
+    ]);
+    assert!(preview.contains("Review ← In Review"), "{preview}");
+    assert!(
+        preview.contains("APP-128  Handle session resume after PR review  [In Review · Sprint 25]"),
+        "{preview}"
+    );
+    let usage = fx.command(&["work", "import", "run", "--board", "7"]);
+    assert_eq!(
+        usage.status.code(),
+        Some(2),
+        "choosing issues (or --all) is required"
+    );
+    let imported = fx.text(&[
+        "work",
+        "import",
+        "run",
+        "--board",
+        "7",
+        "--issue",
+        "APP-128",
+        "--issue",
+        "APP-142",
+        "--issue",
+        "APP-122",
+        "--project",
+        "Drogon",
+    ]);
+    assert!(
+        imported.contains("Imported 3 issue(s) into Platform Delivery"),
+        "{imported}"
+    );
+
+    let listed = fx.text(&["work", "boards"]);
+    assert!(
+        listed.contains("My work")
+            && listed.contains("Platform Delivery  (3 ticket(s))  jira scrum board 7"),
+        "{listed}"
+    );
+    let board = fx.text(&["work", "board", "--board", "7"]);
+    assert!(
+        board.starts_with("Platform Delivery · Jira · Sprint 25 (active)"),
+        "{board}"
+    );
+    assert!(board.contains("APP-128  Handle session resume after PR review  [Task · Medium · Jon Doe]  carried from Sprint 24"), "{board}");
+    let backlog = fx.text(&[
+        "work", "ticket", "list", "--board", "7", "--sprint", "backlog",
+    ]);
+    assert!(
+        backlog.contains("APP-122  Clarify retry strategy"),
+        "{backlog}"
+    );
+    let closed = fx.json(&["work", "board", "--board", "7", "--sprint", "Sprint 24"]);
+    assert_eq!(closed["view"]["readOnly"], true);
+
+    // A Drogon-only move, pushed; then a column mapping and a conflict.
+    let moved = fx.text(&[
+        "work", "ticket", "move", "--ticket", "APP-142", "--column", "Review",
+    ]);
+    assert!(
+        moved.contains("(not synced to Jira → In Review)"),
+        "{moved}"
+    );
+    let refused = fx.command(&[
+        "work", "ticket", "move", "--ticket", "APP-128", "--column", "QA", "--sprint", "24",
+    ]);
+    assert!(
+        stderr(&refused).contains("Sprint 24 is closed and read-only"),
+        "{}",
+        stderr(&refused)
+    );
+    let pushed = fx.text(&["work", "push", "--board", "7"]);
+    assert!(
+        pushed.contains("Pushed 1, refused 0.") && pushed.contains("APP-142: pushed."),
+        "{pushed}"
+    );
+    let carried = fx.text(&[
+        "work", "ticket", "sprint", "--ticket", "APP-122", "--to", "active",
+    ]);
+    assert!(
+        carried.contains("not synced to Jira → Sprint 25"),
+        "{carried}"
+    );
+    assert!(
+        fx.text(&["work", "push", "--ticket", "APP-122"])
+            .contains("APP-122: pushed.")
+    );
+
+    fx.json(&[
+        "work", "column", "create", "--board", "7", "--name", "Blocked", "--icon", "blocked",
+    ]);
+    let mapped = fx.json(&[
+        "work",
+        "column",
+        "update",
+        "--column",
+        "Blocked",
+        "--statuses",
+        "Blocked",
+    ]);
+    assert_eq!(mapped["statuses"][0]["id"], "10102");
+    let columns = fx.json(&["work", "column", "list", "--board", "7"]);
+    let blocked = columns["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "Blocked")
+        .unwrap()
+        .clone();
+    assert_eq!(blocked["statuses"][0]["name"], "Blocked", "{columns}");
+
+    fx.text(&[
+        "work", "ticket", "move", "--ticket", "APP-128", "--column", "QA",
+    ]);
+    jira.control("issue/APP-128", "{\"status\":\"Done\"}");
+    let synced = fx.text(&["work", "sync", "--board", "Platform Delivery"]);
+    assert!(synced.contains("1 conflict(s)"), "{synced}");
+    let shown = fx.text(&["work", "ticket", "show", "--ticket", "APP-128"]);
+    assert!(
+        shown.contains("(Jira: Done (yours: QA) — resolve)"),
+        "{shown}"
+    );
+    assert!(shown.contains("drogon key: DRG-"), "{shown}");
+    assert!(shown.contains("· Sprint 24 — carried over"), "{shown}");
+    let bad = fx.command(&[
+        "work", "ticket", "resolve", "--ticket", "APP-128", "--keep", "both",
+    ]);
+    assert_eq!(bad.status.code(), Some(2));
+    let resolved = fx.json(&[
+        "work", "ticket", "resolve", "--ticket", "APP-128", "--keep", "jira",
+    ]);
+    assert_eq!(resolved["sync"], "synced");
+
+    // Sessions from the ticket, named on it.
+    let started = fx.json(&[
+        "work",
+        "ticket",
+        "new-session",
+        "--ticket",
+        "APP-128",
+        "--harness",
+        "claude",
+    ]);
+    let session = started["session"]["id"].as_str().unwrap().to_string();
+    let renamed = fx.text(&[
+        "work",
+        "ticket",
+        "rename-session",
+        "--ticket",
+        "APP-128",
+        "--session",
+        &session,
+        "--title",
+        "Implement",
+    ]);
+    assert!(renamed.contains("session \"Implement\""), "{renamed}");
+    let _ = fx.command(&[
+        "terminal",
+        "close",
+        "--session",
+        &session,
+        "--incarnation",
+        started["session"]["incarnation"].as_str().unwrap(),
+    ]);
+
+    let removed = fx.text(&["work", "import", "remove", "--board", "7"]);
+    assert!(
+        removed.contains("Removed Platform Delivery and its 3 ticket(s)"),
+        "{removed}"
+    );
+    assert!(
+        fx.text(&["work", "boards"]).lines().count() == 2,
+        "only My work is left"
+    );
+}

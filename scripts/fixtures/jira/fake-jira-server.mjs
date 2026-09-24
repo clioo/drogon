@@ -33,6 +33,23 @@
 // Medium / Not Set, unassigned and un-prioritized rows included. See
 // data/screenshot-site.json.
 //
+// Agile (Work board import, data/agile-site.json with `stateful: true`):
+//
+//   GET  /rest/agile/1.0/board                       (paged boards)
+//   GET  /rest/agile/1.0/board/<id>/configuration     (columns → status ids)
+//   GET  /rest/agile/1.0/board/<id>/sprint            (paged sprints)
+//   GET  /rest/agile/1.0/board/<id>/sprint/<sid>/issue, /board/<id>/backlog,
+//        /board/<id>/issue                            (paged issues)
+//   GET  /rest/agile/1.0/issue/<key>                  (issue + sprint fields)
+//   POST /rest/agile/1.0/sprint/<sid>/issue, /rest/agile/1.0/backlog/issue
+//   GET  /rest/api/{2,3}/status
+//
+// With `stateful: true` a transition POST really changes the issue's
+// status (unknown transition → 400), and sprint/backlog moves change its
+// sprint. Tests change "Jira" from the outside through the unauthenticated
+// control endpoint `POST /__fixture/issue/<key>` ({status, sprintId,
+// summary, deleted}) and `POST /__fixture/sprint/<id>` ({state}).
+//
 // Usage: node fake-jira-server.mjs --data <json> --port <n>   (port 0 =
 // ephemeral; the chosen port is printed as `LISTEN <port>` on stdout.)
 
@@ -136,10 +153,163 @@ function jqlFailure(jql, res) {
   return false
 }
 
+function json(res, status, body) {
+  res.writeHead(status, { 'content-type': 'application/json' })
+  res.end(body === undefined ? '' : JSON.stringify(body))
+}
+
+function findIssue(key) {
+  return (dataset.issues ?? []).find((candidate) => candidate.key === key && !candidate.deleted)
+}
+
+function sprintRef(id) {
+  const sprint = (dataset.sprints ?? []).find((candidate) => candidate.id === id)
+  if (!sprint) return null
+  const { boardId, ...rest } = sprint
+  return { ...rest, originBoardId: boardId }
+}
+
+// An issue as the agile API returns it: its current (non-closed) sprint in
+// `fields.sprint`, the closed ones it passed through in `fields.closedSprints`.
+function agileIssue(issue) {
+  return {
+    id: issue.id,
+    key: issue.key,
+    fields: {
+      ...issue.fields,
+      sprint: issue.sprintId == null ? null : sprintRef(issue.sprintId),
+      closedSprints: (issue.closedSprintIds ?? []).map(sprintRef).filter(Boolean),
+    },
+  }
+}
+
+function boardIssues(board) {
+  return (dataset.issues ?? []).filter(
+    (issue) => !issue.deleted && issue.fields.project.key === board.location.projectKey,
+  )
+}
+
+async function agile(req, res, url, path) {
+  const startAt = Number(url.searchParams.get('startAt') ?? 0)
+  const maxResults = Number(url.searchParams.get('maxResults') ?? 50)
+  const issuePage = (records) => {
+    logRequest({ path, method: req.method })
+    const window = records.slice(startAt, startAt + maxResults)
+    return json(res, 200, { startAt, maxResults, total: records.length, issues: window.map(agileIssue) })
+  }
+  if (req.method === 'GET' && path === '/rest/agile/1.0/board') {
+    logRequest({ path, method: req.method })
+    const boards = (dataset.boards ?? []).map(({ columns, ...board }) => board)
+    return json(res, 200, page(boards, startAt, maxResults))
+  }
+  const boardMatch = path.match(/^\/rest\/agile\/1\.0\/board\/(\d+)(\/.*)?$/)
+  if (req.method === 'GET' && boardMatch) {
+    const board = (dataset.boards ?? []).find((candidate) => candidate.id === Number(boardMatch[1]))
+    if (!board) return json(res, 404, { errorMessages: ['Board does not exist.'], errors: {} })
+    const rest = boardMatch[2] ?? ''
+    if (rest === '') {
+      logRequest({ path, method: req.method })
+      const { columns, ...summary } = board
+      return json(res, 200, summary)
+    }
+    if (rest === '/configuration') {
+      logRequest({ path, method: req.method })
+      return json(res, 200, {
+        id: board.id,
+        name: board.name,
+        type: board.type,
+        columnConfig: {
+          columns: board.columns.map((column) => ({
+            name: column.name,
+            statuses: column.statuses.map((id) => ({ id, self: `https://fixture.local/rest/api/2/status/${id}` })),
+          })),
+        },
+      })
+    }
+    if (rest === '/sprint') {
+      logRequest({ path, method: req.method, state: url.searchParams.get('state') })
+      if (board.type !== 'scrum') return json(res, 400, { errorMessages: ['The board does not support sprints'], errors: {} })
+      const states = (url.searchParams.get('state') ?? 'active,closed,future').split(',')
+      const sprints = (dataset.sprints ?? [])
+        .filter((sprint) => sprint.boardId === board.id && states.includes(sprint.state))
+        .map(({ boardId, ...sprint }) => ({ ...sprint, originBoardId: boardId }))
+      return json(res, 200, page(sprints, startAt, maxResults))
+    }
+    const sprintIssues = rest.match(/^\/sprint\/(\d+)\/issue$/)
+    if (sprintIssues) {
+      const id = Number(sprintIssues[1])
+      return issuePage(boardIssues(board).filter((issue) => issue.sprintId === id || (issue.sprintId == null && (issue.closedSprintIds ?? []).includes(id))))
+    }
+    if (rest === '/backlog') {
+      return issuePage(boardIssues(board).filter((issue) => issue.sprintId == null && issue.fields.status.statusCategory.key !== 'done'))
+    }
+    if (rest === '/issue') return issuePage(boardIssues(board))
+  }
+  const agileIssueMatch = path.match(/^\/rest\/agile\/1\.0\/issue\/([^/]+)$/)
+  if (req.method === 'GET' && agileIssueMatch) {
+    const key = decodeURIComponent(agileIssueMatch[1])
+    logRequest({ path, method: req.method, key })
+    const issue = findIssue(key)
+    if (!issue) return json(res, 404, { errorMessages: ['Issue does not exist or you do not have permission to see it.'], errors: {} })
+    return json(res, 200, agileIssue(issue))
+  }
+  const moveMatch = path.match(/^\/rest\/agile\/1\.0\/(?:sprint\/(\d+)|backlog)\/issue$/)
+  if (req.method === 'POST' && moveMatch) {
+    const body = await readBody(req)
+    logRequest({ path, method: req.method, body })
+    const target = moveMatch[1] ? Number(moveMatch[1]) : null
+    if (target !== null) {
+      const sprint = (dataset.sprints ?? []).find((candidate) => candidate.id === target)
+      if (!sprint || sprint.state === 'closed') {
+        return json(res, 400, { errorMessages: ['Issues can only be moved to an open sprint.'], errors: {} })
+      }
+    }
+    for (const key of body.issues ?? []) {
+      const issue = findIssue(key)
+      if (!issue) return json(res, 400, { errorMessages: [`Issue ${key} does not exist.`], errors: {} })
+      issue.sprintId = target
+    }
+    return json(res, 204)
+  }
+  return json(res, 404, { errorMessages: [`Fixture has no agile handler for ${req.method} ${path}.`], errors: {} })
+}
+
+async function control(req, res, path) {
+  const body = await readBody(req)
+  const issueMatch = path.match(/^\/__fixture\/issue\/([^/]+)$/)
+  if (issueMatch) {
+    const issue = (dataset.issues ?? []).find((candidate) => candidate.key === decodeURIComponent(issueMatch[1]))
+    if (!issue) return json(res, 404, { error: 'no such issue' })
+    if (body.status) {
+      const status = (dataset.statuses ?? []).find((candidate) => candidate.id === body.status || candidate.name === body.status)
+      if (!status) return json(res, 400, { error: 'no such status' })
+      issue.fields.status = status
+    }
+    if ('sprintId' in body) issue.sprintId = body.sprintId
+    if (Array.isArray(body.closedSprintIds)) issue.closedSprintIds = body.closedSprintIds
+    if (typeof body.summary === 'string') issue.fields.summary = body.summary
+    if (typeof body.deleted === 'boolean') issue.deleted = body.deleted
+    issue.fields.updated = new Date().toISOString()
+    return json(res, 200, agileIssue(issue))
+  }
+  const sprintMatch = path.match(/^\/__fixture\/sprint\/(\d+)$/)
+  if (sprintMatch) {
+    const sprint = (dataset.sprints ?? []).find((candidate) => candidate.id === Number(sprintMatch[1]))
+    if (!sprint) return json(res, 404, { error: 'no such sprint' })
+    if (body.state) sprint.state = body.state
+    return json(res, 200, sprint)
+  }
+  return json(res, 404, { error: 'no such control' })
+}
+
 const server = createServer(async (req, res) => {
-  if (!checkAuth(req)) return authError(res)
   const url = new URL(req.url, 'http://fixture.local')
   const path = url.pathname
+  // Test control (fixture-only, never a Jira path): lets a test change
+  // "Jira" from the outside, the way a teammate would.
+  if (path.startsWith('/__fixture/') && req.method === 'POST') return control(req, res, path)
+  if (!checkAuth(req)) return authError(res)
+  if (path.startsWith('/rest/agile/1.0/')) return agile(req, res, url, path)
   const api = path.startsWith('/rest/api/2') ? 'v2' : path.startsWith('/rest/api/3') ? 'v3' : null
 
   // /myself (both versions share the fixture viewer).
@@ -198,6 +368,11 @@ const server = createServer(async (req, res) => {
     return res.end(JSON.stringify(page(fields, Number(url.searchParams.get('startAt')), Number(url.searchParams.get('maxResults')))))
   }
 
+  if (api && req.method === 'GET' && path.endsWith('/status')) {
+    logRequest({ path, method: req.method })
+    return json(res, 200, dataset.statuses ?? [])
+  }
+
   if (api && path.endsWith('/priority')) {
     logRequest({ path, method: req.method })
     res.writeHead(200, { 'content-type': 'application/json' })
@@ -250,6 +425,13 @@ const server = createServer(async (req, res) => {
     }
     const issue = (dataset.issues ?? []).find((candidate) => candidate.key === key)
     const from = issue?.fields.status
+    if (dataset.stateful) {
+      // Like Jira: a gone issue has no transitions, and none leads to the
+      // status it already has.
+      if (!findIssue(key)) return json(res, 404, { errorMessages: ['Issue does not exist or you do not have permission to see it.'], errors: {} })
+      const offered = (dataset.transitions ?? []).filter((transition) => transition.to.id !== from.id)
+      return json(res, 200, { transitions: offered.map((transition) => ({ ...transition, from })) })
+    }
     res.writeHead(200, { 'content-type': 'application/json' })
     return res.end(JSON.stringify({ transitions: (dataset.transitions ?? []).map((transition) => ({ ...transition, from })) }))
   }
@@ -294,6 +476,17 @@ const server = createServer(async (req, res) => {
     if (key.endsWith('-400')) {
       res.writeHead(400, { 'content-type': 'application/json' })
       return res.end(JSON.stringify({ errorMessages: ['The value is invalid (fixture -400 switch).'], errors: {} }))
+    }
+    if (sub === '/transitions' && dataset.stateful) {
+      const transition = (dataset.transitions ?? []).find((candidate) => candidate.id === body?.transition?.id)
+      const issue = findIssue(key)
+      if (!issue) return json(res, 404, { errorMessages: ['Issue does not exist or you do not have permission to see it.'], errors: {} })
+      if (!transition) {
+        return json(res, 400, { errorMessages: [`Transition id '${body?.transition?.id}' is not valid for this issue.`], errors: {} })
+      }
+      issue.fields.status = transition.to
+      issue.fields.updated = new Date().toISOString()
+      return json(res, 204)
     }
     if (sub === '/comment') {
       res.writeHead(201, { 'content-type': 'application/json' })

@@ -33,7 +33,7 @@ const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("coordination_access", 1, &[]),
     ("orchestration_mail", 1, &[]),
     ("orchestration_attempts", 1, &[]),
-    ("work", 1, &[]),
+    ("work", 2, &[("work-v1", 1)]),
 ];
 
 /// Same cap as `db::PRE_MIGRATION_BACKUP_RETENTION`.
@@ -54,6 +54,7 @@ fn fixture_sql(fixture: &str) -> &'static str {
         "bot_monitors-v1" => include_str!("fixtures/upgrades/bot_monitors-v1.sql"),
         "bot_delegation-v2" => include_str!("fixtures/upgrades/bot_delegation-v2.sql"),
         "graph-v1" => include_str!("fixtures/upgrades/graph-v1.sql"),
+        "work-v1" => include_str!("fixtures/upgrades/work-v1.sql"),
         "projects-v1" => include_str!("fixtures/upgrades/projects-v1.sql"),
         "main-schema-v1" => include_str!("fixtures/upgrades/main-schema-v1.sql"),
         "workspaces-only-pre-projects" => {
@@ -744,4 +745,69 @@ fn fresh_install_backfill_is_a_no_op_with_no_pre_existing_workspaces() {
     });
     let projects = response.result.unwrap();
     assert_eq!(projects["projects"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn work_v1_board_survives_the_imported_boards_step() {
+    let (dir, engine) = open_seeded("work-v1-rows", "work-v1");
+    let conn = read_db(&dir);
+    assert_eq!(version_of(&conn, "work"), 2);
+    // The v1 rows are intact and land on My work (board_id NULL).
+    let (key, board, column): (String, Option<String>, String) = conn
+        .query_row(
+            "SELECT key, board_id, column_id FROM work_tickets WHERE id = 'tkt-seed'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (key.as_str(), board, column.as_str()),
+        ("DRG-41", None, "col-review")
+    );
+    let (statuses, message): (String, String) = conn
+        .query_row(
+            "SELECT statuses, message FROM work_columns WHERE id = 'col-review'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (statuses.as_str(), message.as_str()),
+        ("[]", "Review {ticket.id}")
+    );
+    let links: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM work_ticket_sessions WHERE label IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(links, 1);
+    for table in [
+        "work_boards",
+        "work_sprints",
+        "work_ticket_sprints",
+        "work_activity",
+    ] {
+        let rows: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "{table} starts empty");
+    }
+    // The board still reads through the engine, and the key counter holds.
+    let board = engine.dispatch(drogon_protocol::Request {
+        protocol: drogon_protocol::PROTOCOL_VERSION,
+        request_id: "work-v1-board".into(),
+        auth: None,
+        method: "work.board".into(),
+        params: serde_json::json!({}),
+    });
+    let board = board.result.expect("work.board after upgrade");
+    assert_eq!(board["tickets"][0]["key"], "DRG-41");
+    assert_eq!(board["board"]["name"], "My work");
+    assert_eq!(
+        board["columns"].as_array().unwrap().len(),
+        1,
+        "no default columns are re-seeded"
+    );
 }

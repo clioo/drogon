@@ -1,6 +1,7 @@
 //! `drogon-cli work …`: the Work board (tickets, columns and the prompts a
 //! column types into the sessions linked to its tickets). Requires the
-//! service capability `work.v1`.
+//! service capability `work.v1`; imported boards (Jira) need
+//! `work.boards.v1`.
 
 use clap::Subcommand;
 use serde_json::{Value, json};
@@ -15,12 +16,51 @@ const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[derive(Subcommand, Debug)]
 pub enum WorkAction {
-    /// Show the whole board: columns in order with their tickets, linked
-    /// sessions and prompt configuration
+    /// Show a board: columns in order with their tickets, linked sessions
+    /// and prompt configuration (default: My work)
     Board {
         /// Only tickets of this project (id or name)
         #[arg(long, value_name = "PROJECT")]
         project: Option<String>,
+        /// An imported board (id or name); `local` is My work
+        #[arg(long, value_name = "BOARD")]
+        board: Option<String>,
+        /// On a scrum board: a sprint (id or name), `active` (default) or
+        /// `backlog`
+        #[arg(long, value_name = "SPRINT")]
+        sprint: Option<String>,
+    },
+    /// List the boards: My work and every imported board, with how many
+    /// moves wait to be pushed
+    Boards,
+    /// Bring a provider board (Jira) in: list its boards, preview one,
+    /// import the chosen issues, or remove an imported board
+    Import {
+        #[command(subcommand)]
+        action: WorkImportAction,
+    },
+    /// Read an imported board's provider now (it also syncs every 5
+    /// minutes): the provider wins for title, description, type, priority,
+    /// assignee and sprint; status changes move cards
+    Sync {
+        /// Imported board id or name
+        #[arg(long, value_name = "BOARD")]
+        board: String,
+    },
+    /// Push unsynced moves (status and sprint) to the provider: one
+    /// ticket's, or every one on a board
+    Push {
+        /// Every unsynced move on this imported board (id or name)
+        #[arg(
+            long,
+            value_name = "BOARD",
+            conflicts_with = "ticket",
+            required_unless_present = "ticket"
+        )]
+        board: Option<String>,
+        /// Only this ticket (id, Drogon key or provider key)
+        #[arg(long, value_name = "TICKET")]
+        ticket: Option<String>,
     },
     /// Columns: create, configure (prompt, triggers, recipients), reorder,
     /// delete, preview and send
@@ -49,14 +89,74 @@ pub enum WorkAction {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum WorkImportAction {
+    /// The provider's boards, marking the ones already imported
+    Boards {
+        /// Ticket provider (default: jira)
+        #[arg(long, value_name = "PROVIDER")]
+        provider: Option<String>,
+        /// Provider site/account id (default: the first connected one)
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+    },
+    /// A provider board's columns, sprints and issues, before importing
+    Preview {
+        /// The provider's board id (`work import boards`)
+        #[arg(long, value_name = "ID")]
+        board: String,
+        /// board (every issue, default) | backlog | sprint:<id>
+        #[arg(long, value_name = "SCOPE")]
+        scope: Option<String>,
+        #[arg(long, value_name = "PROVIDER")]
+        provider: Option<String>,
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+    },
+    /// Import a provider board (first time: its columns, mapped to their
+    /// statuses) and the chosen issues; issues already in are refreshed
+    Run {
+        /// The provider's board id (`work import boards`)
+        #[arg(long, value_name = "ID")]
+        board: String,
+        /// An issue to import (repeatable), e.g. --issue APP-128
+        #[arg(long = "issue", value_name = "KEY", required_unless_present = "all")]
+        issues: Vec<String>,
+        /// Import every issue on the board
+        #[arg(long, conflicts_with = "issues")]
+        all: bool,
+        /// The Drogon project whose workspace the tickets' sessions start in
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
+        #[arg(long, value_name = "PROVIDER")]
+        provider: Option<String>,
+        #[arg(long, value_name = "SITE")]
+        site: Option<String>,
+    },
+    /// Remove an imported board and its tickets from Drogon (the provider
+    /// is untouched; linked sessions keep running)
+    Remove {
+        /// Imported board id or name
+        #[arg(long, value_name = "BOARD")]
+        board: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum WorkColumnAction {
     /// List the columns in board order with their prompt configuration
-    List,
+    List {
+        /// An imported board (id or name); default My work
+        #[arg(long, value_name = "BOARD")]
+        board: Option<String>,
+    },
     /// Add a column
     Create {
         /// Column name, unique on the board (1..=64 chars)
         #[arg(long, value_name = "NAME")]
         name: String,
+        /// Add it to this imported board (id or name); default My work
+        #[arg(long, value_name = "BOARD")]
+        board: Option<String>,
         /// backlog | todo | in_progress | review | qa | done | blocked
         #[arg(long, value_name = "ICON")]
         icon: Option<String>,
@@ -94,7 +194,7 @@ pub enum WorkColumnAction {
         pr_watch: Option<bool>,
         /// The prompt; placeholders: {ticket.id} {ticket.title} {ticket.pr}
         /// {ticket.url} {ticket.description} {ticket.next} {ticket.project}
-        /// {ticket.column}
+        /// {ticket.column} {ticket.status} {ticket.drogon_key}
         #[arg(
             long,
             value_name = "TEXT",
@@ -115,6 +215,11 @@ pub enum WorkColumnAction {
         /// Start new sessions with the default agent again
         #[arg(long)]
         default_harness: bool,
+        /// Imported boards: the provider statuses this column stands for,
+        /// comma-separated ids or names (`--statuses "In Review,Blocked"`);
+        /// a status belongs to one column; `none` makes it Drogon-only
+        #[arg(long, value_name = "STATUSES")]
+        statuses: Option<String>,
     },
     /// Delete a column; its tickets must move somewhere else
     Delete {
@@ -158,6 +263,12 @@ pub enum WorkTicketAction {
         /// Project id or name
         #[arg(long, value_name = "PROJECT")]
         project: Option<String>,
+        /// An imported board (id or name); default My work
+        #[arg(long, value_name = "BOARD")]
+        board: Option<String>,
+        /// On a scrum board: a sprint, `active` (default) or `backlog`
+        #[arg(long, value_name = "SPRINT")]
+        sprint: Option<String>,
     },
     /// Create a ticket; entering a column with an on-enter prompt sends it
     Create {
@@ -228,6 +339,54 @@ pub enum WorkTicketAction {
         /// 0-based position in the column (default: last)
         #[arg(long, value_name = "N")]
         index: Option<u32>,
+        /// The sprint being viewed; a closed sprint refuses the move
+        #[arg(long, value_name = "SPRINT")]
+        sprint: Option<String>,
+    },
+    /// Imported boards: settle a status conflict (the provider changed the
+    /// status while your move was unsynced)
+    Resolve {
+        /// Ticket id or key
+        #[arg(long, value_name = "TICKET")]
+        ticket: String,
+        /// jira (keep the provider's status; the card goes to its column) |
+        /// ours (push your move)
+        #[arg(long, value_name = "jira|ours")]
+        keep: String,
+    },
+    /// Scrum boards: carry a ticket over to the active sprint, send it to
+    /// the backlog, or put it in an open sprint (unsynced until pushed)
+    Sprint {
+        /// Ticket id or key
+        #[arg(long, value_name = "TICKET")]
+        ticket: String,
+        /// active | backlog | a sprint id or name
+        #[arg(long, value_name = "SPRINT")]
+        to: String,
+    },
+    /// Start a new session in the ticket's workspace, linked to the ticket
+    NewSession {
+        /// Ticket id or key
+        #[arg(long, value_name = "TICKET")]
+        ticket: String,
+        /// claude | codex | opencode | pi | antigravity (default: the
+        /// column's or the default agent)
+        #[arg(long, value_name = "HARNESS")]
+        harness: Option<String>,
+        /// A first prompt for the session
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        prompt: Option<String>,
+    },
+    /// Name a linked session on this ticket (an empty title restores the
+    /// session's own)
+    RenameSession {
+        /// Ticket id or key
+        #[arg(long, value_name = "TICKET")]
+        ticket: String,
+        #[arg(long, value_name = "ID")]
+        session: String,
+        #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
+        title: String,
     },
     /// Delete a ticket (its sessions keep running)
     Delete {
@@ -282,9 +441,37 @@ fn nonempty(flag: &str, value: &str) -> Result<(), CliError> {
 /// Local checks run before any transport work.
 pub fn validate(action: &WorkAction) -> Result<(), CliError> {
     match action {
-        WorkAction::Board { project } => {
-            if let Some(p) = project {
-                nonempty("project", p)?;
+        WorkAction::Board {
+            project,
+            board,
+            sprint,
+        } => {
+            for (flag, value) in [("project", project), ("board", board), ("sprint", sprint)] {
+                if let Some(v) = value {
+                    nonempty(flag, v)?;
+                }
+            }
+        }
+        WorkAction::Boards => {}
+        WorkAction::Import { action } => match action {
+            WorkImportAction::Boards { .. } => {}
+            WorkImportAction::Preview { board, .. } | WorkImportAction::Remove { board } => {
+                nonempty("board", board)?
+            }
+            WorkImportAction::Run { board, issues, .. } => {
+                nonempty("board", board)?;
+                for issue in issues {
+                    nonempty("issue", issue)?;
+                }
+            }
+        },
+        WorkAction::Sync { board } => nonempty("board", board)?,
+        WorkAction::Push { board, ticket } => {
+            if let Some(b) = board {
+                nonempty("board", b)?;
+            }
+            if let Some(t) = ticket {
+                nonempty("ticket", t)?;
             }
         }
         WorkAction::Sends { limit, .. } => {
@@ -295,7 +482,7 @@ pub fn validate(action: &WorkAction) -> Result<(), CliError> {
             }
         }
         WorkAction::Column { action } => match action {
-            WorkColumnAction::List => {}
+            WorkColumnAction::List { .. } => {}
             WorkColumnAction::Create { name, .. } => nonempty("name", name)?,
             WorkColumnAction::Update {
                 column,
@@ -331,7 +518,24 @@ pub fn validate(action: &WorkAction) -> Result<(), CliError> {
             }
             WorkTicketAction::Show { ticket }
             | WorkTicketAction::Update { ticket, .. }
-            | WorkTicketAction::Delete { ticket } => nonempty("ticket", ticket)?,
+            | WorkTicketAction::Delete { ticket }
+            | WorkTicketAction::NewSession { ticket, .. } => nonempty("ticket", ticket)?,
+            WorkTicketAction::Resolve { ticket, keep } => {
+                nonempty("ticket", ticket)?;
+                if keep != "jira" && keep != "ours" {
+                    return Err(usage("--keep must be jira or ours"));
+                }
+            }
+            WorkTicketAction::Sprint { ticket, to } => {
+                nonempty("ticket", ticket)?;
+                nonempty("to", to)?;
+            }
+            WorkTicketAction::RenameSession {
+                ticket, session, ..
+            } => {
+                nonempty("ticket", ticket)?;
+                nonempty("session", session)?;
+            }
             WorkTicketAction::Link { ticket, session }
             | WorkTicketAction::Unlink { ticket, session }
             | WorkTicketAction::Open { ticket, session } => {
@@ -359,14 +563,37 @@ pub async fn run(
     action: &WorkAction,
 ) -> Result<RunOutcome, CliError> {
     crate::commands::require_capability(client, request_id, "work.v1", "the Work board").await?;
+    if needs_boards(action) {
+        crate::commands::require_capability(
+            client,
+            request_id,
+            "work.boards.v1",
+            "imported Work boards",
+        )
+        .await?;
+    }
     let (method, params, human): (&str, Value, fn(&Value) -> String) = match action {
-        WorkAction::Board { project } => {
-            let mut params = json!({});
-            if let Some(p) = project {
-                params["projectId"] = json!(p);
-            }
-            ("work.board", params, render_board)
-        }
+        WorkAction::Board {
+            project,
+            board,
+            sprint,
+        } => (
+            "work.board",
+            board_params(project, board, sprint),
+            render_board,
+        ),
+        WorkAction::Boards => ("work.board", json!({}), render_boards),
+        WorkAction::Import { action } => import_call(action),
+        WorkAction::Sync { board } => ("work.board_sync", json!({ "boardId": board }), render_sync),
+        WorkAction::Push { board, ticket } => match (board, ticket) {
+            (_, Some(t)) => ("work.ticket_push", json!({ "ticketId": t }), render_push),
+            (Some(b), None) => (
+                "work.board_push",
+                json!({ "boardId": b }),
+                render_board_push,
+            ),
+            (None, None) => return Err(usage("work push needs --board or --ticket")),
+        },
         WorkAction::Sends {
             column,
             ticket,
@@ -389,7 +616,17 @@ pub async fn run(
     };
     let timeout = if matches!(
         method,
-        "work.column_send" | "work.ticket_move" | "work.ticket_create" | "work.session_open"
+        "work.column_send"
+            | "work.ticket_move"
+            | "work.ticket_create"
+            | "work.session_open"
+            | "work.board_import"
+            | "work.board_sync"
+            | "work.board_push"
+            | "work.ticket_push"
+            | "work.ticket_resolve"
+            | "work.ticket_session_start"
+            | "work.column_update"
     ) {
         SEND_TIMEOUT
     } else {
@@ -408,11 +645,140 @@ pub async fn run(
     crate::commands::emit_call(call, json_mode, move || human(&result))
 }
 
+/// Verbs that only exist with imported boards (`work.boards.v1`).
+fn needs_boards(action: &WorkAction) -> bool {
+    match action {
+        WorkAction::Board { board, sprint, .. } => board.is_some() || sprint.is_some(),
+        WorkAction::Boards
+        | WorkAction::Import { .. }
+        | WorkAction::Sync { .. }
+        | WorkAction::Push { .. } => true,
+        WorkAction::Column { action } => match action {
+            WorkColumnAction::List { board } | WorkColumnAction::Create { board, .. } => {
+                board.is_some()
+            }
+            WorkColumnAction::Update { statuses, .. } => statuses.is_some(),
+            _ => false,
+        },
+        WorkAction::Ticket { action } => match action {
+            WorkTicketAction::List { board, sprint, .. } => board.is_some() || sprint.is_some(),
+            WorkTicketAction::Move { sprint, .. } => sprint.is_some(),
+            WorkTicketAction::Resolve { .. }
+            | WorkTicketAction::Sprint { .. }
+            | WorkTicketAction::NewSession { .. }
+            | WorkTicketAction::RenameSession { .. } => true,
+            _ => false,
+        },
+        WorkAction::Sends { .. } => false,
+    }
+}
+
+fn board_params(
+    project: &Option<String>,
+    board: &Option<String>,
+    sprint: &Option<String>,
+) -> Value {
+    let mut params = json!({});
+    for (key, value) in [
+        ("projectId", project),
+        ("boardId", board),
+        ("sprintId", sprint),
+    ] {
+        if let Some(v) = value {
+            params[key] = json!(v);
+        }
+    }
+    params
+}
+
+fn provider_params(provider: &Option<String>, site: &Option<String>) -> Value {
+    let mut params = json!({});
+    if let Some(p) = provider {
+        params["provider"] = json!(p);
+    }
+    if let Some(s) = site {
+        params["siteId"] = json!(s);
+    }
+    params
+}
+
+fn import_call(action: &WorkImportAction) -> WorkCall {
+    match action {
+        WorkImportAction::Boards { provider, site } => (
+            "work.provider_boards",
+            provider_params(provider, site),
+            render_provider_boards,
+        ),
+        WorkImportAction::Preview {
+            board,
+            scope,
+            provider,
+            site,
+        } => {
+            let mut params = provider_params(provider, site);
+            params["externalBoardId"] = json!(board);
+            if let Some(scope) = scope {
+                params["scope"] = json!(scope);
+            }
+            ("work.import_preview", params, render_import_preview)
+        }
+        WorkImportAction::Run {
+            board,
+            issues,
+            all,
+            project,
+            provider,
+            site,
+        } => {
+            let mut params = provider_params(provider, site);
+            params["externalBoardId"] = json!(board);
+            if *all {
+                params["all"] = json!(true);
+            } else {
+                params["issueKeys"] = json!(issues);
+            }
+            if let Some(p) = project {
+                params["projectId"] = json!(p);
+            }
+            ("work.board_import", params, |v| {
+                format!(
+                    "Imported {} issue(s) into {} ({} already there, refreshed).\n  board id: {}",
+                    v["imported"],
+                    text(&v["board"]["name"]),
+                    v["refreshed"],
+                    text(&v["board"]["id"]),
+                )
+            })
+        }
+        WorkImportAction::Remove { board } => {
+            ("work.board_delete", json!({ "boardId": board }), |v| {
+                format!(
+                    "Removed {} and its {} ticket(s) from Drogon; the provider is untouched.",
+                    text(&v["name"]),
+                    v["tickets"]
+                )
+            })
+        }
+    }
+}
+
 fn column_call(action: &WorkColumnAction) -> Result<WorkCall, CliError> {
     Ok(match action {
-        WorkColumnAction::List => ("work.board", json!({}), render_columns),
-        WorkColumnAction::Create { name, icon, index } => {
+        WorkColumnAction::List { board } => (
+            "work.board",
+            board_params(&None, board, &None),
+            render_columns,
+        ),
+        WorkColumnAction::Create {
+            name,
+            board,
+            icon,
+            index,
+        } => {
             let mut params = json!({ "name": name });
+            if let Some(b) = board {
+                params["boardId"] = json!(b);
+            }
             if let Some(icon) = icon {
                 params["icon"] = json!(icon);
             }
@@ -435,8 +801,20 @@ fn column_call(action: &WorkColumnAction) -> Result<WorkCall, CliError> {
             recipients,
             harness,
             default_harness,
+            statuses,
         } => {
             let mut params = json!({ "columnId": column });
+            if let Some(list) = statuses {
+                let ids: Vec<&str> = if list.trim().eq_ignore_ascii_case("none") {
+                    Vec::new()
+                } else {
+                    list.split(',')
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                };
+                params["statusIds"] = json!(ids);
+            }
             if let Some(v) = name {
                 params["name"] = json!(v);
             }
@@ -531,13 +909,56 @@ fn column_call(action: &WorkColumnAction) -> Result<WorkCall, CliError> {
 
 fn ticket_call(action: &WorkTicketAction) -> Result<WorkCall, CliError> {
     Ok(match action {
-        WorkTicketAction::List { project, .. } => {
-            let mut params = json!({});
-            if let Some(p) = project {
-                params["projectId"] = json!(p);
+        WorkTicketAction::List {
+            project,
+            board,
+            sprint,
+            ..
+        } => (
+            "work.board",
+            board_params(project, board, sprint),
+            render_board,
+        ),
+        WorkTicketAction::Resolve { ticket, keep } => (
+            "work.ticket_resolve",
+            json!({ "ticketId": ticket, "keep": keep }),
+            render_ticket_with_delivery,
+        ),
+        WorkTicketAction::Sprint { ticket, to } => (
+            "work.ticket_sprint",
+            json!({ "ticketId": ticket, "to": to }),
+            render_ticket,
+        ),
+        WorkTicketAction::NewSession {
+            ticket,
+            harness,
+            prompt,
+        } => {
+            let mut params = json!({ "ticketId": ticket });
+            if let Some(h) = harness {
+                params["harnessId"] = json!(h);
             }
-            ("work.board", params, render_board)
+            if let Some(p) = prompt {
+                params["prompt"] = json!(p);
+            }
+            ("work.ticket_session_start", params, |v| {
+                format!(
+                    "Started session {} for {}.\n{}",
+                    text(&v["session"]["id"]),
+                    v["externalKey"].as_str().unwrap_or(text(&v["key"])),
+                    render_ticket(v)
+                )
+            })
         }
+        WorkTicketAction::RenameSession {
+            ticket,
+            session,
+            title,
+        } => (
+            "work.ticket_session_rename",
+            json!({ "ticketId": ticket, "sessionId": session, "title": title }),
+            render_ticket,
+        ),
         WorkTicketAction::Create {
             title,
             project,
@@ -614,10 +1035,14 @@ fn ticket_call(action: &WorkTicketAction) -> Result<WorkCall, CliError> {
             ticket,
             column,
             index,
+            sprint,
         } => {
             let mut params = json!({ "ticketId": ticket, "columnId": column });
             if let Some(i) = index {
                 params["index"] = json!(i);
+            }
+            if let Some(s) = sprint {
+                params["sprintId"] = json!(s);
             }
             ("work.ticket_move", params, render_ticket_with_delivery)
         }
@@ -725,22 +1150,247 @@ fn session_summary(s: &Value) -> String {
     )
 }
 
+/// What an imported ticket's card says about its sync state.
+fn sync_note(t: &Value) -> Option<String> {
+    let provider = if t["provider"] == "jira" {
+        "Jira"
+    } else {
+        "the provider"
+    };
+    match t["sync"].as_str()? {
+        "pending" if t["pendingStatus"].is_object() => Some(format!(
+            "not synced to {provider} → {}",
+            text(&t["pendingStatus"]["name"])
+        )),
+        "pending" => Some(format!(
+            "not synced to {provider} → {}",
+            t["sprintName"].as_str().unwrap_or("backlog")
+        )),
+        "conflict" => Some(format!(
+            "{provider}: {} (yours: {}) — resolve",
+            text(&t["externalStatus"]["name"]),
+            text(&t["pendingStatus"]["name"])
+        )),
+        "error" => Some(format!("push refused: {}", text(&t["pushError"]))),
+        "unmapped" => Some(format!(
+            "status '{}' not mapped",
+            text(&t["externalStatus"]["name"])
+        )),
+        "removed" => Some(format!("not in {provider} anymore")),
+        _ => None,
+    }
+}
+
 fn ticket_line(t: &Value) -> String {
-    let mut line = format!("{}  {}", text(&t["key"]), text(&t["title"]));
-    if let Some(project) = t["projectName"].as_str() {
+    let mut line = match t["externalKey"].as_str() {
+        Some(ext) => format!("{ext}  {}", text(&t["title"])),
+        None => format!("{}  {}", text(&t["key"]), text(&t["title"])),
+    };
+    let facts: Vec<&str> = ["issueType", "priority", "assignee"]
+        .iter()
+        .filter_map(|f| t[*f].as_str())
+        .collect();
+    if !facts.is_empty() {
+        line.push_str(&format!("  [{}]", facts.join(" · ")));
+    } else if let Some(project) = t["projectName"].as_str() {
         line.push_str(&format!("  [{project}]"));
+    }
+    if let Some(from) = t["carriedFrom"].as_str() {
+        line.push_str(&format!("  carried from {from}"));
     }
     if let Some(n) = t["prNumber"].as_i64() {
         line.push_str(&format!("  PR #{n}"));
     }
     let sessions = t["sessions"].as_array().map_or(0, Vec::len);
     line.push_str(&format!("  {sessions} session(s)"));
+    if let Some(note) = sync_note(t) {
+        line.push_str(&format!("  ({note})"));
+    }
     line
+}
+
+fn board_heading(board: &Value) -> Option<String> {
+    let b = &board["board"];
+    if b.is_null() || b["id"] == "local" {
+        return None;
+    }
+    let view = &board["view"];
+    let mut heading = format!(
+        "{} · {}",
+        text(&b["name"]),
+        if b["provider"] == "jira" {
+            "Jira"
+        } else {
+            text(&b["provider"])
+        }
+    );
+    match view["kind"].as_str() {
+        Some("backlog") => heading.push_str(" · Backlog (prompts paused)"),
+        Some("sprint") => {
+            heading.push_str(&format!(
+                " · {} ({})",
+                text(&view["sprint"]["name"]),
+                text(&view["sprint"]["state"])
+            ));
+            if view["readOnly"] == true {
+                heading.push_str(" · read-only, prompts paused");
+            } else if view["promptsPaused"] == true {
+                heading.push_str(" · prompts paused");
+            }
+        }
+        _ => {}
+    }
+    if b["pendingCount"].as_i64().unwrap_or(0) > 0 {
+        heading.push_str(&format!(" · {} unsynced", b["pendingCount"]));
+    }
+    if let Some(error) = b["lastSyncError"].as_str() {
+        heading.push_str(&format!("\n  last sync failed: {error}"));
+    }
+    Some(heading)
+}
+
+fn render_boards(board: &Value) -> String {
+    board["boards"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|b| {
+            let mut line = format!("{}  ({} ticket(s))", text(&b["name"]), b["ticketCount"]);
+            if b["provider"].is_string() {
+                line.push_str(&format!(
+                    "  {} {} board {}",
+                    text(&b["provider"]),
+                    text(&b["kind"]),
+                    text(&b["externalId"])
+                ));
+                if b["pendingCount"].as_i64().unwrap_or(0) > 0 {
+                    line.push_str(&format!("  {} unsynced", b["pendingCount"]));
+                }
+            }
+            line.push_str(&format!("\n  id: {}", text(&b["id"])));
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_provider_boards(v: &Value) -> String {
+    let boards = v["boards"].as_array().cloned().unwrap_or_default();
+    if boards.is_empty() {
+        return "The provider has no boards you can see.".to_string();
+    }
+    boards
+        .iter()
+        .map(|b| {
+            let mut line = format!(
+                "{}  {} ({})",
+                text(&b["id"]),
+                text(&b["name"]),
+                text(&b["kind"])
+            );
+            if let Some(p) = b["projectKey"].as_str() {
+                line.push_str(&format!("  project {p}"));
+            }
+            if b["importedBoardId"].is_string() {
+                line.push_str("  imported");
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_import_preview(v: &Value) -> String {
+    let mut out = vec![format!(
+        "{} ({})",
+        text(&v["board"]["name"]),
+        text(&v["board"]["kind"])
+    )];
+    let columns: Vec<String> = v["columns"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|c| {
+            let statuses: Vec<&str> = c["statuses"]
+                .as_array()
+                .map(|s| s.iter().filter_map(|x| x["name"].as_str()).collect())
+                .unwrap_or_default();
+            format!("{} ← {}", text(&c["name"]), statuses.join(", "))
+        })
+        .collect();
+    out.push(format!("columns: {}", columns.join(" | ")));
+    let sprints: Vec<String> = v["sprints"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|s| format!("{} ({})", text(&s["name"]), text(&s["state"])))
+        .collect();
+    if !sprints.is_empty() {
+        out.push(format!("sprints: {}", sprints.join(", ")));
+    }
+    for issue in v["issues"].as_array().cloned().unwrap_or_default() {
+        let sprint = issue["sprint"]["name"].as_str().unwrap_or("backlog");
+        out.push(format!(
+            "  {}  {}  [{} · {}]{}",
+            text(&issue["key"]),
+            text(&issue["title"]),
+            text(&issue["status"]["name"]),
+            sprint,
+            if issue["importedTicketId"].is_string() {
+                "  imported"
+            } else {
+                ""
+            }
+        ));
+    }
+    out.join("\n")
+}
+
+fn render_sync(v: &Value) -> String {
+    let mut out = format!(
+        "Synced {}: {} ticket(s) read, {} moved by the provider, {} conflict(s), {} gone from the provider.",
+        text(&v["board"]["name"]),
+        v["updated"],
+        v["moved"],
+        v["conflicts"],
+        v["removed"]
+    );
+    for delivery in v["deliveries"].as_array().cloned().unwrap_or_default() {
+        out.push('\n');
+        out.push_str(&render_delivery(&delivery));
+    }
+    out
+}
+
+fn render_push(v: &Value) -> String {
+    if v["nothing"] == true {
+        return format!("{} has nothing to push.", text(&v["key"]));
+    }
+    match v["error"].as_str() {
+        Some(error) => format!(
+            "{}: the provider refused the push: {error}",
+            text(&v["key"])
+        ),
+        None => format!("{}: pushed.", text(&v["key"])),
+    }
+}
+
+fn render_board_push(v: &Value) -> String {
+    let results = v["results"].as_array().cloned().unwrap_or_default();
+    if results.is_empty() {
+        return "Nothing to push.".to_string();
+    }
+    let mut out = vec![format!("Pushed {}, refused {}.", v["pushed"], v["failed"])];
+    out.extend(results.iter().map(render_push));
+    out.join("\n")
 }
 
 fn render_board(board: &Value) -> String {
     let tickets = board["tickets"].as_array().cloned().unwrap_or_default();
-    let mut out = Vec::new();
+    let mut out: Vec<String> = board_heading(board).into_iter().collect();
     for column in board["columns"].as_array().cloned().unwrap_or_default() {
         let mine: Vec<&Value> = tickets
             .iter()
@@ -791,6 +1441,22 @@ fn render_ticket_list(board: &Value, column: Option<&str>) -> String {
 
 fn render_ticket(t: &Value) -> String {
     let mut out = vec![ticket_line(t), format!("  id: {}", text(&t["id"]))];
+    if t["externalKey"].is_string() {
+        out.push(format!("  drogon key: {}", text(&t["key"])));
+        if let Some(status) = t["externalStatus"]["name"].as_str() {
+            out.push(format!("  status: {status}"));
+        }
+        if let Some(sprint) = t["sprintName"].as_str() {
+            out.push(format!("  sprint: {sprint}"));
+        }
+        for s in t["sprints"].as_array().cloned().unwrap_or_default() {
+            out.push(format!(
+                "  · {} — {}",
+                text(&s["name"]),
+                text(&s["outcome"])
+            ));
+        }
+    }
     if let Some(url) = t["prUrl"].as_str() {
         out.push(format!("  pr: {url}"));
     }
@@ -807,7 +1473,19 @@ fn render_ticket(t: &Value) -> String {
         out.push(format!("  {}", text(&t["description"])));
     }
     for s in t["sessions"].as_array().cloned().unwrap_or_default() {
-        out.push(format!("  session {}", session_summary(&s)));
+        match s["label"].as_str() {
+            Some(label) => out.push(format!("  session \"{label}\" {}", session_summary(&s))),
+            None => out.push(format!("  session {}", session_summary(&s))),
+        }
+    }
+    for a in t["activity"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .take(5)
+    {
+        out.push(format!("  activity: {}", text(&a["text"])));
     }
     for send in t["sends"]
         .as_array()

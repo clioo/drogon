@@ -29,9 +29,15 @@ use serde_json::{Value, json};
 use crate::{Engine, error};
 use drogon_protocol::RpcError;
 
+pub(crate) mod provider;
+mod sync;
+
 pub(crate) const WORK_CAPABILITY: &str = "work.v1";
+pub(crate) const WORK_BOARDS_CAPABILITY: &str = "work.boards.v1";
 pub(crate) const SCHEMA_COMPONENT: &str = "work";
-pub(crate) const SCHEMA_VERSION: i64 = 1;
+/// v1: local board. v2: imported provider boards (Jira), column↔status
+/// mapping, sprints, sync state and the ticket activity log.
+pub(crate) const SCHEMA_VERSION: i64 = 2;
 
 /// How often a watched pull request is re-read (`gh pr view`).
 pub(crate) const PR_POLL_MS: i64 = 5 * 60_000;
@@ -94,6 +100,21 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
     if existing == Some(SCHEMA_VERSION) {
         return Ok(());
     }
+    if existing.unwrap_or(0) < 1 {
+        apply_v1(tx)?;
+    }
+    if existing.unwrap_or(0) < 2 {
+        apply_v2(tx)?;
+    }
+    tx.execute(
+        "INSERT INTO schema_versions (component, version) VALUES (?1, ?2)
+         ON CONFLICT(component) DO UPDATE SET version = excluded.version",
+        params![SCHEMA_COMPONENT, SCHEMA_VERSION],
+    )?;
+    Ok(())
+}
+
+fn apply_v1(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         "CREATE TABLE IF NOT EXISTS work_columns (
             id TEXT PRIMARY KEY,
@@ -169,10 +190,95 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             )?;
         }
     }
-    tx.execute(
-        "INSERT INTO schema_versions (component, version) VALUES (?1, ?2)
-         ON CONFLICT(component) DO UPDATE SET version = excluded.version",
-        params![SCHEMA_COMPONENT, SCHEMA_VERSION],
+    Ok(())
+}
+
+fn add_column(tx: &Transaction, table: &str, column: &str, decl: &str) -> rusqlite::Result<()> {
+    let exists: bool = tx
+        .prepare(&format!("PRAGMA table_info({table})"))?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|name| name == column);
+    if !exists {
+        tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
+    }
+    Ok(())
+}
+
+/// Additive: every v1 row keeps its meaning (`board_id` NULL = My work).
+fn apply_v2(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS work_boards (
+            id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            site_id TEXT NOT NULL,
+            site_url TEXT NOT NULL DEFAULT '',
+            external_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            project_key TEXT,
+            project_name TEXT,
+            project_id TEXT,
+            statuses TEXT NOT NULL DEFAULT '[]',
+            last_synced_at INTEGER,
+            last_sync_error TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(provider, site_id, external_id)
+        );
+        CREATE TABLE IF NOT EXISTS work_sprints (
+            board_id TEXT NOT NULL,
+            ext_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            state TEXT NOT NULL,
+            start_at TEXT,
+            end_at TEXT,
+            position INTEGER NOT NULL,
+            PRIMARY KEY(board_id, ext_id)
+        );
+        CREATE TABLE IF NOT EXISTS work_ticket_sprints (
+            ticket_id TEXT NOT NULL,
+            sprint_id TEXT NOT NULL,
+            status_name TEXT,
+            first_seen_at INTEGER NOT NULL,
+            PRIMARY KEY(ticket_id, sprint_id)
+        );
+        CREATE TABLE IF NOT EXISTS work_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            text TEXT NOT NULL,
+            at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS work_activity_ticket ON work_activity(ticket_id, at);",
+    )?;
+    add_column(tx, "work_columns", "board_id", "TEXT")?;
+    add_column(tx, "work_columns", "statuses", "TEXT NOT NULL DEFAULT '[]'")?;
+    for (column, decl) in [
+        ("board_id", "TEXT"),
+        ("ext_id", "TEXT"),
+        ("ext_key", "TEXT"),
+        ("ext_url", "TEXT"),
+        ("issue_type", "TEXT"),
+        ("priority", "TEXT"),
+        ("assignee", "TEXT"),
+        ("ext_status_id", "TEXT"),
+        ("ext_status_name", "TEXT"),
+        ("ext_status_category", "TEXT"),
+        ("pending_status_id", "TEXT"),
+        ("status_conflict", "INTEGER NOT NULL DEFAULT 0"),
+        ("sprint_id", "TEXT"),
+        ("ext_sprint_id", "TEXT"),
+        ("push_error", "TEXT"),
+        ("removed_at", "INTEGER"),
+    ] {
+        add_column(tx, "work_tickets", column, decl)?;
+    }
+    add_column(tx, "work_ticket_sessions", "label", "TEXT")?;
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS work_tickets_board ON work_tickets(board_id, sprint_id);
+         CREATE INDEX IF NOT EXISTS work_columns_board ON work_columns(board_id, position);",
     )?;
     Ok(())
 }
@@ -192,6 +298,20 @@ struct Column {
     recipients: String,
     harness_id: Option<String>,
     next_run_at: Option<i64>,
+    /// `None` = the local board ("My work").
+    board_id: Option<String>,
+    /// Provider statuses this column stands for (empty = Drogon-only).
+    statuses: Vec<BoardStatus>,
+}
+
+/// A provider status as the board records it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BoardStatus {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub category: String,
 }
 
 #[derive(Clone, Debug)]
@@ -212,10 +332,37 @@ struct Ticket {
     pr_checked_at: Option<i64>,
     created_at: i64,
     updated_at: i64,
+    ext: TicketExt,
 }
 
-const COLUMN_SELECT: &str = "SELECT id, name, icon, position, send_on_enter, cron, pr_watch, message, recipients, harness_id, next_run_at FROM work_columns";
-const TICKET_SELECT: &str = "SELECT id, key, project_id, workspace_id, column_id, position, title, description, pr_url, pr_number, source_url, next_step, pr_fingerprint, pr_checked_at, created_at, updated_at FROM work_tickets";
+/// A ticket's provider side; all `None`/default for a local ticket.
+#[derive(Clone, Debug, Default)]
+struct TicketExt {
+    board_id: Option<String>,
+    id: Option<String>,
+    key: Option<String>,
+    url: Option<String>,
+    issue_type: Option<String>,
+    priority: Option<String>,
+    assignee: Option<String>,
+    status_id: Option<String>,
+    status_name: Option<String>,
+    status_category: Option<String>,
+    /// A local move not yet pushed: the status it asks for.
+    pending_status_id: Option<String>,
+    /// The provider changed status while a local move was pending.
+    status_conflict: bool,
+    /// The sprint the ticket is in on the board (local view).
+    sprint_id: Option<String>,
+    /// The provider's sprint; differs from `sprint_id` while a carry-over
+    /// or send-to-backlog is unsynced.
+    ext_sprint_id: Option<String>,
+    push_error: Option<String>,
+    removed_at: Option<i64>,
+}
+
+const COLUMN_SELECT: &str = "SELECT id, name, icon, position, send_on_enter, cron, pr_watch, message, recipients, harness_id, next_run_at, board_id, statuses FROM work_columns";
+const TICKET_SELECT: &str = "SELECT id, key, project_id, workspace_id, column_id, position, title, description, pr_url, pr_number, source_url, next_step, pr_fingerprint, pr_checked_at, created_at, updated_at, board_id, ext_id, ext_key, ext_url, issue_type, priority, assignee, ext_status_id, ext_status_name, ext_status_category, pending_status_id, status_conflict, sprint_id, ext_sprint_id, push_error, removed_at FROM work_tickets";
 
 fn column_from_row(r: &rusqlite::Row) -> rusqlite::Result<Column> {
     Ok(Column {
@@ -230,6 +377,8 @@ fn column_from_row(r: &rusqlite::Row) -> rusqlite::Result<Column> {
         recipients: r.get(8)?,
         harness_id: r.get(9)?,
         next_run_at: r.get(10)?,
+        board_id: r.get(11)?,
+        statuses: serde_json::from_str(&r.get::<_, String>(12)?).unwrap_or_default(),
     })
 }
 
@@ -251,12 +400,43 @@ fn ticket_from_row(r: &rusqlite::Row) -> rusqlite::Result<Ticket> {
         pr_checked_at: r.get(13)?,
         created_at: r.get(14)?,
         updated_at: r.get(15)?,
+        ext: TicketExt {
+            board_id: r.get(16)?,
+            id: r.get(17)?,
+            key: r.get(18)?,
+            url: r.get(19)?,
+            issue_type: r.get(20)?,
+            priority: r.get(21)?,
+            assignee: r.get(22)?,
+            status_id: r.get(23)?,
+            status_name: r.get(24)?,
+            status_category: r.get(25)?,
+            pending_status_id: r.get(26)?,
+            status_conflict: r.get::<_, i64>(27)? != 0,
+            sprint_id: r.get(28)?,
+            ext_sprint_id: r.get(29)?,
+            push_error: r.get(30)?,
+            removed_at: r.get(31)?,
+        },
     })
 }
 
-fn list_columns(conn: &Connection) -> Result<Vec<Column>, RpcError> {
+/// The columns of one board (`None` = My work), in order.
+fn list_columns(conn: &Connection, board_id: Option<&str>) -> Result<Vec<Column>, RpcError> {
     let mut stmt = conn
-        .prepare(&format!("{COLUMN_SELECT} ORDER BY position, created_at"))
+        .prepare(&format!(
+            "{COLUMN_SELECT} WHERE board_id IS ?1 ORDER BY position, created_at"
+        ))
+        .map_err(error::from_sqlite)?;
+    stmt.query_map(params![board_id], column_from_row)
+        .map_err(error::from_sqlite)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(error::from_sqlite)
+}
+
+fn list_all_columns(conn: &Connection) -> Result<Vec<Column>, RpcError> {
+    let mut stmt = conn
+        .prepare(&format!("{COLUMN_SELECT} ORDER BY board_id, position"))
         .map_err(error::from_sqlite)?;
     stmt.query_map([], column_from_row)
         .map_err(error::from_sqlite)?
@@ -266,8 +446,10 @@ fn list_columns(conn: &Connection) -> Result<Vec<Column>, RpcError> {
 
 fn get_column(conn: &Connection, id: &str) -> Result<Column, RpcError> {
     conn.query_row(
+        // A name resolves on My work first: imported boards reuse names.
         &format!(
-            "{COLUMN_SELECT} WHERE id = ?1 OR lower(name) = lower(?1) ORDER BY id = ?1 DESC LIMIT 1"
+            "{COLUMN_SELECT} WHERE id = ?1 OR lower(name) = lower(?1)
+             ORDER BY id = ?1 DESC, board_id IS NULL DESC LIMIT 1"
         ),
         params![id],
         column_from_row,
@@ -295,16 +477,41 @@ fn list_tickets(conn: &Connection, column_id: Option<&str>) -> Result<Vec<Ticket
         .map_err(error::from_sqlite)
 }
 
-/// Resolves a ticket by id or by key (`DRG-41`, case-insensitive).
+/// Resolves a ticket by id, by Drogon key (`DRG-41`) or by provider key
+/// (`APP-128`), keys case-insensitive. A provider key imported on two
+/// boards is ambiguous: pass the Drogon key or id then.
 fn get_ticket(conn: &Connection, id: &str) -> Result<Ticket, RpcError> {
-    conn.query_row(
-        &format!("{TICKET_SELECT} WHERE id = ?1 OR upper(key) = upper(?1) LIMIT 1"),
-        params![id],
-        ticket_from_row,
-    )
-    .optional()
-    .map_err(error::from_sqlite)?
-    .ok_or_else(|| error::not_found(format!("ticket {id} not found")))
+    if let Some(found) = conn
+        .query_row(
+            &format!("{TICKET_SELECT} WHERE id = ?1 OR upper(key) = upper(?1) LIMIT 1"),
+            params![id],
+            ticket_from_row,
+        )
+        .optional()
+        .map_err(error::from_sqlite)?
+    {
+        return Ok(found);
+    }
+    let mut stmt = conn
+        .prepare(&format!("{TICKET_SELECT} WHERE upper(ext_key) = upper(?1)"))
+        .map_err(error::from_sqlite)?;
+    let mut found = stmt
+        .query_map(params![id], ticket_from_row)
+        .map_err(error::from_sqlite)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(error::from_sqlite)?;
+    match found.len() {
+        0 => Err(error::not_found(format!("ticket {id} not found"))),
+        1 => Ok(found.remove(0)),
+        _ => Err(error::invalid_argument(format!(
+            "{id} is on more than one board ({}); pass its Drogon key",
+            found
+                .iter()
+                .map(|t| t.key.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
 }
 
 fn linked_session_ids(conn: &Connection, ticket_id: &str) -> Result<Vec<String>, RpcError> {
@@ -316,6 +523,19 @@ fn linked_session_ids(conn: &Connection, ticket_id: &str) -> Result<Vec<String>,
     stmt.query_map(params![ticket_id], |r| r.get::<_, String>(0))
         .map_err(error::from_sqlite)?
         .collect::<Result<Vec<_>, _>>()
+        .map_err(error::from_sqlite)
+}
+
+fn session_labels(
+    conn: &Connection,
+    ticket_id: &str,
+) -> Result<std::collections::HashMap<String, String>, RpcError> {
+    let mut stmt = conn
+        .prepare("SELECT session_id, label FROM work_ticket_sessions WHERE ticket_id = ?1 AND label IS NOT NULL")
+        .map_err(error::from_sqlite)?;
+    stmt.query_map(params![ticket_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(error::from_sqlite)?
+        .collect::<Result<_, _>>()
         .map_err(error::from_sqlite)
 }
 
@@ -672,9 +892,21 @@ fn render_message(
         (None, Some(n)) => format!("PR #{n}"),
         (None, None) => "(no pull request)".to_string(),
     };
+    // An imported ticket goes by its provider key (APP-128); the Drogon key
+    // stays reachable as {ticket.drogon_key}.
+    let key = ticket.ext.key.clone().unwrap_or_else(|| ticket.key.clone());
     let pairs = [
-        ("{ticket.id}", ticket.key.clone()),
-        ("{ticket.key}", ticket.key.clone()),
+        ("{ticket.id}", key.clone()),
+        ("{ticket.key}", key),
+        ("{ticket.drogon_key}", ticket.key.clone()),
+        (
+            "{ticket.status}",
+            ticket
+                .ext
+                .status_name
+                .clone()
+                .unwrap_or_else(|| column.map(|c| c.name.clone()).unwrap_or_default()),
+        ),
         ("{ticket.title}", ticket.title.clone()),
         ("{ticket.description}", ticket.description.clone()),
         ("{ticket.pr}", pr),
@@ -762,6 +994,8 @@ fn column_json(conn: &Connection, column: &Column) -> Result<Value, RpcError> {
         "recipients": column.recipients,
         "harnessId": column.harness_id,
         "nextRunAt": column.next_run_at,
+        "boardId": column.board_id,
+        "statuses": column.statuses,
         "ticketCount": ticket_count,
         "lastSentAt": last_sent_at,
         "lastSentCount": last_sent_count,
@@ -801,17 +1035,23 @@ impl Engine {
     }
 
     fn ticket_json(&self, ticket: &Ticket) -> Result<Value, RpcError> {
-        let (ids, project) = {
+        let (ids, labels, project, ext) = {
             let conn = self.db.lock().unwrap();
             let ids = linked_session_ids(&conn, &ticket.id)?;
+            let labels = session_labels(&conn, &ticket.id)?;
             let project = match &ticket.project_id {
                 Some(id) => project_name(&conn, id).ok(),
                 None => None,
             };
-            (ids, project)
+            (ids, labels, project, sync::ticket_ext_json(&conn, ticket)?)
         };
-        let sessions = self.work_session_rows(&ids)?;
-        Ok(json!({
+        let mut sessions = self.work_session_rows(&ids)?;
+        for row in &mut sessions {
+            if let Some(label) = row["id"].as_str().and_then(|id| labels.get(id)) {
+                row["label"] = json!(label);
+            }
+        }
+        let mut value = json!({
             "id": ticket.id,
             "key": ticket.key,
             "title": ticket.title,
@@ -828,23 +1068,47 @@ impl Engine {
             "createdAt": ticket.created_at,
             "updatedAt": ticket.updated_at,
             "sessions": sessions,
-        }))
+        });
+        if let (Some(target), Value::Object(extra)) = (value.as_object_mut(), ext) {
+            target.extend(extra);
+        }
+        Ok(value)
     }
 
     // --------------------------------------------------------- reads --
 
+    /// `work.board`: one board's columns and tickets. Without `boardId`
+    /// it is My work; an imported scrum board shows one sprint (`sprintId`,
+    /// default the active one) or `backlog`.
     pub(crate) fn work_board(&self, params: &Value) -> Result<Value, RpcError> {
-        reject_unknown(params, &["projectId"])?;
-        let (columns, tickets, projects) = {
+        reject_unknown(params, &["projectId", "boardId", "sprintId"])?;
+        let (columns, tickets, projects, board, boards, view) = {
             let conn = self.db.lock().unwrap();
             let project_filter = str_field(params, "projectId")?
                 .map(|p| resolve_project(&conn, p))
                 .transpose()?;
-            let columns = list_columns(&conn)?
+            let board_id = sync::resolve_board_param(&conn, str_field(params, "boardId")?)?;
+            let columns = list_columns(&conn, board_id.as_deref())?
                 .iter()
                 .map(|c| column_json(&conn, c))
                 .collect::<Result<Vec<_>, _>>()?;
-            let tickets: Vec<Ticket> = list_tickets(&conn, None)?
+            let (scoped, board, view) = match &board_id {
+                None => (
+                    list_tickets(&conn, None)?
+                        .into_iter()
+                        .filter(|t| t.ext.board_id.is_none())
+                        .collect::<Vec<_>>(),
+                    sync::local_board_json(&conn)?,
+                    json!({ "kind": "all", "readOnly": false, "promptsPaused": false, "sprints": [] }),
+                ),
+                Some(id) => {
+                    let board = sync::get_board(&conn, id)?;
+                    let view = sync::board_view(&conn, &board, str_field(params, "sprintId")?)?;
+                    (view.tickets, sync::board_json(&conn, &board)?, view.view)
+                }
+            };
+            let boards = sync::boards_json(&conn)?;
+            let tickets: Vec<Ticket> = scoped
                 .into_iter()
                 .filter(|t| {
                     project_filter
@@ -862,13 +1126,20 @@ impl Engine {
                 .map_err(error::from_sqlite)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(error::from_sqlite)?;
-            (columns, tickets, projects)
+            (columns, tickets, projects, board, boards, view)
         };
         let tickets = tickets
             .iter()
             .map(|t| self.ticket_json(t))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(json!({ "columns": columns, "tickets": tickets, "projects": projects }))
+        Ok(json!({
+            "columns": columns,
+            "tickets": tickets,
+            "projects": projects,
+            "board": board,
+            "boards": boards,
+            "view": view,
+        }))
     }
 
     pub(crate) fn work_ticket_show(&self, params: &Value) -> Result<Value, RpcError> {
@@ -881,6 +1152,8 @@ impl Engine {
         let mut value = self.ticket_json(&ticket)?;
         let sends = self.work_sends(&json!({ "ticketId": ticket.id, "limit": 20 }))?;
         value["sends"] = sends["sends"].clone();
+        let conn = self.db.lock().unwrap();
+        value["activity"] = json!(sync::activity_json(&conn, &ticket.id)?);
         Ok(value)
     }
 
@@ -929,12 +1202,13 @@ impl Engine {
     // ------------------------------------------------------- columns --
 
     pub(crate) fn do_work_column_create(&self, params: &Value) -> Result<Value, RpcError> {
-        reject_unknown(params, &["name", "icon", "index"])?;
+        reject_unknown(params, &["name", "icon", "index", "boardId"])?;
         let name = bounded_text(&required(params, "name")?, "name", MAX_NAME, false)?;
         let icon = validate_icon(str_field(params, "icon")?.unwrap_or("todo"))?;
         let index = index_field(params, "index")?;
         let conn = self.db.lock().unwrap();
-        let existing = list_columns(&conn)?;
+        let board_id = sync::resolve_board_param(&conn, str_field(params, "boardId")?)?;
+        let existing = list_columns(&conn, board_id.as_deref())?;
         if existing.iter().any(|c| c.name.eq_ignore_ascii_case(&name)) {
             return Err(error::invalid_argument(format!(
                 "a column named {name} already exists"
@@ -943,8 +1217,8 @@ impl Engine {
         let id = uuid::Uuid::new_v4().to_string();
         let now = crate::now_unix_ms() as i64;
         conn.execute(
-            "INSERT INTO work_columns (id, name, icon, position, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-            params![id, name, icon, existing.len() as i64, now],
+            "INSERT INTO work_columns (id, name, icon, position, board_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            params![id, name, icon, existing.len() as i64, board_id, now],
         )
         .map_err(error::from_sqlite)?;
         reorder_columns(&conn, &id, index)?;
@@ -965,13 +1239,28 @@ impl Engine {
                 "message",
                 "recipients",
                 "harnessId",
+                "statusIds",
             ],
         )?;
+        let status_ids: Option<Vec<String>> = match params.get("statusIds") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(items)) => Some(
+                items
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .map(str::to_owned)
+                            .ok_or_else(|| error::invalid_argument("statusIds must be strings"))
+                    })
+                    .collect::<Result<_, _>>()?,
+            ),
+            Some(_) => return Err(error::invalid_argument("statusIds must be an array")),
+        };
         let conn = self.db.lock().unwrap();
         let mut column = get_column(&conn, &required(params, "columnId")?)?;
         if let Some(name) = str_field(params, "name")? {
             let name = bounded_text(name, "name", MAX_NAME, false)?;
-            if list_columns(&conn)?
+            if list_columns(&conn, column.board_id.as_deref())?
                 .iter()
                 .any(|c| c.id != column.id && c.name.eq_ignore_ascii_case(&name))
             {
@@ -1036,7 +1325,18 @@ impl Engine {
         if let Some(index) = index_field(params, "index")? {
             reorder_columns(&conn, &column.id, Some(index))?;
         }
-        column_json(&conn, &get_column(&conn, &column.id)?)
+        let adopted = match status_ids {
+            Some(ids) => sync::map_column_statuses(&conn, &column, &ids)?,
+            None => Vec::new(),
+        };
+        let value = column_json(&conn, &get_column(&conn, &column.id)?)?;
+        drop(conn);
+        // Cards whose provider status just got a home move there (by the
+        // provider), and the column's on-enter prompt reaches them.
+        for ticket_id in adopted {
+            let _ = self.deliver_on_enter(&ticket_id);
+        }
+        Ok(value)
     }
 
     pub(crate) fn do_work_column_delete(&self, params: &Value) -> Result<Value, RpcError> {
@@ -1049,10 +1349,10 @@ impl Engine {
             None => None,
         };
         if let Some(target) = &target
-            && target.id == column.id
+            && (target.id == column.id || target.board_id != column.board_id)
         {
             return Err(error::invalid_argument(
-                "moveTicketsTo must be another column",
+                "moveTicketsTo must be another column of the same board",
             ));
         }
         if !tickets.is_empty() && target.is_none() {
@@ -1062,7 +1362,7 @@ impl Engine {
                 tickets.len()
             )));
         }
-        if list_columns(&conn)?.len() <= 1 {
+        if list_columns(&conn, column.board_id.as_deref())?.len() <= 1 {
             return Err(error::invalid_argument(
                 "the board needs at least one column",
             ));
@@ -1079,7 +1379,7 @@ impl Engine {
         }
         conn.execute("DELETE FROM work_columns WHERE id = ?1", params![column.id])
             .map_err(error::from_sqlite)?;
-        let remaining = list_columns(&conn)?;
+        let remaining = list_columns(&conn, column.board_id.as_deref())?;
         for (position, c) in remaining.iter().enumerate() {
             conn.execute(
                 "UPDATE work_columns SET position = ?2 WHERE id = ?1",
@@ -1152,11 +1452,16 @@ impl Engine {
             }
             let column = match str_field(params, "columnId")? {
                 Some(c) => get_column(&conn, c)?,
-                None => list_columns(&conn)?
+                None => list_columns(&conn, None)?
                     .into_iter()
                     .next()
                     .ok_or_else(|| error::invalid_argument("the board has no columns"))?,
             };
+            if column.board_id.is_some() {
+                return Err(error::invalid_argument(
+                    "tickets on an imported board come from its provider: create the issue there, then import it",
+                ));
+            }
             for session in &session_ids {
                 self.require_session_row(&conn, session)?;
             }
@@ -1205,6 +1510,17 @@ impl Engine {
         )?;
         let conn = self.db.lock().unwrap();
         let mut ticket = get_ticket(&conn, &required(params, "ticketId")?)?;
+        if let Some(board_id) = &ticket.ext.board_id
+            && let Some(field) = ["title", "description"]
+                .iter()
+                .find(|f| params.get(**f).is_some())
+        {
+            return Err(error::invalid_argument(format!(
+                "{field} comes from {} for {}; edit it there and sync",
+                sync::provider_label(&sync::get_board(&conn, board_id)?.provider),
+                ticket.ext.key.clone().unwrap_or(ticket.key.clone())
+            )));
+        }
         if let Some(title) = str_field(params, "title")? {
             ticket.title = bounded_text(title, "title", MAX_TITLE, false)?;
         }
@@ -1263,13 +1579,33 @@ impl Engine {
         self.ticket_json(&ticket)
     }
 
+    /// Moves a ticket between columns (or within one). On an imported board
+    /// a move into a mapped column is Drogon-only until pushed: the ticket
+    /// records the status it asks for (`pendingStatus`), or clears it when
+    /// the column already holds the provider's status.
     pub(crate) fn do_work_ticket_move(&self, params: &Value) -> Result<Value, RpcError> {
-        reject_unknown(params, &["ticketId", "columnId", "index"])?;
+        reject_unknown(params, &["ticketId", "columnId", "index", "sprintId"])?;
         let (ticket_id, entered) = {
             let conn = self.db.lock().unwrap();
             let ticket = get_ticket(&conn, &required(params, "ticketId")?)?;
-            let column = get_column(&conn, &required(params, "columnId")?)?;
+            let column = get_column_on(
+                &conn,
+                &required(params, "columnId")?,
+                ticket.ext.board_id.as_deref(),
+            )?;
+            if column.board_id != ticket.ext.board_id {
+                return Err(error::invalid_argument(format!(
+                    "{} belongs to another board; tickets move within their board",
+                    column.name
+                )));
+            }
+            if let Some(board_id) = &ticket.ext.board_id {
+                sync::check_movable(&conn, board_id, &ticket, str_field(params, "sprintId")?)?;
+            }
             let entered = ticket.column_id != column.id;
+            if entered && ticket.ext.board_id.is_some() {
+                sync::record_local_move(&conn, &ticket, &column)?;
+            }
             if entered {
                 conn.execute(
                     "UPDATE work_tickets SET column_id = ?2, updated_at = ?3 WHERE id = ?1",
@@ -1312,11 +1648,17 @@ impl Engine {
         reject_unknown(params, &["ticketId"])?;
         let conn = self.db.lock().unwrap();
         let ticket = get_ticket(&conn, &required(params, "ticketId")?)?;
-        conn.execute(
-            "DELETE FROM work_ticket_sessions WHERE ticket_id = ?1",
-            params![ticket.id],
-        )
-        .map_err(error::from_sqlite)?;
+        for table in [
+            "work_ticket_sessions",
+            "work_ticket_sprints",
+            "work_activity",
+        ] {
+            conn.execute(
+                &format!("DELETE FROM {table} WHERE ticket_id = ?1"),
+                params![ticket.id],
+            )
+            .map_err(error::from_sqlite)?;
+        }
         conn.execute("DELETE FROM work_tickets WHERE id = ?1", params![ticket.id])
             .map_err(error::from_sqlite)?;
         let remaining: Vec<String> = list_tickets(&conn, Some(&ticket.column_id))?
@@ -1541,8 +1883,16 @@ impl Engine {
             }
         };
         let tickets = match ticket {
-            Some(t) => vec![t],
-            None => list_tickets(&conn, Some(&column.id))?,
+            Some(t) => {
+                if !sync::prompts_live(&conn, &t)? {
+                    return Err(error::invalid_argument(format!(
+                        "prompts are paused for {}: it is not in the active sprint",
+                        t.ext.key.clone().unwrap_or(t.key.clone())
+                    )));
+                }
+                vec![t]
+            }
+            None => live_tickets(&conn, &column.id)?,
         };
         Ok((column, tickets))
     }
@@ -1594,12 +1944,15 @@ impl Engine {
     }
 
     fn deliver_on_enter(&self, ticket_id: &str) -> Result<Value, RpcError> {
-        let column = {
+        let (column, live) = {
             let conn = self.db.lock().unwrap();
             let ticket = get_ticket(&conn, ticket_id)?;
-            get_column(&conn, &ticket.column_id)?
+            (
+                get_column(&conn, &ticket.column_id)?,
+                sync::prompts_live(&conn, &ticket)?,
+            )
         };
-        if !column.send_on_enter || column.message.trim().is_empty() {
+        if !live || !column.send_on_enter || column.message.trim().is_empty() {
             return Ok(Value::Null);
         }
         self.deliver(&column, ticket_id, "enter", None)
@@ -1781,7 +2134,7 @@ impl Engine {
         let now = now_ms as i64;
         let columns = {
             let conn = self.db.lock().unwrap();
-            match list_columns(&conn) {
+            match list_all_columns(&conn) {
                 Ok(c) => c,
                 Err(err) => {
                     eprintln!("[work] tick: cannot list columns: {}", err.message);
@@ -1800,7 +2153,7 @@ impl Engine {
                         "UPDATE work_columns SET next_run_at = ?2 WHERE id = ?1",
                         params![column.id, next],
                     );
-                    list_tickets(&conn, Some(&column.id)).unwrap_or_default()
+                    live_tickets(&conn, &column.id).unwrap_or_default()
                 };
                 if !column.message.trim().is_empty() {
                     for ticket in tickets {
@@ -1817,12 +2170,13 @@ impl Engine {
                 self.watch_column_prs(column, now);
             }
         }
+        self.tick_work_sync(now);
     }
 
     fn watch_column_prs(&self, column: &Column, now: i64) {
         let tickets = {
             let conn = self.db.lock().unwrap();
-            list_tickets(&conn, Some(&column.id)).unwrap_or_default()
+            live_tickets(&conn, &column.id).unwrap_or_default()
         };
         for ticket in tickets {
             let (Some(project), Some(number)) = (&ticket.project_id, ticket.pr_number) else {
@@ -1867,8 +2221,31 @@ impl Engine {
     }
 }
 
+/// A column's tickets that prompts reach (see [`sync::prompts_live`]).
+fn live_tickets(conn: &Connection, column_id: &str) -> Result<Vec<Ticket>, RpcError> {
+    let mut out = Vec::new();
+    for ticket in list_tickets(conn, Some(column_id))? {
+        if sync::prompts_live(conn, &ticket)? {
+            out.push(ticket);
+        }
+    }
+    Ok(out)
+}
+
+/// A column by id, or by name on the given board first.
+fn get_column_on(conn: &Connection, id: &str, board_id: Option<&str>) -> Result<Column, RpcError> {
+    if let Some(found) = list_columns(conn, board_id)?
+        .into_iter()
+        .find(|c| c.id == id || c.name.eq_ignore_ascii_case(id))
+    {
+        return Ok(found);
+    }
+    get_column(conn, id)
+}
+
 fn reorder_columns(conn: &Connection, moving: &str, index: Option<usize>) -> Result<(), RpcError> {
-    let mut order: Vec<String> = list_columns(conn)?
+    let board = get_column(conn, moving)?.board_id;
+    let mut order: Vec<String> = list_columns(conn, board.as_deref())?
         .into_iter()
         .map(|c| c.id)
         .filter(|id| id != moving)
@@ -1947,6 +2324,44 @@ mod tests {
     }
 
     #[test]
+    fn imported_tickets_render_their_provider_key() {
+        let mut ticket = Ticket {
+            id: "t".into(),
+            key: "DRG-7".into(),
+            project_id: None,
+            workspace_id: None,
+            column_id: "c".into(),
+            position: 0,
+            title: "Resume".into(),
+            description: String::new(),
+            pr_url: None,
+            pr_number: None,
+            source_url: None,
+            next_step: String::new(),
+            pr_fingerprint: None,
+            pr_checked_at: None,
+            created_at: 0,
+            updated_at: 0,
+            ext: TicketExt::default(),
+        };
+        assert_eq!(
+            render_message("{ticket.key} {ticket.status}", &ticket, None, None),
+            "DRG-7"
+        );
+        ticket.ext.key = Some("APP-128".into());
+        ticket.ext.status_name = Some("In Review".into());
+        assert_eq!(
+            render_message(
+                "{ticket.id} {ticket.key} {ticket.drogon_key} {ticket.status}",
+                &ticket,
+                None,
+                None
+            ),
+            "APP-128 APP-128 DRG-7 In Review"
+        );
+    }
+
+    #[test]
     fn messages_render_ticket_placeholders() {
         let ticket = Ticket {
             id: "t".into(),
@@ -1965,6 +2380,7 @@ mod tests {
             pr_checked_at: None,
             created_at: 0,
             updated_at: 0,
+            ext: TicketExt::default(),
         };
         let out = render_message(
             "Review {ticket.pr} for {ticket.id}.\r\nSource: {ticket.url} {unknown}\n\n",

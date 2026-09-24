@@ -73,11 +73,19 @@ export function sourceKind(url: string | null): string {
 export function matchesSearch(ticket: WorkTicket, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return [ticket.key, ticket.title, ticket.description, ticket.projectName ?? "", ticket.nextStep]
-    .some((field) => field.toLowerCase().includes(q));
+  return [
+    ticket.key,
+    ticket.externalKey ?? "",
+    ticket.title,
+    ticket.description,
+    ticket.projectName ?? "",
+    ticket.nextStep,
+    ticket.assignee ?? "",
+    ticket.issueType ?? "",
+  ].some((field) => field.toLowerCase().includes(q));
 }
 
-export type WorkFilter = "all" | "with-pr" | "with-sessions" | "without-sessions" | "working";
+export type WorkFilter = "all" | "with-pr" | "with-sessions" | "without-sessions" | "working" | "unsynced";
 
 export function matchesFilter(ticket: WorkTicket, filter: WorkFilter): boolean {
   switch (filter) {
@@ -89,6 +97,8 @@ export function matchesFilter(ticket: WorkTicket, filter: WorkFilter): boolean {
       return ticket.sessions.length === 0;
     case "working":
       return ticketIsWorking(ticket);
+    case "unsynced":
+      return ticket.sync !== undefined && ticket.sync !== "local" && ticket.sync !== "synced";
     default:
       return true;
   }
@@ -100,6 +110,7 @@ export const WORK_FILTER_LABELS: Record<WorkFilter, string> = {
   "with-sessions": "With sessions",
   "without-sessions": "Without sessions",
   working: "Agent working",
+  unsynced: "Needs attention (sync)",
 };
 
 export function deliverySummary(results: { action: string }[]): string {

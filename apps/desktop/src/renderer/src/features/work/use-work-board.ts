@@ -1,6 +1,8 @@
 // Loads the Work board and keeps it fresh while the page is shown: a poll
 // (sessions change state on their own) plus an immediate reload after every
 // mutation. Mutations return the daemon's error message for the page to show.
+// The selection (an imported board, one of its sprints or the backlog) is part
+// of every read; changing it reloads at once.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Result } from "../../../../shared/session-contract";
 import type { WorkBoard, WorkBridge } from "../../../../shared/work-contract";
@@ -16,11 +18,18 @@ export type WorkBoardState = {
   run: <T>(call: () => Promise<Result<T>>) => Promise<{ ok: true; value: T } | { ok: false; error: string }>;
 };
 
-export function useWorkBoard(bridge: WorkBridge | null, active: boolean): WorkBoardState {
+export type WorkSelection = { boardId?: string; sprintId?: string };
+
+export function useWorkBoard(
+  bridge: WorkBridge | null,
+  active: boolean,
+  selection: WorkSelection = {},
+): WorkBoardState {
   const [board, setBoard] = useState<WorkBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const generation = useRef(0);
+  const { boardId, sprintId } = selection;
 
   const reload = useCallback(async () => {
     if (!bridge) {
@@ -30,7 +39,10 @@ export function useWorkBoard(bridge: WorkBridge | null, active: boolean): WorkBo
     }
     const mine = ++generation.current;
     try {
-      const result = await bridge.board();
+      const input: { boardId?: string; sprintId?: string } = {};
+      if (boardId) input.boardId = boardId;
+      if (sprintId) input.sprintId = sprintId;
+      const result = await bridge.board(boardId || sprintId ? input : undefined);
       if (mine !== generation.current) return;
       if (result.ok) {
         setBoard(result.result);
@@ -43,7 +55,14 @@ export function useWorkBoard(bridge: WorkBridge | null, active: boolean): WorkBo
     } finally {
       if (mine === generation.current) setLoading(false);
     }
-  }, [bridge]);
+  }, [bridge, boardId, sprintId]);
+
+  // Another board or sprint: never show the previous one's cards under it.
+  useEffect(() => {
+    setBoard(null);
+    setError(null);
+    setLoading(true);
+  }, [boardId, sprintId]);
 
   useEffect(() => {
     if (!active) return;

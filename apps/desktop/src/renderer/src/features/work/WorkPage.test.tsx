@@ -113,7 +113,9 @@ function fakeBridge(board = boardFixture()) {
   const current = board;
   const bridge = {
     board: vi.fn(() => ok(current)),
-    ticketShow: vi.fn(),
+    ticketShow: vi.fn((input: { ticketId: string }) =>
+      ok({ ...current.tickets.find((t) => t.id === input.ticketId)!, sends: [], activity: [] }),
+    ),
     sends: vi.fn(() => ok({ sends: [] })),
     preview: vi.fn(() =>
       ok({
@@ -319,6 +321,7 @@ describe("Work board", () => {
     const { bridge } = await mount(fakeBridge(), vi.fn(), listSessions);
     fireEvent.click(screen.getByRole("button", { name: "Open DRG-42: Improve Jira resume" }));
     const panel = await screen.findByRole("complementary", { name: "Ticket DRG-42" });
+    fireEvent.click(within(panel).getByRole("tab", { name: "sessions" }));
     fireEvent.click(within(panel).getByRole("button", { name: /Link a session/ }));
     const picker = await within(panel).findByRole("combobox", { name: "Session to link" });
     // Already-linked sessions are not offered again.
@@ -328,6 +331,7 @@ describe("Work board", () => {
     await waitFor(() =>
       expect(bridge.linkSession).toHaveBeenCalledWith({ ticketId: "t2", sessionId: "other-9" }),
     );
+    fireEvent.click(within(panel).getByRole("tab", { name: "details" }));
     const next = within(panel).getByRole("textbox", { name: "Next step" });
     fireEvent.change(next, { target: { value: "Ship it" } });
     fireEvent.blur(next);
@@ -338,7 +342,8 @@ describe("Work board", () => {
     await waitFor(() =>
       expect(bridge.ticketMove).toHaveBeenCalledWith({ ticketId: "t2", columnId: "prog" }),
     );
-    fireEvent.click(within(panel).getByRole("button", { name: /Unlink session live-1/ }));
+    openMenu(within(panel).getByRole("button", { name: "Session live-1 actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Unlink from ticket" }));
     await waitFor(() =>
       expect(bridge.unlinkSession).toHaveBeenCalledWith({ ticketId: "t2", sessionId: "live-1" }),
     );

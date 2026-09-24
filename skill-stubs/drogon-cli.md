@@ -9,7 +9,8 @@ workspaces, projects, worktrees, terminals, automations, the Work board (Drogon 
 like `DRG-41`, their columns and the prompts a column sends to the sessions linked to its
 tickets), and the browser embedded inside the Drogon app. Triggers include "$drogon-cli",
 "Drogon ticket", "Work board", "move the ticket to Review/QA", "link this session to the
-ticket", a ticket key such as "DRG-42", "Drogon worktree", "child worktree",
+ticket", a ticket key such as "DRG-42" or an imported Jira key such as "APP-128", "import
+a Jira board", "push to Jira", "carry over to the active sprint", "Drogon worktree", "child worktree",
 "spawn codex/claude in a worktree", "read/wait/send Drogon terminal", "full handoff" /
 "handover" / "give this to another agent", and "control the browser inside Drogon". Use
 plain shell tools when Drogon state does not matter.

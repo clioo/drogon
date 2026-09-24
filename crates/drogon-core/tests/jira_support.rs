@@ -52,6 +52,16 @@ pub fn fixture_server() -> FixtureServer {
 
 impl FixtureServer {
     pub fn new() -> Self {
+        Self::spawn(None)
+    }
+
+    /// The fixture over another dataset under `scripts/fixtures/jira/data`
+    /// (e.g. `agile-site.json`, the stateful Work board site).
+    pub fn with_data(file: &str) -> Self {
+        Self::spawn(Some(file))
+    }
+
+    fn spawn(data: Option<&str>) -> Self {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let script = manifest
             .join("../..")
@@ -60,8 +70,14 @@ impl FixtureServer {
             .join("scripts/fixtures/jira/fake-jira-server.mjs");
         let log_dir = TempDir::new().expect("fixture log dir");
         let log_path = log_dir.path().join("requests.jsonl");
-        let mut child = Command::new(node_bin())
-            .arg(&script)
+        let mut command = Command::new(node_bin());
+        command.arg(&script);
+        if let Some(file) = data {
+            command
+                .arg("--data")
+                .arg(script.parent().unwrap().join("data").join(file));
+        }
+        let mut child = command
             .arg("--port")
             .arg("0")
             .arg("--log")
@@ -109,6 +125,30 @@ impl FixtureServer {
     }
 
     /// The most recent search request line ({path, jql, maxResults, fields}).
+    /// Changes "Jira" from the outside (a teammate's edit): the fixture's
+    /// unauthenticated control endpoint.
+    pub fn control(&self, path: &str, body: serde_json::Value) {
+        let output = Command::new("curl")
+            .args([
+                "-sS",
+                "-f",
+                "-X",
+                "POST",
+                "-H",
+                "content-type: application/json",
+                "-d",
+            ])
+            .arg(body.to_string())
+            .arg(format!("{}/__fixture/{path}", self.site_url()))
+            .output()
+            .expect("curl");
+        assert!(
+            output.status.success(),
+            "fixture control {path} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     pub fn last_search_request(&self) -> serde_json::Value {
         self.request_log()
             .into_iter()

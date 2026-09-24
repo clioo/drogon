@@ -166,6 +166,9 @@ const CAPABILITIES: &[&str] = &[
     // Work: Drogon tickets on a configurable board; columns type prompts
     // into the sessions linked to their tickets (enter / cron / PR change).
     work::WORK_CAPABILITY,
+    // Work boards imported from a ticket provider (Jira first): import,
+    // sync, push, sprints (work/sync.rs).
+    work::WORK_BOARDS_CAPABILITY,
     // The work graph (`.drogon/graph.json`): the two-halves store, the
     // graph→recipe compiler and node-level resume/retry. The graph replaces
     // the Mentu tab as the authoring surface; the runtime underneath is
@@ -709,6 +712,22 @@ impl Engine {
                 self.mutating(request, Self::do_work_ticket_unlink_session)
             }
             "work.session_open" => self.mutating(request, Self::do_work_session_open),
+            // Imported boards (Jira first; work/sync.rs).
+            "work.provider_boards" => self.work_provider_boards(&request.params),
+            "work.import_preview" => self.work_import_preview(&request.params),
+            "work.board_import" => self.mutating(request, Self::do_work_board_import),
+            "work.board_sync" => self.mutating(request, Self::do_work_board_sync),
+            "work.board_push" => self.mutating(request, Self::do_work_board_push),
+            "work.board_delete" => self.mutating(request, Self::do_work_board_delete),
+            "work.ticket_push" => self.mutating(request, Self::do_work_ticket_push),
+            "work.ticket_resolve" => self.mutating(request, Self::do_work_ticket_resolve),
+            "work.ticket_sprint" => self.mutating(request, Self::do_work_ticket_sprint),
+            "work.ticket_session_start" => {
+                self.mutating(request, Self::do_work_ticket_session_start)
+            }
+            "work.ticket_session_rename" => {
+                self.mutating(request, Self::do_work_ticket_session_rename)
+            }
             "mentu.recipes" => self.mentu_recipes(&request.params),
             "mentu.recipe" => self.mentu_recipe(&request.params),
             "mentu.recipe_save" => self.mentu_recipe_save(request),

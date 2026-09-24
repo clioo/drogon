@@ -7,7 +7,8 @@ description: >-
   browser pane (open, navigate, snapshot, click, fill, tabs), launch
   harnesses, create and run cron automations, work the Work board (Drogon
   tickets such as DRG-41, their columns and the prompts a column types into
-  the sessions linked to its tickets: create, link, move, configure, send),
+  the sessions linked to its tickets: create, link, move, configure, send;
+  import Jira boards and sync, push and carry tickets across sprints),
   manage Bots and their self-managed automations, monitors and monitor
   actions, seal and grant integration secrets, and list and restore
   pre-migration backups. Use for terminal control, lightweight prompts and
@@ -280,7 +281,7 @@ drogon-cli work ticket delete --ticket DRG-42
 Configure a column. The prompt (`--message <TEXT>`, or `--message-file`
 for a longer one) supports `{ticket.id}` `{ticket.title}` `{ticket.pr}`
 `{ticket.pr_number}` `{ticket.url}` `{ticket.description}` `{ticket.next}`
-`{ticket.project}` `{ticket.column}`; `--recipients primary` sends only to
+`{ticket.project}` `{ticket.column}` `{ticket.status}` `{ticket.drogon_key}`; `--recipients primary` sends only to
 the first linked session. Write prompts that say what "done" means and how
 to hand the ticket on, because the receiving agent acts on exactly that
 text. A Review prompt, for example: "Review {ticket.pr} for {ticket.id}.
@@ -301,6 +302,61 @@ Preview first when unsure: it changes nothing and names the action per
 session (`send`, `resume`, `start`). A column that still holds tickets is
 deleted only with `--move-to <COLUMN>`. Do not send the same prompt again
 to "make sure": check `work sends` and read the session instead.
+
+### Imported boards (Jira)
+
+With the service capability `work.boards.v1`, a board can come from a ticket
+provider (Jira today, through the connection made on the Tasks page). The
+board picker holds **My work** (the local board above) and one board per
+import. Importing picks a Jira board as the frame: its columns become the
+board's columns, each mapped to the Jira statuses it stands for, and only
+the issues you choose come in. Each imported ticket shows its Jira key
+(`APP-128`) and keeps a hidden Drogon key (`key` in JSON); both are accepted
+wherever a ticket is expected.
+
+```text
+drogon-cli work import boards --json
+drogon-cli work import preview --board 7 --scope sprint:25
+drogon-cli work import run --board 7 --issue APP-128 --issue APP-142 --project Drogon
+drogon-cli work boards
+drogon-cli work board --board 7 --sprint backlog --json
+```
+
+Sync runs every 5 minutes (`work sync --board <BOARD>` runs it now). Jira
+wins for title, description, type, priority, assignee and sprint. Status is
+the field both sides move, and the ticket's `sync` says where it stands:
+
+- `pending`: you moved the card into a mapped column; Drogon only until
+  pushed (`work push --ticket <KEY>` or `work push --board <BOARD>`).
+- `error`: Jira refused the push (`pushError` says why); the card stays.
+- `conflict`: Jira changed the status while your move was unsynced;
+  `work ticket resolve --ticket <KEY> --keep jira` takes Jira's (the card
+  goes to its column), `--keep ours` pushes yours.
+- `unmapped`: Jira's status has no column; the card stays until a column
+  adopts it (`work column update --column Blocked --statuses Blocked`).
+- `removed`: the issue is not in Jira anymore; kept, never deleted.
+
+A Jira status change on a card with nothing pending moves the card to the
+mapped column, logs "Moved by Jira", and fires the column's on-enter prompt.
+
+Scrum boards show one sprint at a time (default: the active one), the
+backlog, or a closed sprint. **Prompts fire only in the active sprint.** A
+closed sprint is read-only; its reply carries `view.outcome` (completed,
+carried forward, returned to backlog). Carry a ticket over or send it back,
+then push, like a status move:
+
+```text
+drogon-cli work ticket sprint --ticket APP-122 --to active
+drogon-cli work push --ticket APP-122
+drogon-cli work ticket new-session --ticket APP-128 --harness claude
+drogon-cli work ticket rename-session --ticket APP-128 --session <SESSION_ID> --title Implement
+drogon-cli work import remove --board 7
+```
+
+In a prompt on an imported ticket, `{ticket.id}` and `{ticket.key}` are the
+Jira key, `{ticket.status}` its Jira status and `{ticket.drogon_key}` the
+Drogon key. Do not edit an imported ticket's title or description in Drogon
+(refused); change it in Jira and sync.
 
 ## Bots (self-management)
 

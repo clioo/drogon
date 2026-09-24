@@ -1,0 +1,645 @@
+// @vitest-environment jsdom
+// Imported (Jira) boards on the Work page, against a recording fake bridge
+// that answers each board/sprint selection the way the daemon does: the
+// import flow (board → issues), the board and sprint pickers, cards with
+// Jira fields and every sync state with the action that settles it, a
+// closed sprint (read-only board, outcome panel, summary with carry-over),
+// the ticket panel's tabs, sessions and Jira details, and the column's
+// status mapping.
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
+import { TooltipProvider } from "../../components/ui/tooltip";
+import type { Result } from "../../../../shared/session-contract";
+import type {
+  WorkBoard,
+  WorkBoardSummary,
+  WorkBridge,
+  WorkColumn,
+  WorkSprint,
+  WorkTicket,
+  WorkView,
+} from "../../../../shared/work-contract";
+import { resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
+import { groupIssues } from "./WorkImportDialog";
+import { initials, priorityLevel, sprintDates, syncHeadline } from "./work-jira";
+
+vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+
+beforeAll(() => installRadixJsdomStubs());
+afterEach(() => {
+  cleanup();
+  resetWorkViewMemoryForTests();
+});
+
+const ok = <T,>(result: T): Promise<Result<T>> => Promise.resolve({ ok: true, result });
+const fail = (message: string, code = "x"): Promise<Result<never>> =>
+  Promise.resolve({ ok: false, error: { code, message, retryable: false } });
+
+const STATUSES = {
+  todo: { id: "10000", name: "To Do", category: "new" },
+  prog: { id: "3", name: "In Progress", category: "indeterminate" },
+  review: { id: "10100", name: "In Review", category: "indeterminate" },
+  done: { id: "10001", name: "Done", category: "done" },
+  blocked: { id: "10102", name: "Blocked", category: "indeterminate" },
+};
+
+const SPRINTS: WorkSprint[] = [
+  { id: "24", name: "Sprint 24", state: "closed", start: "2026-09-01T09:00:00.000Z", end: "2026-09-14T17:00:00.000Z" },
+  { id: "25", name: "Sprint 25", state: "active", start: "2026-09-15T09:00:00.000Z", end: "2026-09-28T17:00:00.000Z" },
+  { id: "26", name: "Sprint 26", state: "future", start: null, end: null },
+];
+
+function col(overrides: Partial<WorkColumn>): WorkColumn {
+  return {
+    id: "c",
+    name: "C",
+    icon: "todo",
+    position: 0,
+    sendOnEnter: false,
+    cron: null,
+    prWatch: false,
+    message: "",
+    recipients: "all",
+    harnessId: null,
+    nextRunAt: null,
+    ticketCount: 0,
+    lastSentAt: null,
+    lastSentCount: 0,
+    boardId: "b7",
+    statuses: [],
+    ...overrides,
+  };
+}
+
+function jira(overrides: Partial<WorkTicket>): WorkTicket {
+  return {
+    id: "t",
+    key: "DRG-1",
+    title: "T",
+    description: "",
+    projectId: "p1",
+    projectName: "Drogon",
+    workspaceId: null,
+    columnId: "todo",
+    position: 0,
+    prUrl: null,
+    prNumber: null,
+    sourceUrl: null,
+    nextStep: "",
+    createdAt: 1,
+    updatedAt: 1,
+    sessions: [],
+    boardId: "b7",
+    provider: "jira",
+    externalKey: "APP-1",
+    externalUrl: "http://jira.local/browse/APP-1",
+    issueType: "Task",
+    priority: "Medium",
+    assignee: "Jon Doe",
+    externalStatus: { id: STATUSES.todo.id, name: "To Do", category: "new" },
+    pendingStatus: null,
+    statusConflict: false,
+    statusUnmapped: false,
+    pushError: null,
+    removed: false,
+    sprintId: "25",
+    sprintName: "Sprint 25",
+    sprintState: "active",
+    sprintPending: false,
+    carriedFrom: null,
+    sync: "synced",
+    sprints: [],
+    ...overrides,
+  };
+}
+
+const LOCAL: WorkBoardSummary = { id: "local", provider: null, name: "My work", kind: "local", statuses: [], pendingCount: 0, ticketCount: 0 };
+const PLATFORM: WorkBoardSummary = {
+  id: "b7",
+  provider: "jira",
+  name: "Platform Delivery",
+  kind: "scrum",
+  externalId: "7",
+  projectId: "p1",
+  statuses: Object.values(STATUSES),
+  pendingCount: 1,
+  ticketCount: 8,
+  lastSyncedAt: 1,
+  lastSyncError: null,
+};
+
+function columns(): WorkColumn[] {
+  return [
+    col({ id: "todo", name: "To Do", icon: "todo", position: 0, statuses: [STATUSES.todo] }),
+    col({ id: "prog", name: "In Progress", icon: "in_progress", position: 1, statuses: [STATUSES.prog] }),
+    col({ id: "review", name: "Review", icon: "review", position: 2, statuses: [STATUSES.review] }),
+    col({ id: "done", name: "Done", icon: "done", position: 3, statuses: [STATUSES.done] }),
+  ];
+}
+
+function activeTickets(): WorkTicket[] {
+  return [
+    jira({ id: "t142", key: "DRG-1", externalKey: "APP-142", title: "Improve error messages", issueType: "Bug", assignee: "Jon Doe" }),
+    jira({
+      id: "t128",
+      key: "DRG-2",
+      externalKey: "APP-128",
+      title: "Handle session resume after PR review",
+      columnId: "review",
+      carriedFrom: "Sprint 24",
+      prNumber: 84,
+      externalStatus: { id: STATUSES.review.id, name: "In Review", category: "indeterminate" },
+      description: "Ensure sessions can be resumed seamlessly.",
+      sessions: [
+        { id: "s1", workspaceId: "ws-1", harnessId: "claude", verdict: "live", label: "Implement", createdAt: new Date().toISOString() },
+        { id: "s2", workspaceId: "ws-1", harnessId: "pi", verdict: "exited" },
+        { id: "s3", workspaceId: "ws-1", harnessId: "codex", verdict: "exited" },
+      ],
+      sprints: [
+        { ...SPRINTS[0]!, status: "Review", outcome: "carried over" },
+        { ...SPRINTS[1]!, status: "Review", outcome: "active" },
+      ],
+    }),
+    jira({
+      id: "t130",
+      key: "DRG-3",
+      externalKey: "APP-130",
+      title: "Refactor workspace initialization",
+      columnId: "prog",
+      sync: "pending",
+      pendingStatus: { id: STATUSES.prog.id, name: "In Progress" },
+    }),
+    jira({
+      id: "t135",
+      key: "DRG-4",
+      externalKey: "APP-135",
+      title: "Validate release build",
+      columnId: "review",
+      sync: "conflict",
+      statusConflict: true,
+      pendingStatus: { id: STATUSES.review.id, name: "In Review" },
+      externalStatus: { id: STATUSES.done.id, name: "Done", category: "done" },
+    }),
+    jira({
+      id: "t146",
+      key: "DRG-5",
+      externalKey: "APP-146",
+      title: "Add analytics for drop-file usage",
+      sync: "error",
+      pushError: "Jira's workflow has no transition from this issue's status to that one",
+      pendingStatus: { id: STATUSES.blocked.id, name: "Blocked" },
+    }),
+    jira({
+      id: "t149",
+      key: "DRG-6",
+      externalKey: "APP-149",
+      title: "Document session resume flow",
+      sync: "unmapped",
+      statusUnmapped: true,
+      externalStatus: { id: STATUSES.blocked.id, name: "Blocked", category: "indeterminate" },
+    }),
+    jira({ id: "t150", key: "DRG-7", externalKey: "APP-150", title: "Investigate flaky sync", sync: "removed", removed: true }),
+  ];
+}
+
+function closedTickets(): WorkTicket[] {
+  return [
+    jira({ id: "t110", key: "DRG-8", externalKey: "APP-110", title: "Add telemetry for drop-files", columnId: "done", sprintId: null, sprintName: null, externalStatus: { id: STATUSES.done.id, name: "Done", category: "done" } }),
+    jira({ id: "t128", key: "DRG-2", externalKey: "APP-128", title: "Handle session resume after PR review", columnId: "review", sessions: [{ id: "s1", verdict: "live" }] }),
+    jira({ id: "t122", key: "DRG-9", externalKey: "APP-122", title: "Clarify retry strategy", sprintId: null, sprintName: null }),
+  ];
+}
+
+function view(kind: WorkView["kind"], sprint: WorkSprint | null, extra: Partial<WorkView> = {}): WorkView {
+  return {
+    kind,
+    sprint,
+    readOnly: sprint?.state === "closed",
+    promptsPaused: sprint?.state !== "active",
+    sprints: SPRINTS,
+    ...extra,
+  };
+}
+
+function fakeBridge(options: { importedBoards?: boolean } = {}) {
+  const importedBoards = options.importedBoards ?? true;
+  const cols = columns();
+  const board = vi.fn((input?: { boardId?: string; sprintId?: string }): Promise<Result<WorkBoard>> => {
+    if (!input?.boardId) {
+      return ok({
+        columns: cols.map((c) => ({ ...c, boardId: null, statuses: [] })),
+        tickets: [],
+        projects: [{ id: "p1", name: "Drogon" }],
+        board: LOCAL,
+        boards: importedBoards ? [LOCAL, PLATFORM] : [LOCAL],
+        view: view("all", null, { readOnly: false, promptsPaused: false, sprints: [] }),
+      });
+    }
+    const base = { columns: cols, projects: [{ id: "p1", name: "Drogon" }], board: PLATFORM, boards: [LOCAL, PLATFORM] };
+    if (input.sprintId === "backlog") {
+      return ok({ ...base, tickets: [closedTickets()[2]!], view: view("backlog", null) });
+    }
+    if (input.sprintId === "24") {
+      return ok({
+        ...base,
+        tickets: closedTickets(),
+        view: view("sprint", SPRINTS[0]!, {
+          outcome: {
+            completed: ["t110"],
+            carried: [{ ticketId: "t128", toSprintId: "25", toSprintName: "Sprint 25", pending: false }],
+            backlog: [{ ticketId: "t122", pending: false }],
+          },
+        }),
+      });
+    }
+    return ok({ ...base, tickets: activeTickets(), view: view("sprint", SPRINTS[1]!) });
+  });
+  const all = [...activeTickets(), ...closedTickets()];
+  const find = (id: string) => all.find((t) => t.id === id)!;
+  return {
+    board,
+    ticketShow: vi.fn((input: { ticketId: string }) =>
+      ok({
+        ...find(input.ticketId),
+        sends: [],
+        activity: [{ id: 1, kind: "moved_by_provider", text: "Moved by Jira: In Progress → Review", at: Date.now() }],
+      }),
+    ),
+    sends: vi.fn(() => ok({ sends: [] })),
+    preview: vi.fn(),
+    columnCreate: vi.fn(),
+    columnUpdate: vi.fn((input: { columnId: string }) => ok(cols.find((c) => c.id === input.columnId)!)),
+    columnDelete: vi.fn(),
+    columnSend: vi.fn(),
+    ticketCreate: vi.fn(),
+    ticketUpdate: vi.fn((input: { ticketId: string }) => ok(find(input.ticketId))),
+    ticketMove: vi.fn((input: { ticketId: string }) => ok({ ...find(input.ticketId), delivery: null })),
+    ticketDelete: vi.fn(),
+    linkSession: vi.fn(),
+    unlinkSession: vi.fn(),
+    sessionOpen: vi.fn(),
+    providerBoards: vi.fn(() =>
+      ok({
+        provider: "jira",
+        boards: [
+          { id: "7", name: "Platform Delivery", kind: "scrum", projectKey: "APP", projectName: "Platform", importedBoardId: null },
+          { id: "9", name: "Ops Kanban", kind: "kanban", projectKey: "APP", projectName: "Platform", importedBoardId: null },
+        ],
+      }),
+    ),
+    importPreview: vi.fn(() =>
+      ok({
+        provider: "jira",
+        board: { id: "7", name: "Platform Delivery", kind: "scrum" },
+        columns: [{ name: "To Do", statuses: [STATUSES.todo] }, { name: "Review", statuses: [STATUSES.review] }],
+        sprints: SPRINTS,
+        issues: [
+          issue("APP-142", "Improve error messages", SPRINTS[1]!, STATUSES.todo),
+          issue("APP-128", "Handle session resume", SPRINTS[1]!, STATUSES.review, "t128"),
+          issue("APP-122", "Clarify retry strategy", null, STATUSES.todo),
+          issue("APP-110", "Add telemetry", null, STATUSES.done, null, [SPRINTS[0]!]),
+        ],
+      }),
+    ),
+    boardImport: vi.fn(() => ok({ board: PLATFORM, imported: 2, refreshed: 0 })),
+    boardSync: vi.fn(() => ok({ board: PLATFORM, updated: 7, moved: 1, conflicts: 1, removed: 0, deliveries: [] })),
+    boardPush: vi.fn(() => ok({ results: [], pushed: 1, failed: 0 })),
+    boardDelete: vi.fn(() => ok({ deleted: "b7", name: "Platform Delivery", tickets: 8 })),
+    ticketPush: vi.fn((input: { ticketId: string }) => ok({ ticketId: input.ticketId, key: "APP-130", pushed: true, error: null })),
+    ticketResolve: vi.fn((input: { ticketId: string }) => ok({ ...find(input.ticketId), sync: "synced" as const })),
+    ticketSprint: vi.fn((input: { ticketId: string }) => ok({ ...find(input.ticketId), sprintName: "Sprint 25" })),
+    ticketSessionStart: vi.fn((input: { ticketId: string }) =>
+      ok({ ...find(input.ticketId), session: { id: "s9", workspaceId: "ws-1", verdict: "live" } }),
+    ),
+    ticketSessionRename: vi.fn((input: { ticketId: string }) => ok(find(input.ticketId))),
+  };
+}
+
+function issue(
+  key: string,
+  title: string,
+  sprint: WorkSprint | null,
+  status: { id: string; name: string; category: string },
+  importedTicketId: string | null = null,
+  closedSprints: WorkSprint[] = [],
+) {
+  return {
+    id: key,
+    key,
+    url: `http://jira.local/browse/${key}`,
+    title,
+    issueType: "Task",
+    priority: "Medium",
+    assignee: null,
+    status,
+    sprint,
+    closedSprints,
+    importedTicketId,
+  };
+}
+
+async function mount(bridge = fakeBridge(), onOpenSession = vi.fn()) {
+  const view = render(
+    <TooltipProvider>
+      <WorkPage
+        bridge={bridge as unknown as WorkBridge}
+        workspaces={[{ id: "ws-1", name: "issue-621" }]}
+        onOpenSession={onOpenSession}
+        onOpenExternal={vi.fn()}
+        listSessions={vi.fn(async () => []) as never}
+      />
+    </TooltipProvider>,
+  );
+  await waitFor(() => expect(bridge.board).toHaveBeenCalled());
+  await screen.findByRole("region", { name: "To Do column" });
+  return { view, bridge, onOpenSession };
+}
+
+function openMenu(trigger: HTMLElement) {
+  fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 });
+  fireEvent.click(trigger);
+}
+
+async function openPlatform(bridge = fakeBridge(), onOpenSession = vi.fn()) {
+  const mounted = await mount(bridge, onOpenSession);
+  openMenu(screen.getByRole("button", { name: "Board" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Platform Delivery · Jira" }));
+  await screen.findByText("Improve error messages");
+  return mounted;
+}
+
+describe("Jira boards on the Work page", () => {
+  test("an empty My work invites a Jira import; the dialog picks a board, then its issues", async () => {
+    const { bridge } = await mount(fakeBridge({ importedBoards: false }));
+    const empty = screen.getByTestId("work-import-empty");
+    expect(within(empty).getByText("Bring in a Jira Scrum board")).toBeTruthy();
+    expect(within(empty).getByText("Sprints, issues, and column prompts in one place")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Import Jira board/ }));
+    const dialog = await screen.findByTestId("work-import-dialog");
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Choose Platform Delivery" }));
+    await within(dialog).findByText("Columns: To Do · Review");
+    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7" });
+    // Grouped like the board: active sprint, backlog, finished in a past sprint.
+    expect(within(dialog).getByRole("region", { name: "Sprint 25 · Active" })).toBeTruthy();
+    expect(within(dialog).getByRole("region", { name: "Backlog" })).toBeTruthy();
+    expect(within(dialog).getByRole("region", { name: "Finished in past sprints" })).toBeTruthy();
+    // The active sprint's new issues start chosen; an imported one is fixed.
+    expect(within(dialog).getByRole("checkbox", { name: "Import APP-142" }).getAttribute("aria-checked")).toBe("true");
+    const onBoard = within(dialog).getByRole("checkbox", { name: "Import APP-128" });
+    expect(onBoard.hasAttribute("disabled")).toBe(true);
+    expect(within(dialog).getByText("On the board")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Import APP-122" }));
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Drogon project for sessions" }), { target: { value: "p1" } });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Import 2 issues" }));
+    });
+    expect(bridge.boardImport).toHaveBeenCalledWith({ externalBoardId: "7", issueKeys: ["APP-142", "APP-122"], projectId: "p1" });
+    // The page moves to the imported board.
+    await waitFor(() => expect(bridge.board).toHaveBeenCalledWith({ boardId: "b7" }));
+  });
+
+  test("the import dialog shows why Jira cannot be read", async () => {
+    const bridge = fakeBridge();
+    bridge.providerBoards.mockImplementation(() =>
+      fail("Jira is not connected. Connect it from the Tasks page first.", "jira_not_connected") as never,
+    );
+    await mount(bridge);
+    fireEvent.click(screen.getByRole("button", { name: /Import Jira board/ }));
+    const dialog = await screen.findByTestId("work-import-dialog");
+    expect((await within(dialog).findByRole("alert")).textContent).toContain("Connect it from the Tasks page");
+  });
+
+  test("an imported sprint board: pickers, cards with Jira fields and each sync state's action", async () => {
+    const { bridge } = await openPlatform();
+    expect(screen.getByRole("button", { name: "Board" }).textContent).toContain("Platform Delivery · Jira");
+    expect(screen.getByRole("button", { name: "Sprint" }).textContent).toContain("Sprint 25 · Active");
+    expect(screen.getByRole("button", { name: "Backlog" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Past sprints" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Project filter" })).toBeNull();
+
+    const card = screen.getByRole("article", { name: "APP-128 Handle session resume after PR review" });
+    expect(within(card).getByTestId("work-carried").textContent).toBe("Carried from Sprint 24");
+    expect(within(card).getByTestId("work-issue-type").textContent).toBe("Task");
+    expect(within(card).getByTestId("work-priority").textContent).toBe("Medium");
+    expect(within(card).getByRole("img", { name: "Jon Doe" }).textContent).toBe("JD");
+    expect(within(card).getByTestId("work-card-sessions").textContent).toBe("3 sessions · PR #84");
+    expect(within(screen.getByRole("article", { name: /APP-142/ })).getByTestId("work-card-sessions").textContent).toBe("No sessions");
+
+    const pending = screen.getByRole("article", { name: /APP-130/ });
+    expect(within(pending).getByText("Not synced to Jira")).toBeTruthy();
+    fireEvent.click(within(pending).getByRole("button", { name: "Push to Jira" }));
+    await waitFor(() => expect(bridge.ticketPush).toHaveBeenCalledWith({ ticketId: "t130" }));
+
+    const conflict = screen.getByRole("article", { name: /APP-135/ });
+    expect(within(conflict).getByText("Jira: Done")).toBeTruthy();
+    expect(within(conflict).getByText("Yours: In Review")).toBeTruthy();
+    fireEvent.click(within(conflict).getByRole("button", { name: "Use Jira's" }));
+    await waitFor(() => expect(bridge.ticketResolve).toHaveBeenCalledWith({ ticketId: "t135", keep: "jira" }));
+    fireEvent.click(within(conflict).getByRole("button", { name: "Push ours" }));
+    await waitFor(() => expect(bridge.ticketResolve).toHaveBeenCalledWith({ ticketId: "t135", keep: "ours" }));
+
+    const refused = screen.getByRole("article", { name: /APP-146/ });
+    expect(within(refused).getByText("Jira refused the push")).toBeTruthy();
+    expect(within(refused).getByText(/no transition/)).toBeTruthy();
+    fireEvent.click(within(refused).getByRole("button", { name: "Retry push" }));
+    await waitFor(() => expect(bridge.ticketPush).toHaveBeenCalledWith({ ticketId: "t146" }));
+
+    const unmapped = screen.getByRole("article", { name: /APP-149/ });
+    expect(within(unmapped).getByText("Status 'Blocked' not mapped")).toBeTruthy();
+    openMenu(within(unmapped).getByRole("button", { name: "Map to a column…" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Review/ }));
+    await waitFor(() =>
+      expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", statusIds: ["10100", "10102"] }),
+    );
+
+    expect(within(screen.getByRole("article", { name: /APP-150/ })).getByText("Not in Jira anymore")).toBeTruthy();
+    // The empty Done column says what it is for.
+    expect(within(screen.getByRole("region", { name: "Done column" })).getByText("Tickets moved here will stay in this sprint.")).toBeTruthy();
+  });
+
+  test("sync, push all, and a drag that carries the viewed sprint", async () => {
+    const { bridge } = await openPlatform();
+    expect(screen.getByTestId("work-pending-count").textContent).toBe("1");
+    fireEvent.click(screen.getByRole("button", { name: "Sync Platform Delivery" }));
+    await waitFor(() => expect(bridge.boardSync).toHaveBeenCalledWith({ boardId: "b7" }));
+    openMenu(screen.getByRole("button", { name: "Sync options" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Push all pending moves (1) to Jira" }));
+    await waitFor(() => expect(bridge.boardPush).toHaveBeenCalledWith({ boardId: "b7" }));
+
+    const card = screen.getByRole("article", { name: /APP-142/ });
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      setData: (k: string, v: string) => data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+      get types() {
+        return [...data.keys()];
+      },
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    fireEvent.dragStart(card, { dataTransfer });
+    const target = screen.getByRole("region", { name: "Review column" });
+    fireEvent.dragOver(target, { dataTransfer, clientY: 10_000 });
+    fireEvent.drop(target, { dataTransfer, clientY: 10_000 });
+    await waitFor(() =>
+      expect(bridge.ticketMove).toHaveBeenCalledWith({ ticketId: "t142", columnId: "review", index: 2, sprintId: "25" }),
+    );
+
+    // New ticket on an imported board brings issues in from Jira.
+    fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    await screen.findByText("Columns: To Do · Review");
+    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7" });
+  });
+
+  test("removing the board returns to My work", async () => {
+    const { bridge } = await openPlatform();
+    openMenu(screen.getByRole("button", { name: "Sync options" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove board from Drogon" }));
+    await waitFor(() => expect(bridge.boardDelete).toHaveBeenCalledWith({ boardId: "b7" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Board" }).textContent).toContain("My work"));
+  });
+
+  test("the sprint picker and the Backlog link change the slice", async () => {
+    const { bridge } = await openPlatform();
+    fireEvent.click(screen.getByRole("button", { name: "Backlog" }));
+    await waitFor(() => expect(bridge.board).toHaveBeenCalledWith({ boardId: "b7", sprintId: "backlog" }));
+    expect(await screen.findByText("Backlog · prompts fire only in the active sprint")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to active sprint" }));
+    await screen.findByText("Improve error messages");
+    openMenu(screen.getByRole("button", { name: "Sprint" }));
+    const items = (await screen.findAllByRole("menuitem")).map((i) => i.getAttribute("aria-label"));
+    expect(items).toEqual(["Sprint 25 · Active", "Sprint 26 · Upcoming", "Sprint 24 · Closed", "Backlog"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sprint 24 · Closed" }));
+    await waitFor(() => expect(bridge.board).toHaveBeenCalledWith({ boardId: "b7", sprintId: "24" }));
+  });
+
+  test("a closed sprint is a read-only record with its outcome and carry-over", async () => {
+    const { bridge } = await openPlatform();
+    openMenu(screen.getByRole("button", { name: "Sprint" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Sprint 24 · Closed" }));
+    const banner = await screen.findByTestId("work-closed-banner");
+    expect(banner.textContent).toContain("Sprint 24 · closed");
+    expect(banner.textContent).toContain("Historical snapshot · prompts paused");
+    expect(screen.queryByRole("button", { name: "New column" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /New ticket in/ })).toBeNull();
+    expect((screen.getByRole("button", { name: "New ticket" }) as HTMLButtonElement).disabled).toBe(true);
+    const moved = screen.getByRole("article", { name: /APP-128/ });
+    expect(moved.getAttribute("draggable")).toBe("false");
+    expect(within(moved).getByTestId("work-carried").textContent).toContain("Carried to Sprint 25");
+
+    const outcome = screen.getByTestId("work-sprint-outcome");
+    expect(within(outcome).getByText("1 completed")).toBeTruthy();
+    expect(within(outcome).getByText("1 carried over")).toBeTruthy();
+    expect(within(outcome).getByText("Sessions and notes remain on APP-128.")).toBeTruthy();
+
+    // The only change a closed sprint takes: carry over or send to backlog.
+    openMenu(screen.getByRole("button", { name: "APP-122 actions" }));
+    expect(screen.queryByRole("menuitem", { name: "Move to" })).toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Carry over to active sprint" }));
+    await waitFor(() => expect(bridge.ticketSprint).toHaveBeenCalledWith({ ticketId: "t122", to: "active" }));
+
+    fireEvent.click(within(banner).getByRole("button", { name: "Sprint summary" }));
+    const summary = await screen.findByTestId("work-sprint-summary");
+    expect(within(summary).getByRole("heading", { name: "Sprint 24" })).toBeTruthy();
+    expect(within(summary).getByText("Read-only · prompts paused")).toBeTruthy();
+    expect(within(summary).getByRole("heading", { name: "Completed · 1" })).toBeTruthy();
+    expect(within(summary).getByRole("heading", { name: "Carried forward · 1" })).toBeTruthy();
+    expect(within(summary).getByRole("heading", { name: "Returned to backlog · 1" })).toBeTruthy();
+    expect(within(summary).getByText("1 linked session · notes kept")).toBeTruthy();
+    fireEvent.click(within(summary).getByRole("button", { name: "Carry over to Sprint 25" }));
+    await waitFor(() => expect(bridge.ticketSprint).toHaveBeenCalledTimes(2));
+    fireEvent.click(within(summary).getByRole("button", { name: "Send to backlog" }));
+    await waitFor(() => expect(bridge.ticketSprint).toHaveBeenCalledWith({ ticketId: "t128", to: "backlog" }));
+    // Open current ticket goes to the sprint it lives in now.
+    fireEvent.click(within(summary).getAllByRole("button", { name: /Open current ticket/ })[0]!);
+    await waitFor(() => expect(bridge.board).toHaveBeenLastCalledWith({ boardId: "b7" }));
+  });
+
+  test("the ticket panel: Jira key, read-only Jira fields, continuity, sessions and activity", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.assign(navigator, { clipboard: { writeText } });
+    const onOpenSession = vi.fn();
+    const { bridge } = await openPlatform(fakeBridge(), onOpenSession);
+    fireEvent.click(screen.getByRole("button", { name: "Open APP-128: Handle session resume after PR review" }));
+    const panel = await screen.findByRole("complementary", { name: "Ticket APP-128" });
+    expect(within(panel).getByTestId("work-panel-key").textContent).toBe("APP-128");
+    expect(within(panel).queryByRole("textbox", { name: "Ticket title" })).toBeNull();
+    expect(within(panel).getByTestId("work-panel-title").textContent).toBe("Handle session resume after PR review");
+    fireEvent.click(within(panel).getByRole("button", { name: "Copy Drogon key DRG-2" }));
+    expect(writeText).toHaveBeenCalledWith("DRG-2");
+
+    const continuity = within(panel).getByRole("region", { name: "Sprint continuity" });
+    expect(continuity.textContent).toContain("Sprint 24 · Review · carried over");
+    expect(continuity.textContent).toContain("Sprint 25 · Review · active");
+    const details = within(panel).getByRole("region", { name: "Jira details" });
+    expect(details.textContent).toContain("Jon Doe");
+    expect(details.textContent).toContain("In Review");
+    expect(details.textContent).toContain("Sprint 25");
+    expect(within(panel).getByText("Sessions (3)")).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: /Open Implement session s1/ })).toBeTruthy();
+
+    openMenu(within(panel).getByRole("button", { name: "New session" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Claude Code" }));
+    await waitFor(() => expect(bridge.ticketSessionStart).toHaveBeenCalledWith({ ticketId: "t128", harnessId: "claude" }));
+    await waitFor(() => expect(onOpenSession).toHaveBeenCalledWith({ workspaceId: "ws-1", sessionId: "s9" }));
+
+    openMenu(within(panel).getByRole("button", { name: "Session s1 actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const name = await within(panel).findByRole("textbox", { name: "Session name" });
+    await waitFor(() => expect(document.activeElement).toBe(name));
+    fireEvent.change(name, { target: { value: "Review follow-up" } });
+    fireEvent.blur(name);
+    await waitFor(() =>
+      expect(bridge.ticketSessionRename).toHaveBeenCalledWith({ ticketId: "t128", sessionId: "s1", title: "Review follow-up" }),
+    );
+
+    fireEvent.click(within(panel).getByRole("tab", { name: "activity" }));
+    expect(await within(panel).findByText("Moved by Jira: In Progress → Review")).toBeTruthy();
+    fireEvent.click(within(panel).getByRole("tab", { name: "links" }));
+    expect(within(panel).getByText("http://jira.local/browse/APP-1")).toBeTruthy();
+  });
+
+  test("the column panel maps Jira statuses", async () => {
+    const { bridge } = await openPlatform();
+    openMenu(screen.getByRole("button", { name: "Review column actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Configure prompt…" }));
+    const panel = await screen.findByRole("complementary", { name: "Review prompt" });
+    const statuses = within(panel).getByTestId("work-column-statuses");
+    expect(within(statuses).getByRole("checkbox", { name: "Map In Review to Review" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(statuses).getByText("in In Progress")).toBeTruthy();
+    fireEvent.click(within(statuses).getByRole("checkbox", { name: "Map Blocked to Review" }));
+    await waitFor(() =>
+      expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", statusIds: ["10100", "10102"] }),
+    );
+    expect(within(panel).getByText(/Prompts reach only tickets in the active sprint/)).toBeTruthy();
+  });
+});
+
+describe("Jira board helpers", () => {
+  test("labels and levels", () => {
+    expect(initials("Jon Doe")).toBe("JD");
+    expect(initials("Ana")).toBe("AN");
+    expect(priorityLevel("Highest")).toBe(4);
+    expect(priorityLevel("High")).toBe(3);
+    expect(priorityLevel("Medium")).toBe(2);
+    expect(priorityLevel("Low")).toBe(1);
+    expect(sprintDates({ start: "2026-09-01T09:00:00.000Z", end: "2026-09-14T17:00:00.000Z" })).toBe("Sep 1 – Sep 14, 2026");
+    expect(sprintDates({ start: null, end: null })).toBe("");
+    expect(syncHeadline(jira({ sync: "pending", pendingStatus: null, sprintName: null }))).toBe(
+      "Not synced to Jira: sent to the backlog",
+    );
+    expect(syncHeadline(jira({ sync: "synced" }))).toBeNull();
+  });
+
+  test("a kanban preview is one group", () => {
+    const groups = groupIssues({
+      provider: "jira",
+      board: { id: "9", name: "Ops", kind: "kanban" },
+      columns: [],
+      sprints: [],
+      issues: [issue("APP-1", "x", null, STATUSES.todo)],
+    });
+    expect(groups.map((g) => g.label)).toEqual(["Issues"]);
+  });
+});

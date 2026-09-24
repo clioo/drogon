@@ -31,7 +31,9 @@ describe("work bridge", () => {
     for (const op of [
       "board", "ticketShow", "sends", "preview", "columnCreate", "columnUpdate", "columnDelete",
       "columnSend", "ticketCreate", "ticketUpdate", "ticketMove", "ticketDelete", "linkSession",
-      "unlinkSession", "sessionOpen",
+      "unlinkSession", "sessionOpen", "providerBoards", "importPreview", "boardImport", "boardSync",
+      "boardPush", "boardDelete", "ticketPush", "ticketResolve", "ticketSprint", "ticketSessionStart",
+      "ticketSessionRename",
     ]) {
       await dispatchWorkRequest({ op, params: {} }, call);
     }
@@ -39,7 +41,9 @@ describe("work bridge", () => {
       "work.board", "work.ticket_show", "work.sends", "work.column_preview", "work.column_create",
       "work.column_update", "work.column_delete", "work.column_send", "work.ticket_create",
       "work.ticket_update", "work.ticket_move", "work.ticket_delete", "work.ticket_link_session",
-      "work.ticket_unlink_session", "work.session_open",
+      "work.ticket_unlink_session", "work.session_open", "work.provider_boards", "work.import_preview",
+      "work.board_import", "work.board_sync", "work.board_push", "work.board_delete", "work.ticket_push",
+      "work.ticket_resolve", "work.ticket_sprint", "work.ticket_session_start", "work.ticket_session_rename",
     ]);
   });
 
@@ -63,5 +67,35 @@ describe("work bridge", () => {
       ok: false,
       error,
     });
+  });
+
+  it("accepts an imported board's view and validates the sync answer", async () => {
+    const board = {
+      columns: [{ ...column, boardId: "b1", statuses: [{ id: "10100", name: "In Review", category: "indeterminate" }] }],
+      tickets: [],
+      projects: [],
+      board: { id: "b1", provider: "jira", name: "Platform Delivery", kind: "scrum", pendingCount: 1, ticketCount: 3 },
+      boards: [
+        { id: "local", provider: null, name: "My work", kind: "local", pendingCount: 0, ticketCount: 0 },
+        { id: "b1", provider: "jira", name: "Platform Delivery", kind: "scrum", pendingCount: 1, ticketCount: 3 },
+      ],
+      view: { kind: "sprint", readOnly: false, promptsPaused: false, sprints: [{ id: "25", name: "Sprint 25", state: "active" }] },
+    };
+    const ok = await dispatchWorkRequest(
+      { op: "board", params: { boardId: "b1", sprintId: "25" } },
+      vi.fn(async () => ({ ok: true as const, result: board })),
+    );
+    expect(ok).toEqual({ ok: true, result: board });
+    const broken = await dispatchWorkRequest(
+      { op: "boardSync", params: { boardId: "b1" } },
+      vi.fn(async () => ({ ok: true as const, result: { board: board.board, updated: "3" } })),
+    );
+    expect(broken).toMatchObject({ ok: false, error: { code: "internal_error" } });
+  });
+
+  it("still reads a daemon that predates imported boards", async () => {
+    const legacy = { columns: [column], tickets: [], projects: [] };
+    const result = await dispatchWorkRequest({ op: "board" }, vi.fn(async () => ({ ok: true as const, result: legacy })));
+    expect(result).toEqual({ ok: true, result: legacy });
   });
 });

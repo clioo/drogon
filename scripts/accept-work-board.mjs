@@ -15,6 +15,17 @@
 //  6. A session that is no longer running is resumed by the same click, the
 //     replacement opens, and the ticket now links the replacement.
 //  7. "Send now" reaches the session; List and Sources show the ticket.
+//  8. A Jira board (the stateful fake Jira, 127.0.0.1 only) is imported
+//     from the empty-state flow: board, then chosen issues; its columns,
+//     sprint and cards (Jira key, type, priority, assignee, carried-from).
+//  9. Jira moves an issue: Sync moves the card and the column's on-enter
+//     prompt starts a session for it.
+// 10. A card dropped in Drogon waits "Not synced to Jira" until Push, and
+//     Jira really transitions; a conflict is settled with "Use Jira's".
+// 11. The ticket panel's New session starts a session linked to the ticket
+//     and opens it.
+// 12. A closed sprint is read-only with its outcome; its summary carries a
+//     ticket over, and "Push all pending" moves it in Jira.
 //
 // Usage: node scripts/accept-work-board.mjs [--bundle <Drogon.app>]
 import assert from "node:assert/strict";
@@ -72,6 +83,49 @@ const env = {
   PATH: `${fixtureBin}:/usr/bin:/bin:/usr/sbin:/sbin`,
   CLAUDE_CONFIG_DIR: claudeConfigDir,
 };
+
+const fakeJira = path.join(root, "scripts", "fixtures", "jira", "fake-jira-server.mjs");
+const jiraData = path.join(root, "scripts", "fixtures", "jira", "data", "agile-site.json");
+let jira = null;
+let jiraUrl = null;
+
+/** The fake Jira on an ephemeral 127.0.0.1 port; its --log path keeps the
+ *  fixture dir on its command line, so the survivor check covers it. */
+async function startJira() {
+  jira = startAcceptanceProcess(process.execPath, [fakeJira, "--port", "0", "--data", jiraData, "--log", path.join(fixture, "jira.jsonl")], {
+    stdio: ["ignore", "pipe", "ignore"],
+    env,
+  });
+  ownedPids.add(jira.pid);
+  const port = await new Promise((resolve, reject) => {
+    let buffered = "";
+    const timer = setTimeout(() => reject(new Error("fake Jira never listened")), 15000);
+    jira.stdout.on("data", (bytes) => {
+      buffered += bytes.toString();
+      const match = buffered.match(/LISTEN (\d+)/);
+      if (match) {
+        clearTimeout(timer);
+        resolve(match[1]);
+      }
+    });
+  });
+  jiraUrl = `http://127.0.0.1:${port}`;
+}
+
+/** A teammate's change in "Jira" (the fixture's control endpoint). */
+async function jiraControl(pathname, body) {
+  const response = await fetch(`${jiraUrl}/__fixture/${pathname}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  assert.equal(response.status, 200, `fixture control ${pathname}`);
+}
+
+async function jiraIssue(key) {
+  const preview = await cli(["work", "import", "preview", "--board", "7"]);
+  return preview.issues.find((i) => i.key === key);
+}
 
 const report = {
   kind: "work-board-cdp",
@@ -244,6 +298,7 @@ try {
   assert.equal(created.prNumber, 648);
   const ticketPanel = page.getByRole("complementary", { name: "Ticket DRG-1" });
   await ticketPanel.waitFor();
+  await ticketPanel.getByRole("tab", { name: "sessions" }).click();
   await ticketPanel.getByRole("button", { name: /Link a session/ }).click();
   const picker = ticketPanel.getByRole("combobox", { name: "Session to link" });
   await picker.selectOption(first.id);
@@ -304,7 +359,11 @@ try {
   await page.getByRole("button", { name: "Work", exact: true }).click();
   await ticketPanel.waitFor();
   const secondRow = ticketPanel.getByRole("button", { name: new RegExp(`Open Claude Code session ${second.id.slice(0, 8)}`) });
-  await secondRow.getByText("Exited").waitFor({ timeout: 15000 });
+  await ticketPanel
+    .locator("li")
+    .filter({ has: page.getByRole("button", { name: new RegExp(`Open Claude Code session ${second.id.slice(0, 8)}`) }) })
+    .getByText("Exited")
+    .waitFor({ timeout: 15000 });
   await secondRow.click();
   const replacementId = await waitFor("replacement linked", async () => {
     const shown = await ticket("DRG-1");
@@ -338,6 +397,109 @@ try {
   await page.getByRole("tab", { name: "board" }).click();
   check("list-and-sources-views-show-the-ticket");
 
+  // 8. Import a Jira board from the empty-state flow.
+  await startJira();
+  await cli(["rpc", "jira.connect", "--params", JSON.stringify({ siteUrl: jiraUrl, email: "carlos@example.com", apiToken: "fixture-token" })]);
+  await page.getByRole("button", { name: /Import Jira board/ }).first().click();
+  const importDialog = page.getByTestId("work-import-dialog");
+  await importDialog.getByRole("button", { name: "Choose Platform Delivery" }).click();
+  await importDialog.getByTestId("work-import-columns").getByText("Columns: To Do · In Progress · Review · QA · Done").waitFor();
+  await importDialog.getByRole("checkbox", { name: "Import APP-122" }).click();
+  await importDialog.getByRole("combobox", { name: "Drogon project for sessions" }).selectOption({ label: "Drogon" });
+  await shot("jira-import-issues");
+  await importDialog.getByRole("button", { name: "Import 7 issues" }).click();
+  await importDialog.waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Board", exact: true }).getByText("Platform Delivery · Jira").waitFor();
+  await page.getByRole("button", { name: "Sprint", exact: true }).getByText("Sprint 25 · Active").waitFor();
+  const carried = page.getByRole("article", { name: "APP-128 Handle session resume after PR review" });
+  await carried.getByTestId("work-carried").getByText("Carried from Sprint 24").waitFor();
+  await carried.getByTestId("work-issue-type").getByText("Task").waitFor();
+  await carried.getByRole("img", { name: "Jon Doe" }).waitFor();
+  const boards = await cli(["work", "boards"]);
+  assert.deepEqual(boards.boards.map((b) => b.name), ["My work", "Platform Delivery"]);
+  await shot("jira-board");
+  check("a-jira-board-and-chosen-issues-import-from-the-empty-state-flow");
+
+  // 9. Jira moves APP-130; Sync moves the card and Review's prompt fires.
+  await page.getByRole("button", { name: "Review column actions" }).click();
+  await page.getByRole("menuitem", { name: "Configure prompt…" }).click();
+  const jiraReview = page.getByRole("complementary", { name: "Review prompt" });
+  await jiraReview.getByTestId("work-column-statuses").getByRole("checkbox", { name: "Map In Review to Review" }).waitFor();
+  await jiraReview.getByRole("checkbox", { name: "Ticket enters Review" }).click();
+  await jiraReview.getByRole("textbox", { name: "Message to sessions" }).fill("Jira moved {ticket.key} to {ticket.status}");
+  await jiraReview.getByRole("heading", { name: "Recipients" }).click();
+  await waitFor("Jira review prompt saved", async () => {
+    const cols = await cli(["work", "column", "list", "--board", "7"]);
+    return cols.columns.find((c) => c.name === "Review")?.message === "Jira moved {ticket.key} to {ticket.status}";
+  });
+  await jiraReview.getByRole("button", { name: "Close prompt panel" }).click();
+  await jiraControl("issue/APP-130", { status: "In Review" });
+  await page.getByRole("button", { name: "Sync Platform Delivery" }).click();
+  await page.getByRole("region", { name: "Review column" }).getByRole("article", { name: /APP-130/ }).waitFor({ timeout: 20000 });
+  const moved = await ticket("APP-130");
+  assert.equal(moved.sends[0].trigger, "enter");
+  assert.equal(moved.sends[0].results[0].action, "started");
+  const started = moved.sessions[0];
+  await waitForSessionText(started, "ARG:Jira moved APP-130 to In Review");
+  assert.ok(moved.activity.some((a) => a.text === "Moved by Jira: In Progress → Review"));
+  check("a-jira-status-change-moves-the-card-and-fires-the-columns-prompt");
+
+  // 10. A Drogon move waits for Push; a conflict takes Jira's status.
+  await page.getByRole("article", { name: /APP-142/ }).dragTo(page.getByRole("region", { name: "QA column" }));
+  const pending = page.getByRole("region", { name: "QA column" }).getByRole("article", { name: /APP-142/ });
+  await pending.getByText("Not synced to Jira").waitFor();
+  assert.equal((await jiraIssue("APP-142")).status.name, "To Do");
+  await shot("jira-not-synced");
+  await pending.getByRole("button", { name: "Push to Jira" }).click();
+  await waitFor("Jira transitioned APP-142", async () => (await jiraIssue("APP-142")).status.name === "QA");
+  await pending.getByText("Not synced to Jira").waitFor({ state: "detached" });
+  await page.getByRole("article", { name: /APP-149/ }).dragTo(page.getByRole("region", { name: "Review column" }));
+  await jiraControl("issue/APP-149", { status: "Done" });
+  await page.getByRole("button", { name: "Sync Platform Delivery" }).click();
+  const conflict = page.getByRole("article", { name: /APP-149/ });
+  await conflict.getByText("Jira: Done").waitFor({ timeout: 20000 });
+  await shot("jira-conflict");
+  await conflict.getByRole("button", { name: "Use Jira's" }).click();
+  await page.getByRole("region", { name: "Done column" }).getByRole("article", { name: /APP-149/ }).waitFor();
+  check("a-drogon-move-waits-for-push-and-a-conflict-takes-jiras-status");
+
+  // 11. New session from the ticket panel, linked and opened.
+  await page.getByRole("button", { name: "Open APP-128: Handle session resume after PR review" }).click();
+  const jiraPanel = page.getByRole("complementary", { name: "Ticket APP-128" });
+  await jiraPanel.getByRole("region", { name: "Sprint continuity" }).getByText(/Sprint 24/).waitFor();
+  await jiraPanel.getByRole("region", { name: "Jira details" }).getByText("Jon Doe").waitFor();
+  await shot("jira-ticket-panel");
+  await jiraPanel.getByRole("button", { name: "New session" }).click();
+  await page.getByRole("menuitem", { name: "Claude Code" }).click();
+  const linkedId = await waitFor("new session linked", async () => (await ticket("APP-128")).sessions[0]?.id ?? false);
+  await waitFor("new session tab active", async () => (await activeSessionTab()) === linkedId);
+  check("new-session-from-the-ticket-panel-is-linked-and-opened");
+
+  // 12. A closed sprint: read-only record, summary, carry over, push.
+  await page.getByRole("button", { name: "Work", exact: true }).click();
+  if (await page.getByRole("button", { name: "Close ticket panel" }).count()) {
+    await page.getByRole("button", { name: "Close ticket panel" }).click();
+  }
+  await page.getByRole("button", { name: "Sprint", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Sprint 24 · Closed" }).click();
+  await page.getByTestId("work-closed-banner").getByText("Historical snapshot · prompts paused").waitFor();
+  const outcome = page.getByTestId("work-sprint-outcome");
+  await outcome.getByText("1 carried over").waitFor();
+  assert.equal(await page.getByRole("button", { name: "New column" }).count(), 0);
+  await shot("jira-closed-sprint");
+  await page.getByTestId("work-closed-banner").getByRole("button", { name: "Sprint summary" }).click();
+  const summaryView = page.getByTestId("work-sprint-summary");
+  await summaryView.getByRole("heading", { name: "Returned to backlog · 1" }).waitFor();
+  await shot("jira-sprint-summary");
+  await summaryView.getByRole("button", { name: "Carry over to Sprint 25" }).click();
+  await waitFor("carried over", async () => (await ticket("APP-122")).sprintPending === true);
+  await page.getByRole("button", { name: "Back to active sprint" }).click();
+  await page.getByRole("article", { name: /APP-122/ }).getByText(/Not synced to Jira/).waitFor();
+  await page.getByRole("button", { name: "Sync options" }).click();
+  await page.getByRole("menuitem", { name: /Push all pending moves/ }).click();
+  await waitFor("APP-122 in Sprint 25 on Jira", async () => (await jiraIssue("APP-122")).sprint?.name === "Sprint 25");
+  check("a-closed-sprint-is-read-only-and-its-summary-carries-a-ticket-over");
+
   // Light theme, chosen through the real Settings pane (the app's theme does
   // not follow an emulated color scheme): the board and both panels.
   await selectSettingsTheme(page, "light");
@@ -348,6 +510,14 @@ try {
     await page.screenshot({ path: path.join(output, file), animations: "disabled" });
     report.screenshots.push(file);
   };
+  await light("jira-board-light.png");
+  await page.getByRole("button", { name: "Open APP-128: Handle session resume after PR review" }).click();
+  await jiraPanel.waitFor();
+  await light("jira-ticket-panel-light.png");
+  await page.getByRole("button", { name: "Close ticket panel" }).click();
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.getByRole("menuitem", { name: "My work" }).click();
+  await page.getByRole("region", { name: "Review column" }).getByRole("article", { name: "DRG-1 Improve Jira resume" }).waitFor();
   await light("board-light.png");
   await page.getByRole("button", { name: "Review column actions" }).click();
   await page.getByRole("menuitem", { name: "Configure prompt…" }).click();
@@ -381,6 +551,10 @@ try {
     if (daemon) {
       await stopAcceptanceProcess(daemon).catch(() => {});
       report.processes.daemon = "exited";
+    }
+    if (jira) {
+      await stopAcceptanceProcess(jira).catch(() => {});
+      report.processes.jira = "exited";
     }
     await delay(500);
     const { stdout } = await runAcceptanceProcess("/bin/ps", ["-axo", "pid=,command="], { timeout: 5000 });

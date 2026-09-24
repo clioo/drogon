@@ -18,7 +18,7 @@ import {
 import type { WorkBoardState } from "./use-work-board";
 import { deliverySummary, formatClock, scheduleLabel, WORK_SCHEDULES } from "./work-format";
 
-const PLACEHOLDERS = "{ticket.id} {ticket.title} {ticket.pr} {ticket.url} {ticket.next} {ticket.project}";
+const PLACEHOLDERS = "{ticket.id} {ticket.title} {ticket.pr} {ticket.url} {ticket.next} {ticket.project} {ticket.status}";
 
 export function WorkColumnPanel({
   column,
@@ -58,6 +58,12 @@ export function WorkColumnPanel({
   }, [column.message]);
 
   const tickets = board.tickets.filter((t) => t.columnId === column.id);
+  const imported = Boolean(column.boardId);
+  const provider = board.board?.provider === "jira" ? "Jira" : "the provider";
+  const statuses = board.board?.statuses ?? [];
+  const mapped = new Set((column.statuses ?? []).map((s) => s.id));
+  const ownerOf = (statusId: string) =>
+    board.columns.find((c) => c.id !== column.id && (c.statuses ?? []).some((s) => s.id === statusId));
   const linkedSessions = tickets.reduce((n, t) => n + t.sessions.length, 0);
 
   const save = async (update: Omit<WorkColumnUpdate, "columnId">): Promise<boolean> => {
@@ -167,6 +173,37 @@ export function WorkColumnPanel({
           ) : null}
         </section>
 
+        {imported ? (
+          <section className="space-y-2" aria-label={`${provider} statuses`}>
+            <h3 className="text-sm font-semibold text-foreground">{provider} statuses</h3>
+            <p className="text-xs text-muted-foreground">
+              A card dropped here asks {provider} for the first status (after you push). A card whose{" "}
+              {provider} status is mapped here moves here on sync. None mapped: a Drogon-only column.
+            </p>
+            <ul className="space-y-1.5" data-testid="work-column-statuses">
+              {statuses.map((status) => {
+                const owner = ownerOf(status.id);
+                return (
+                  <li key={status.id}>
+                    <label className="flex items-center gap-2.5 text-sm">
+                      <Checkbox
+                        checked={mapped.has(status.id)}
+                        aria-label={`Map ${status.name} to ${column.name}`}
+                        onCheckedChange={(checked) => {
+                          const ids = (column.statuses ?? []).map((s) => s.id).filter((id) => id !== status.id);
+                          void save({ statusIds: checked === true ? [...ids, status.id] : ids });
+                        }}
+                      />
+                      <span className="flex-1">{status.name}</span>
+                      {owner ? <span className="text-xs text-muted-foreground">in {owner.name}</span> : null}
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
+
         <section className="flex min-h-0 flex-col gap-2" aria-label="Message to sessions">
           <h3 className="text-sm font-semibold text-foreground">Message to sessions</h3>
           <Textarea
@@ -194,6 +231,7 @@ export function WorkColumnPanel({
           <p className="text-xs text-muted-foreground">
             Live sessions are typed into right away; a session that is no longer running is
             resumed; a ticket with nothing to resume gets a new session.
+            {board.board?.kind === "scrum" ? " Prompts reach only tickets in the active sprint." : ""}
           </p>
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             New sessions start with
@@ -254,7 +292,7 @@ export function WorkColumnPanel({
             Preview
           </Button>
           <Button
-            disabled={busy || !message.trim() || tickets.length === 0}
+            disabled={busy || !message.trim() || tickets.length === 0 || board.view?.promptsPaused === true}
             onClick={async () => {
               setBusy(true);
               try {
