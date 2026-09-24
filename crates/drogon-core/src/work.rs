@@ -310,7 +310,7 @@ fn get_ticket(conn: &Connection, id: &str) -> Result<Ticket, RpcError> {
 fn linked_session_ids(conn: &Connection, ticket_id: &str) -> Result<Vec<String>, RpcError> {
     let mut stmt = conn
         .prepare(
-            "SELECT session_id FROM work_ticket_sessions WHERE ticket_id = ?1 ORDER BY linked_at, session_id",
+            "SELECT session_id FROM work_ticket_sessions WHERE ticket_id = ?1 ORDER BY linked_at, rowid",
         )
         .map_err(error::from_sqlite)?;
     stmt.query_map(params![ticket_id], |r| r.get::<_, String>(0))

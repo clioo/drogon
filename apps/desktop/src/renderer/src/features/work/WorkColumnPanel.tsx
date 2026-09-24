@@ -2,7 +2,7 @@
 // it types into the sessions linked to its tickets, who receives it, and the
 // Preview / Send now controls. Toggles save immediately; the message saves
 // on blur and before any preview or send, so what is sent is what is shown.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
@@ -41,11 +41,21 @@ export function WorkColumnPanel({
   const [customCron, setCustomCron] = useState(
     column.cron && !WORK_SCHEDULES.some((s) => s.value === column.cron) ? column.cron : "",
   );
-  // A different column, or a message changed elsewhere (CLI), resets the draft.
+  const lastSaved = useRef(column.message);
+  // Switching columns starts from that column's saved state.
   useEffect(() => {
     setMessage(column.message);
     setPreview(null);
-  }, [column.id, column.message]);
+    lastSaved.current = column.message;
+  }, [column.id]);
+  // A message changed elsewhere (the CLI, another window) replaces the draft
+  // only while the draft still equals what was last saved: never an edit in
+  // progress, and never the preview it produced.
+  useEffect(() => {
+    if (column.message === lastSaved.current) return;
+    setMessage((draft) => (draft === lastSaved.current ? column.message : draft));
+    lastSaved.current = column.message;
+  }, [column.message]);
 
   const tickets = board.tickets.filter((t) => t.columnId === column.id);
   const linkedSessions = tickets.reduce((n, t) => n + t.sessions.length, 0);
@@ -55,8 +65,12 @@ export function WorkColumnPanel({
     if (!result.ok) onNotice(result.error, "error");
     return result.ok;
   };
-  const saveMessage = async (): Promise<boolean> =>
-    message === column.message ? true : save({ message });
+  const saveMessage = async (): Promise<boolean> => {
+    if (message === lastSaved.current) return true;
+    const saved = await save({ message });
+    if (saved) lastSaved.current = message;
+    return saved;
+  };
 
   const scheduleValue = column.cron
     ? WORK_SCHEDULES.some((s) => s.value === column.cron)

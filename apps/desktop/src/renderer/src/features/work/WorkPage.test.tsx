@@ -126,9 +126,13 @@ function fakeBridge(board = boardFixture()) {
       }),
     ),
     columnCreate: vi.fn((input: { name: string }) => ok(column({ id: "new", name: input.name }))),
-    columnUpdate: vi.fn((input: { columnId: string }) =>
-      ok(current.columns.find((c) => c.id === input.columnId)!),
-    ),
+    // Updates land in the board the next reload returns, like the daemon.
+    columnUpdate: vi.fn((input: { columnId: string } & Partial<WorkColumn>) => {
+      const index = current.columns.findIndex((c) => c.id === input.columnId);
+      const { columnId: _id, ...patch } = input;
+      current.columns[index] = { ...current.columns[index], ...patch };
+      return ok(current.columns[index]);
+    }),
     columnDelete: vi.fn(() => ok({ deleted: "x", movedTickets: 0 })),
     columnSend: vi.fn(() =>
       ok({
@@ -163,7 +167,7 @@ function fakeBridge(board = boardFixture()) {
   return bridge;
 }
 
-async function mount(bridge = fakeBridge(), onOpenSession = vi.fn(), listSessions = vi.fn(async () => [])) {
+async function mount(bridge = fakeBridge(), onOpenSession = vi.fn(), listSessions: () => Promise<unknown[]> = vi.fn(async () => [])) {
   const view = render(
     <TooltipProvider>
     <WorkPage
@@ -270,6 +274,13 @@ describe("Work board", () => {
       expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", message: "Check {ticket.id} now" }),
     );
     expect(await within(review).findByText("Review PR #648 for DRG-42")).toBeTruthy();
+    // The saved message coming back from the daemon does not clear the
+    // preview it produced, nor the draft.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(within(review).getByTestId("work-column-preview")).toBeTruthy();
+    expect((message as HTMLTextAreaElement).value).toBe("Check {ticket.id} now");
     fireEvent.click(within(review).getByRole("button", { name: "Send now" }));
     await waitFor(() => expect(bridge.columnSend).toHaveBeenCalledWith({ columnId: "review" }));
   });

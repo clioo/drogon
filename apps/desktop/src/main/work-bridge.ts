@@ -6,6 +6,14 @@ import { ipcMain } from "electron";
 import { WORK_OPS, workRequestSchema } from "../shared/work-contract";
 import type { Result } from "../shared/session-contract";
 import { callNative } from "./native-client";
+import { resultSchemas } from "../shared/result-validation";
+
+// The native client refuses any method whose result has no registered
+// schema; the Work methods register theirs here (as daemon-restart does for
+// runtime.shutdown) so the contract lives next to the only caller.
+for (const { method, schema } of Object.values(WORK_OPS)) {
+  (resultSchemas as Record<string, unknown>)[method] = schema;
+}
 
 export const WORK_IPC_CHANNEL = "drogon:work";
 
