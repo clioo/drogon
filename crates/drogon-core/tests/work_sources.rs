@@ -844,3 +844,139 @@ fn github_connects_through_the_gh_login_without_storing_a_token() {
         0
     );
 }
+
+/// A real team's size (the owner's hit "Service disconnected": 351 issues,
+/// 1.9 MB of descriptions): the picker and the board stay under one reply's
+/// 1 MB, and the panel still gets every word.
+#[test]
+fn a_large_linear_team_fits_in_one_reply_and_keeps_whole_descriptions() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "linear", "apiKey": "lin_api_fixture", "apiUrl": fx.url("linear")}),
+    );
+    fx.control(
+        "linear/bulk",
+        json!({"team": "team-ops", "count": 400, "descriptionBytes": 6000}),
+    );
+    let frame = |v: &Value| serde_json::to_vec(v).unwrap().len();
+
+    // The picker: compact rows, no descriptions, all 401 issues.
+    let preview = ctx.ok(
+        "work.import_preview",
+        json!({"provider": "linear", "externalBoardId": "team-ops"}),
+    );
+    assert_eq!(preview["total"], 401);
+    assert_eq!(preview["truncated"], false);
+    assert_eq!(preview["issues"].as_array().unwrap().len(), 401);
+    assert!(preview["issues"][0].get("description").is_none());
+    assert!(
+        frame(&preview) < 1024 * 1024,
+        "preview is {} bytes",
+        frame(&preview)
+    );
+
+    // A board past the budget is cut, and says so.
+    fx.control(
+        "linear/bulk",
+        json!({"team": "team-ops", "count": 2600, "descriptionBytes": 10}),
+    );
+    let big = ctx.ok(
+        "work.import_preview",
+        json!({"provider": "linear", "externalBoardId": "team-ops"}),
+    );
+    assert_eq!(big["total"], 3001);
+    assert_eq!(big["truncated"], true);
+    let shown = big["issues"].as_array().unwrap().len();
+    assert!(shown > 1000 && shown < 3001, "{shown} rows");
+    assert!(
+        frame(&big) < 1024 * 1024,
+        "preview is {} bytes",
+        frame(&big)
+    );
+
+    // The board carries excerpts; one ticket carries the whole text.
+    let keys: Vec<String> = preview["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .take(400)
+        .map(|i| i["key"].as_str().unwrap().to_string())
+        .collect();
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"provider": "linear", "externalBoardId": "team-ops", "issueKeys": keys}),
+    );
+    assert_eq!(imported["imported"], 400);
+    let view = ctx.ok("work.board", json!({"boardId": imported["board"]["id"]}));
+    assert_eq!(view["tickets"].as_array().unwrap().len(), 400);
+    assert!(
+        frame(&view) < 1024 * 1024,
+        "board is {} bytes",
+        frame(&view)
+    );
+    let card = view["tickets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["externalKey"] == "OPS-1006")
+        .unwrap();
+    assert_eq!(card["descriptionTruncated"], true);
+    assert!(card["description"].as_str().unwrap().chars().count() <= 281);
+    let whole = ctx.ok("work.ticket_show", json!({"ticketId": "OPS-1006"}));
+    assert_eq!(whole["descriptionTruncated"], false);
+    assert_eq!(whole["description"].as_str().unwrap().len(), 6000);
+}
+
+/// A gh login without read:project (GitHub's INSUFFICIENT_SCOPES) or a
+/// GraphQL rate limit still lists the repositories, with the reason.
+#[test]
+fn github_without_project_access_still_lists_repositories_and_says_why() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "github", "apiKey": "ghp_fixture", "apiUrl": fx.url("github")}),
+    );
+    fx.control(
+        "github/projects-error",
+        json!({"type": "INSUFFICIENT_SCOPES", "message": "Your token has not been granted the required scopes to execute this query. The 'id' field requires one of the following scopes: ['read:project']"}),
+    );
+    let boards = ctx.ok("work.provider_boards", json!({"provider": "github"}));
+    let ids: Vec<&str> = boards["boards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["repo:clioo/drogon", "repo:octo-fixture/notes"]);
+    let warning = boards["warnings"][0].as_str().unwrap();
+    assert!(
+        warning.contains("gh auth refresh -s read:project,project"),
+        "{warning}"
+    );
+    // A repository still imports and syncs.
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"provider": "github", "externalBoardId": "repo:clioo/drogon", "all": true}),
+    );
+    assert_eq!(imported["imported"], 5);
+    fx.control(
+        "github/projects-error",
+        json!({"type": "RATE_LIMIT", "message": "API rate limit already exceeded for user ID 1."}),
+    );
+    let limited = ctx.ok("work.provider_boards", json!({"provider": "github"}));
+    assert!(
+        limited["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("API rate limit already exceeded")
+    );
+    fx.control("github/projects-error", json!({"message": null}));
+    let fine = ctx.ok("work.provider_boards", json!({"provider": "github"}));
+    assert_eq!(fine["warnings"], json!([]));
+    assert_eq!(fine["boards"].as_array().unwrap().len(), 4);
+}

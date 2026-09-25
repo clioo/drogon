@@ -28,6 +28,16 @@ pub(crate) const NO_STATUS: &str = "none";
 pub(crate) struct GithubProvider {
     token: String,
     api_url: String,
+    warnings: std::cell::RefCell<Vec<String>>,
+}
+
+/// Why Projects could not be listed, and what to do about it.
+pub(crate) fn projects_warning(message: &str) -> String {
+    if message.contains("scope") {
+        "Your GitHub login can't read Projects: it needs the read:project scope. Run `gh auth refresh -s read:project,project` (or use a token with project access), then open this list again. Repositories are listed below.".to_string()
+    } else {
+        format!("GitHub Projects could not be listed ({message}). Repositories are listed below.")
+    }
 }
 
 enum BoardRef<'a> {
@@ -135,6 +145,7 @@ impl GithubProvider {
                 .unwrap_or_else(|| DEFAULT_API_URL.to_string())
                 .trim_end_matches('/')
                 .to_string(),
+            warnings: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -525,8 +536,16 @@ impl WorkProvider for GithubProvider {
         ("default".into(), web)
     }
 
+    fn board_warnings(&self) -> Vec<String> {
+        self.warnings.borrow().clone()
+    }
+
     fn list_boards(&self) -> ProviderResult<Vec<ExtBoard>> {
-        let data = self.gql(
+        self.warnings.borrow_mut().clear();
+        // Projects need a scope a gh login often lacks (read:project), and
+        // GraphQL has its own rate limit: either way the repositories are
+        // still listed, with the reason Projects are missing.
+        let projects = self.gql(
             "query DrogonGhProjects { viewer { login
                projectsV2(first: 50) { nodes { id number title closed owner { ... on User { login } ... on Organization { login } }
                  fields(first: 30) { nodes { __typename } } } }
@@ -534,7 +553,16 @@ impl WorkProvider for GithubProvider {
                  projectsV2(first: 50) { nodes { id number title closed owner { ... on User { login } ... on Organization { login } }
                    fields(first: 30) { nodes { __typename } } } } } } } }",
             json!({}),
-        )?;
+        );
+        let data = match projects {
+            Ok(data) => data,
+            Err(error) => {
+                self.warnings
+                    .borrow_mut()
+                    .push(projects_warning(&error.message));
+                json!({ "viewer": {} })
+            }
+        };
         let viewer = &data["viewer"];
         let mut projects: Vec<Value> = viewer["projectsV2"]["nodes"]
             .as_array()
@@ -819,6 +847,18 @@ impl WorkProvider for GithubProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projects_warnings_name_the_missing_scope() {
+        assert!(
+            projects_warning("Your token has not been granted the required scopes")
+                .contains("gh auth refresh -s read:project,project")
+        );
+        assert!(
+            projects_warning("API rate limit already exceeded")
+                .contains("(API rate limit already exceeded)")
+        );
+    }
 
     #[test]
     fn board_ids_name_a_project_or_a_repository() {

@@ -117,7 +117,13 @@ export function WorkTicketPanel({
   const imported = Boolean(ticket.externalKey);
   const [tab, setTab] = useState<PanelTab>("details");
   const [title, setTitle] = useState(ticket.title);
-  const [description, setDescription] = useState(ticket.description);
+  // The board carries a description excerpt; the whole text comes with
+  // ticketShow. Until it does, a truncated description is shown, not edited.
+  const [loaded, setLoaded] = useState<{ id: string; description: string } | null>(null);
+  const fullDescription =
+    loaded?.id === ticket.id ? loaded.description : ticket.descriptionTruncated ? null : ticket.description;
+  const [description, setDescription] = useState(fullDescription ?? ticket.description);
+  const [expanded, setExpanded] = useState(false);
   const [pr, setPr] = useState(ticket.prUrl ?? (ticket.prNumber ? `#${ticket.prNumber}` : ""));
   const [source, setSource] = useState(ticket.sourceUrl ?? "");
   const [next, setNext] = useState(ticket.nextStep);
@@ -129,16 +135,17 @@ export function WorkTicketPanel({
 
   useEffect(() => {
     setTitle(ticket.title);
-    setDescription(ticket.description);
+    setDescription(fullDescription ?? ticket.description);
     setPr(ticket.prUrl ?? (ticket.prNumber ? `#${ticket.prNumber}` : ""));
     setSource(ticket.sourceUrl ?? "");
     setNext(ticket.nextStep);
-  }, [ticket.id, ticket.title, ticket.description, ticket.prUrl, ticket.prNumber, ticket.sourceUrl, ticket.nextStep]);
+  }, [ticket.id, ticket.title, ticket.description, fullDescription, ticket.prUrl, ticket.prNumber, ticket.sourceUrl, ticket.nextStep]);
 
   useEffect(() => {
     let cancelled = false;
     void bridge.ticketShow({ ticketId: ticket.id }).then((result) => {
       if (cancelled || !result.ok) return;
+      setLoaded({ id: ticket.id, description: result.result.description });
       setSends(result.result.sends ?? []);
       setActivity(result.result.activity ?? []);
     });
@@ -351,7 +358,16 @@ export function WorkTicketPanel({
         ) : null}
         {imported ? (
           ticket.description ? (
-            <p className="line-clamp-6 whitespace-pre-wrap text-sm text-muted-foreground">{ticket.description}</p>
+            <div className="text-sm text-muted-foreground">
+              <p className={`whitespace-pre-wrap ${expanded ? "" : "line-clamp-6"}`} data-testid="work-panel-description">
+                {fullDescription ?? ticket.description}
+              </p>
+              {(fullDescription ?? ticket.description).length > 280 ? (
+                <button type="button" className="mt-1 text-xs underline" onClick={() => setExpanded((v) => !v)}>
+                  {expanded ? "Show less" : "Show all"}
+                </button>
+              ) : null}
+            </div>
           ) : null
         ) : (
           <Textarea
@@ -359,8 +375,9 @@ export function WorkTicketPanel({
             className="min-h-[72px]"
             placeholder="Description"
             value={description}
+            disabled={fullDescription === null}
             onChange={(event) => setDescription(event.target.value)}
-            onBlur={() => saveIfChanged(description, ticket.description, { description })}
+            onBlur={() => fullDescription !== null && saveIfChanged(description, fullDescription, { description })}
           />
         )}
         {imported ? (

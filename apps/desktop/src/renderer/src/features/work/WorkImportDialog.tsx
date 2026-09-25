@@ -85,6 +85,7 @@ export function WorkImportDialog({
   const [needsConnect, setNeedsConnect] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [boards, setBoards] = useState<WorkProviderBoard[] | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [external, setExternal] = useState<string | null>(null);
   const [preview, setPreview] = useState<WorkImportPreview | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
@@ -105,8 +106,10 @@ export function WorkImportDialog({
     let cancelled = false;
     void bridge.providerBoards({ provider }).then((result) => {
       if (cancelled) return;
-      if (result.ok) setBoards(result.result.boards);
-      else if (/_not_connected$/.test(result.error.code)) setNeedsConnect(true);
+      if (result.ok) {
+        setBoards(result.result.boards);
+        setWarnings(result.result.warnings ?? []);
+      } else if (/_not_connected$/.test(result.error.code)) setNeedsConnect(true);
       else setError(result.error.message);
     });
     return () => {
@@ -193,6 +196,16 @@ export function WorkImportDialog({
           </p>
         ) : null}
 
+        {!external && warnings.length ? (
+          <div className="space-y-1" data-testid="work-import-warnings">
+            {warnings.map((w) => (
+              <p key={w} className="rounded-md border border-amber-500/40 bg-amber-500/8 px-3 py-2 text-xs text-amber-700 dark:text-amber-300" role="status">
+                {w}
+              </p>
+            ))}
+          </div>
+        ) : null}
+
         {needsConnect && !external ? (
           <WorkSourceConnectForm
             source={source}
@@ -251,6 +264,11 @@ export function WorkImportDialog({
             <p className="text-xs text-muted-foreground" data-testid="work-import-columns">
               Columns: {preview.columns.map((c) => c.name).join(" · ")}
             </p>
+            {preview.truncated ? (
+              <p className="text-xs text-amber-600 dark:text-amber-400" role="status">
+                Showing {preview.issues.length} of {preview.total} issues. Import these, then import more later.
+              </p>
+            ) : null}
             <div className="max-h-[340px] space-y-4 overflow-y-auto pr-1" aria-label="Issues">
               {groups.map((group) => {
                 const selectable = group.issues.filter((i) => !i.importedTicketId).map((i) => i.key);

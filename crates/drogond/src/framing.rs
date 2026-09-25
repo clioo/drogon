@@ -33,14 +33,24 @@ pub fn read_frame(reader: &mut dyn BufRead) -> io::Result<Option<Vec<u8>>> {
 pub fn write_response(writer: &mut impl Write, response: &Response) -> io::Result<()> {
     let mut bytes =
         serde_json::to_vec(response).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    // Defensive: the same bound the wire applies to requests should hold
-    // for what this side ever writes, so a bug that builds an oversized
-    // result never silently produces a frame no compliant reader accepts.
+    // The same bound the wire applies to requests holds for what this side
+    // writes: an oversized result is replaced by an error answering the same
+    // request, so the caller learns why instead of seeing the connection
+    // drop ("service disconnected").
     if bytes.len() > MAX_FRAME_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "refusing to write a response frame exceeding MAX_FRAME_BYTES",
-        ));
+        let refusal = Response::failure(
+            response.request_id.clone(),
+            drogon_protocol::RpcError::new(
+                "response_too_large",
+                format!(
+                    "the reply ({:.1} MB) is over the {} MB limit of one answer; narrow the request",
+                    bytes.len() as f64 / (1024.0 * 1024.0),
+                    MAX_FRAME_BYTES / (1024 * 1024)
+                ),
+            ),
+        );
+        bytes = serde_json::to_vec(&refusal)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     }
     bytes.push(b'\n');
     writer.write_all(&bytes)
@@ -66,6 +76,24 @@ mod tests {
         let mut reader = Cursor::new(body);
         let frame = read_frame(&mut reader).unwrap().unwrap();
         assert_eq!(frame.len(), MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn an_oversized_reply_becomes_an_error_for_the_same_request() {
+        let big = serde_json::json!({ "blob": "x".repeat(MAX_FRAME_BYTES + 1) });
+        let mut out = Vec::new();
+        write_response(&mut out, &Response::success("req-1", big)).unwrap();
+        assert!(out.len() < 1024, "the refusal is small");
+        let answer: serde_json::Value = serde_json::from_slice(&out[..out.len() - 1]).unwrap();
+        assert_eq!(answer["requestId"], "req-1");
+        assert_eq!(answer["ok"], false);
+        assert_eq!(answer["error"]["code"], "response_too_large");
+        assert!(
+            answer["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("over the 1 MB limit")
+        );
     }
 
     #[test]

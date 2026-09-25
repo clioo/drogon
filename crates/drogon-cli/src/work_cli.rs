@@ -1424,6 +1424,22 @@ fn render_boards(board: &Value) -> String {
 }
 
 fn render_provider_boards(v: &Value) -> String {
+    let notes: Vec<String> = v["warnings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|w| w.as_str().map(|w| format!("note: {w}")))
+        .collect();
+    let listed = render_provider_board_rows(v);
+    if notes.is_empty() {
+        listed
+    } else {
+        format!("{}\n{listed}", notes.join("\n"))
+    }
+}
+
+fn render_provider_board_rows(v: &Value) -> String {
     let boards = v["boards"].as_array().cloned().unwrap_or_default();
     if boards.is_empty() {
         return "The provider has no boards you can see.".to_string();

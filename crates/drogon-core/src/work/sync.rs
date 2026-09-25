@@ -33,6 +33,8 @@ use super::*;
 
 pub(super) const LOCAL_BOARD: &str = "local";
 pub(crate) const SYNC_INTERVAL_MS: i64 = 5 * 60_000;
+/// What the import picker's issue rows may take of the 1 MB reply.
+pub(super) const PREVIEW_BUDGET_BYTES: usize = 700 * 1024;
 
 #[derive(Clone, Debug)]
 pub(super) struct Board {
@@ -1148,7 +1150,9 @@ impl Engine {
                 row
             })
             .collect();
-        Ok(json!({ "provider": provider.kind(), "boards": rows }))
+        Ok(
+            json!({ "provider": provider.kind(), "boards": rows, "warnings": provider.board_warnings() }),
+        )
     }
 
     /// `work.import_preview`: a provider board's columns, sprints and
@@ -1190,20 +1194,34 @@ impl Engine {
             .collect::<Result<_, _>>()
             .map_err(error::from_sqlite)?
         };
-        let issues: Vec<Value> = issues
-            .iter()
-            .map(|i| {
-                let mut row = serde_json::to_value(i).unwrap();
-                row["importedTicketId"] = json!(imported.get(&i.key));
-                row
-            })
-            .collect();
+        // The picker needs keys, titles, statuses and sprints, not
+        // descriptions (a real team's run to megabytes): rows are compact,
+        // and a board past the reply budget is cut with `truncated` (narrow
+        // it with a scope).
+        let total = issues.len();
+        let mut rows: Vec<Value> = Vec::new();
+        let mut used = 0usize;
+        for i in &issues {
+            let mut row = serde_json::to_value(i).unwrap();
+            if let Some(object) = row.as_object_mut() {
+                object.remove("description");
+                object.remove("updated");
+            }
+            row["importedTicketId"] = json!(imported.get(&i.key));
+            used += row.to_string().len() + 1;
+            if used > PREVIEW_BUDGET_BYTES {
+                break;
+            }
+            rows.push(row);
+        }
         Ok(json!({
             "provider": provider.kind(),
             "board": board,
             "columns": columns,
             "sprints": sprints,
-            "issues": issues,
+            "truncated": rows.len() < total,
+            "total": total,
+            "issues": rows,
         }))
     }
 

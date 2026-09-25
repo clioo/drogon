@@ -163,6 +163,8 @@ export type WorkTicket = {
   createdAt: number;
   updatedAt: number;
   sessions: WorkSession[];
+  /** The board listing carries an excerpt; `ticketShow` the whole text. */
+  descriptionTruncated?: boolean;
   delivery?: WorkDelivery | null;
   sends?: WorkSend[];
   activity?: WorkActivity[];
@@ -251,6 +253,9 @@ export type WorkImportPreview = {
   columns: { name: string; statuses: WorkBoardStatus[] }[];
   sprints: WorkSprint[];
   issues: WorkProviderIssue[];
+  /** The board had more issues than one reply carries. */
+  truncated?: boolean;
+  total?: number;
 };
 
 export type WorkSyncResult = {
@@ -340,7 +345,10 @@ export interface WorkBridge {
   unlinkSession(input: { ticketId: string; sessionId: string }): Promise<Result<WorkTicket>>;
   sessionOpen(input: { ticketId: string; sessionId: string }): Promise<Result<WorkSessionOpen>>;
   // Imported boards (`work.boards.v1`).
-  providerBoards(input?: { provider?: string; siteId?: string }): Promise<Result<{ provider: string; boards: WorkProviderBoard[] }>>;
+  providerBoards(input?: {
+    provider?: string;
+    siteId?: string;
+  }): Promise<Result<{ provider: string; boards: WorkProviderBoard[]; warnings?: string[] }>>;
   importPreview(input: { externalBoardId: string; provider?: string; siteId?: string; scope?: string }): Promise<Result<WorkImportPreview>>;
   boardImport(input: {
     externalBoardId: string;

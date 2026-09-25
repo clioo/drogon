@@ -123,6 +123,11 @@ pub(crate) trait WorkProvider {
     /// reconnects) and the site's web URL.
     fn site(&self) -> (String, String);
     fn list_boards(&self) -> ProviderResult<Vec<ExtBoard>>;
+    /// What the last `list_boards` could not list, in the owner's words
+    /// (a missing permission, a rate limit); the rest was listed.
+    fn board_warnings(&self) -> Vec<String> {
+        Vec::new()
+    }
     fn board(&self, board_id: &str) -> ProviderResult<ExtBoard>;
     fn board_columns(&self, board_id: &str) -> ProviderResult<Vec<ExtColumn>>;
     /// Every status the site knows (what a column can be mapped to).

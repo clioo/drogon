@@ -10,9 +10,13 @@
 // Tests change "Linear"/"GitHub" from the outside (a teammate's edit)
 // through the unauthenticated control endpoints:
 //
-//   POST /__fixture/linear/issue/<identifier>  {state, cycle, title, deleted}
+//   POST /__fixture/linear/issue/<identifier>  {state, cycle, title, description, deleted}
+//   POST /__fixture/linear/bulk                {team, count, descriptionBytes}
+//        (a real team's size: many issues with long descriptions)
 //   POST /__fixture/github/item                {project, key, status, iteration, deleted}
 //   POST /__fixture/github/issue               {key, state, title, deleted}
+//   POST /__fixture/github/projects-error      {type, message} (null clears): the
+//        Projects query fails like a gh login without read:project
 //
 // Usage: node fake-sources-server.mjs [--data <json>] [--port <n>] [--log <jsonl>]
 // Prints `LISTEN <port>` once ready.
@@ -121,14 +125,16 @@ function linearGraphql(op, v) {
       if (!team) return { data: { team: null }, errors: [{ message: 'Entity not found: Team' }] }
       const all = linear.issues.filter((i) => i.team === team.id && !i.deleted)
       const start = v.after ? Number(v.after) : 0
-      const page = all.slice(start, start + PAGE)
-      const next = start + PAGE < all.length
+      // Small pages exercise paging; a bulk-seeded team pages like Linear.
+      const size = all.length > 50 ? 100 : PAGE
+      const page = all.slice(start, start + size)
+      const next = start + size < all.length
       return {
         data: {
           team: {
             issues: {
               nodes: page.map(linearIssueJson),
-              pageInfo: { hasNextPage: next, endCursor: next ? String(start + PAGE) : null },
+              pageInfo: { hasNextPage: next, endCursor: next ? String(start + size) : null },
             },
           },
         },
@@ -251,6 +257,7 @@ function ghGraphql(op, v) {
     case 'DrogonGhViewer':
       return { data: { viewer: github.viewer } }
     case 'DrogonGhProjects':
+      if (github.projectsError) return { data: { viewer: null }, errors: [github.projectsError] }
       return {
         data: {
           viewer: {
@@ -377,8 +384,31 @@ async function control(req, res, path) {
     }
     if ('cycle' in body) issue.cycle = body.cycle === null ? null : team.cycles.find((c) => c.number === body.cycle)?.id ?? null
     if (typeof body.title === 'string') issue.title = body.title
+    if (typeof body.description === 'string') issue.description = body.description
     if (typeof body.deleted === 'boolean') issue.deleted = body.deleted
     return send(res, 200, { ok: true })
+  }
+  if (path === '/__fixture/linear/bulk') {
+    const team = linearTeam(body.team)
+    if (!team) return send(res, 404, { error: 'no such team' })
+    const states = team.states.map((s) => s.id)
+    const text = 'Context for the agent. '.repeat(Math.ceil((body.descriptionBytes ?? 0) / 23)).slice(0, body.descriptionBytes ?? 0)
+    for (let n = 0; n < (body.count ?? 0); n += 1) {
+      const number = 1000 + linear.issues.length
+      linear.issues.push({
+        id: `bulk-${number}`,
+        identifier: `${team.key}-${number}`,
+        team: team.id,
+        title: `Bulk issue ${number}`,
+        description: text,
+        priority: 'Medium',
+        assignee: null,
+        state: states[n % states.length],
+        cycle: null,
+        labels: [],
+      })
+    }
+    return send(res, 200, { ok: true, issues: linear.issues.length })
   }
   if (path === '/__fixture/github/item') {
     const item = github.items.find((i) => i.project === body.project && i.issue === body.key)
@@ -387,6 +417,10 @@ async function control(req, res, path) {
     if ('status' in body) item.status = body.status === null ? null : project.status.options.find((o) => o.name === body.status)?.id
     if ('iteration' in body) item.iteration = body.iteration === null ? null : project.iteration.iterations.find((i) => i.title === body.iteration)?.id
     if (typeof body.deleted === 'boolean') item.deleted = body.deleted
+    return send(res, 200, { ok: true })
+  }
+  if (path === '/__fixture/github/projects-error') {
+    github.projectsError = body.message ? { type: body.type ?? 'INSUFFICIENT_SCOPES', message: body.message } : null
     return send(res, 200, { ok: true })
   }
   if (path === '/__fixture/github/issue') {

@@ -55,6 +55,17 @@ const MAX_TEXT: usize = 20_000;
 const MAX_MESSAGE: usize = 16_000;
 const MAX_URL: usize = 2048;
 const MAX_SENDS_PAGE: i64 = 200;
+/// How much of each description the board listing carries.
+const BOARD_DESCRIPTION_CHARS: usize = 280;
+
+/// The first `max` characters of `text` (at a character boundary), and
+/// whether anything was cut.
+fn excerpt(text: &str, max: usize) -> (String, bool) {
+    match text.char_indices().nth(max) {
+        Some((cut, _)) => (format!("{}…", text[..cut].trim_end()), true),
+        None => (text.to_string(), false),
+    }
+}
 
 pub(crate) const ICONS: &[&str] = &[
     "backlog",
@@ -1060,6 +1071,13 @@ impl Engine {
     }
 
     fn ticket_json(&self, ticket: &Ticket) -> Result<Value, RpcError> {
+        self.ticket_json_with(ticket, true)
+    }
+
+    /// A ticket as JSON. The board lists every ticket at once, so it carries
+    /// a description excerpt (`descriptionTruncated`); one ticket carries
+    /// all of it.
+    fn ticket_json_with(&self, ticket: &Ticket, full: bool) -> Result<Value, RpcError> {
         let (ids, labels, project, ext) = {
             let conn = self.db.lock().unwrap();
             let ids = linked_session_ids(&conn, &ticket.id)?;
@@ -1069,6 +1087,11 @@ impl Engine {
                 None => None,
             };
             (ids, labels, project, sync::ticket_ext_json(&conn, ticket)?)
+        };
+        let (description, truncated) = if full {
+            (ticket.description.clone(), false)
+        } else {
+            excerpt(&ticket.description, BOARD_DESCRIPTION_CHARS)
         };
         let mut sessions = self.work_session_rows(&ids)?;
         for row in &mut sessions {
@@ -1080,7 +1103,8 @@ impl Engine {
             "id": ticket.id,
             "key": ticket.key,
             "title": ticket.title,
-            "description": ticket.description,
+            "description": description,
+            "descriptionTruncated": truncated,
             "projectId": ticket.project_id,
             "projectName": project,
             "workspaceId": ticket.workspace_id,
@@ -1155,7 +1179,7 @@ impl Engine {
         };
         let tickets = tickets
             .iter()
-            .map(|t| self.ticket_json(t))
+            .map(|t| self.ticket_json_with(t, false))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(json!({
             "columns": columns,
@@ -2346,6 +2370,13 @@ mod tests {
         assert_eq!(normalize_schedule("*/5 * * * *").unwrap(), "*/5 * * * *");
         assert!(normalize_schedule("90m").is_err());
         assert!(normalize_schedule("nonsense").is_err());
+    }
+
+    #[test]
+    fn excerpts_cut_at_a_character_boundary() {
+        assert_eq!(excerpt("short", 10), ("short".to_string(), false));
+        assert_eq!(excerpt("héllo wörld", 6), ("héllo…".to_string(), true));
+        assert_eq!(excerpt("", 3), (String::new(), false));
     }
 
     #[test]

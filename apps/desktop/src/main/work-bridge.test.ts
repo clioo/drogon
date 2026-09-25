@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({ ipcMain: { handle: vi.fn() } }));
-vi.mock("./native-client", () => ({ callNative: vi.fn() }));
+vi.mock("./native-client", () => ({ callNative: vi.fn(), callNativeHold: vi.fn() }));
 
-import { dispatchWorkRequest } from "./work-bridge";
+import { dispatchWorkRequest, WORK_SLOW_OPS } from "./work-bridge";
 
 const column = {
   id: "c1", name: "Review", icon: "review", position: 2, sendOnEnter: true, cron: null,
@@ -35,7 +35,7 @@ describe("work bridge", () => {
       "boardPush", "boardDelete", "ticketPush", "ticketResolve", "ticketSprint", "ticketSessionStart",
       "ticketSessionRename", "sources", "sourceUpdate", "sourceConnect", "sourceDisconnect",
     ]) {
-      await dispatchWorkRequest({ op, params: {} }, call);
+      await dispatchWorkRequest({ op, params: {} }, call, call);
     }
     expect(seen).toEqual([
       "work.board", "work.ticket_show", "work.sends", "work.column_preview", "work.column_create",
@@ -87,10 +87,8 @@ describe("work bridge", () => {
       vi.fn(async () => ({ ok: true as const, result: board })),
     );
     expect(ok).toEqual({ ok: true, result: board });
-    const broken = await dispatchWorkRequest(
-      { op: "boardSync", params: { boardId: "b1" } },
-      vi.fn(async () => ({ ok: true as const, result: { board: board.board, updated: "3" } })),
-    );
+    const brokenSync = vi.fn(async () => ({ ok: true as const, result: { board: board.board, updated: "3" } }));
+    const broken = await dispatchWorkRequest({ op: "boardSync", params: { boardId: "b1" } }, brokenSync, brokenSync);
     expect(broken).toMatchObject({ ok: false, error: { code: "internal_error" } });
   });
 
@@ -98,5 +96,25 @@ describe("work bridge", () => {
     const legacy = { columns: [column], tickets: [], projects: [] };
     const result = await dispatchWorkRequest({ op: "board" }, vi.fn(async () => ({ ok: true as const, result: legacy })));
     expect(result).toEqual({ ok: true, result: legacy });
+  });
+
+  it("sends network-bound ops over a long-deadline connection and the rest over the pool", async () => {
+    const fast = vi.fn(async () => ({ ok: true as const, result: column }));
+    const slow = vi.fn(async () => ({ ok: false as const, error: { code: "x", message: "x", retryable: false } }));
+    await dispatchWorkRequest({ op: "columnUpdate", params: { columnId: "c1" } }, fast, slow);
+    expect(fast).toHaveBeenCalledTimes(1);
+    expect(slow).not.toHaveBeenCalled();
+    await dispatchWorkRequest({ op: "importPreview", params: { externalBoardId: "t" } }, fast, slow);
+    expect(slow).toHaveBeenCalledWith("work.import_preview", { externalBoardId: "t" });
+    expect(fast).toHaveBeenCalledTimes(1);
+    for (const op of ["providerBoards", "boardImport", "boardSync", "boardPush", "ticketPush", "sourceConnect"]) {
+      expect(WORK_SLOW_OPS.has(op)).toBe(true);
+    }
+  });
+
+  it("validates a long-deadline answer against the contract too", async () => {
+    const slow = vi.fn(async () => ({ ok: true as const, result: { issues: "nope" } }));
+    const result = await dispatchWorkRequest({ op: "importPreview", params: {} }, vi.fn(), slow);
+    expect(result).toMatchObject({ ok: false, error: { code: "internal_error" } });
   });
 });

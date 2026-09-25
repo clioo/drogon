@@ -418,3 +418,79 @@ describe("source vocabulary", () => {
     expect(importLabel(initialSources()[2]!)).toBe("Import a GitHub project or repository");
   });
 });
+
+describe("long descriptions", () => {
+  test("the panel shows and edits the whole description, never the board's excerpt", async () => {
+    const whole = `${"Resume context. ".repeat(40)}The end.`;
+    const excerpt = `${whole.slice(0, 280)}…`;
+    const local: WorkTicket = {
+      ...linearTicket(),
+      id: "t9",
+      key: "DRG-9",
+      provider: null,
+      externalKey: null,
+      boardId: null,
+      sync: "local",
+      columnId: "todo",
+      description: excerpt,
+      descriptionTruncated: true,
+    };
+    let release: (() => void) | null = null;
+    const bridge = {
+      ...fakeBridge(),
+      board: vi.fn(() =>
+        ok({
+          columns: [col({ id: "todo", name: "To do" })],
+          tickets: [local],
+          projects: [],
+          board: LOCAL,
+          boards: [LOCAL],
+          view: { kind: "all" as const, readOnly: false, promptsPaused: false, sprints: [] },
+        }),
+      ),
+      ticketShow: vi.fn(
+        () =>
+          new Promise<Result<WorkTicket>>((resolve) => {
+            release = () => resolve({ ok: true, result: { ...local, description: whole, descriptionTruncated: false, sends: [], activity: [] } });
+          }),
+      ),
+      ticketUpdate: vi.fn(() => ok(local)),
+    };
+    render(
+      <TooltipProvider>
+        <WorkPage bridge={bridge as unknown as WorkBridge} workspaces={[]} onOpenSession={vi.fn()} onOpenExternal={vi.fn()} listSessions={vi.fn(async () => []) as never} />
+      </TooltipProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Open DRG-9/ }));
+    const panel = await screen.findByRole("complementary", { name: "Ticket DRG-9" });
+    const box = within(panel).getByRole("textbox", { name: "Description" }) as HTMLTextAreaElement;
+    // Until the whole text arrives the excerpt is read-only: a blur saves nothing.
+    expect(box.disabled).toBe(true);
+    fireEvent.blur(box);
+    expect(bridge.ticketUpdate).not.toHaveBeenCalled();
+    await act(async () => release?.());
+    await waitFor(() => expect(box.disabled).toBe(false));
+    expect(box.value).toBe(whole);
+    fireEvent.change(box, { target: { value: `${whole} More.` } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(bridge.ticketUpdate).toHaveBeenCalledWith({ ticketId: "t9", description: `${whole} More.` }));
+  });
+});
+
+describe("GitHub without project access", () => {
+  test("the import dialog lists repositories and says how to enable Projects", async () => {
+    const bridge = fakeBridge();
+    bridge.providerBoards.mockImplementation(() =>
+      ok({
+        provider: "github",
+        boards: [{ id: "repo:clioo/drogon", name: "clioo/drogon issues", kind: "kanban", projectKey: "clioo/drogon", projectName: "Repository issues", importedBoardId: null }],
+        warnings: ["Your GitHub login can't read Projects: it needs the read:project scope. Run `gh auth refresh -s read:project,project`."],
+      }) as never,
+    );
+    await mount(bridge);
+    fireEvent.click(within(await screen.findByTestId("work-sync-card")).getByRole("button", { name: /Import a GitHub project or repository/ }));
+    const dialog = await screen.findByTestId("work-import-dialog");
+    expect((await within(dialog).findByTestId("work-import-warnings")).textContent).toContain("gh auth refresh -s read:project,project");
+    expect(within(dialog).getByRole("button", { name: "Choose clioo/drogon issues" })).toBeTruthy();
+  });
+});
