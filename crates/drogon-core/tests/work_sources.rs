@@ -823,6 +823,7 @@ fn github_connects_through_the_gh_login_without_storing_a_token() {
     let before = source(&ctx.ok("work.sources", json!({})), "github").clone();
     assert_eq!(before["connected"], true);
     assert_eq!(before["via"], "gh");
+    assert_eq!(before["account"], Value::Null, "unknown until connected");
     let connected = ctx.ok(
         "work.source_connect",
         json!({"provider": "github", "apiUrl": fx.url("github")}),

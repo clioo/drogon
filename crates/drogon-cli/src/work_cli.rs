@@ -757,6 +757,7 @@ fn render_source(s: &Value) -> String {
         match (s["account"].as_str(), s["via"].as_str()) {
             (Some(account), Some("gh")) => format!("connected as {account} (gh login)"),
             (Some(account), _) => format!("connected as {account}"),
+            (None, Some("gh")) => "connected (gh login)".to_string(),
             _ => "connected".to_string(),
         }
     } else {
@@ -769,7 +770,7 @@ fn render_source(s: &Value) -> String {
         }
     };
     let mut line = format!(
-        "{}  {}  — boards: {}, sprints: {}s, {} imported",
+        "{}  {}  — {} with {}s, {} imported",
         text(&s["name"]),
         state,
         s["boardsTerm"].as_str().unwrap_or("boards"),

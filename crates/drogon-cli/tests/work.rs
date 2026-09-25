@@ -822,7 +822,12 @@ fn sources_are_listed_toggled_connected_and_a_linear_team_imported_from_the_cli(
         listed.contains("Jira  not connected (connect Jira on the Tasks page)"),
         "{listed}"
     );
-    assert!(listed.contains("Linear  not connected (work source connect --api-key-stdin)  — boards: teams, sprints: cycles"), "{listed}");
+    assert!(
+        listed.contains(
+            "Linear  not connected (work source connect --api-key-stdin)  — teams with cycles"
+        ),
+        "{listed}"
+    );
     assert!(
         listed.contains("GitHub  not connected (gh auth login"),
         "{listed}"
@@ -945,7 +950,9 @@ fn sources_are_listed_toggled_connected_and_a_linear_team_imported_from_the_cli(
         fx.text(&["work", "push", "--ticket", "ENG-2"])
             .contains("ENG-2: pushed.")
     );
-    assert!(fx.text(&["work", "sources"]).contains("Linear  connected as Jon Doe · Drogon Fixture  — boards: teams, sprints: cycles, 1 imported"));
+    assert!(fx.text(&["work", "sources"]).contains(
+        "Linear  connected as Jon Doe · Drogon Fixture  — teams with cycles, 1 imported"
+    ));
 
     let resolve = fx.command(&[
         "work", "ticket", "resolve", "--ticket", "ENG-2", "--keep", "maybe",

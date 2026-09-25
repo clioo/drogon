@@ -326,6 +326,16 @@ describe("Work sources", () => {
     await waitFor(() => expect(bridge.sourceDisconnect).toHaveBeenCalledWith({ provider: "linear" }));
   });
 
+  test("a gh login with no account yet reads as connected through gh", async () => {
+    const bridge = fakeBridge();
+    const sources = initialSources().map((s) => (s.id === "github" ? { ...s, connected: true, via: "gh" } : s));
+    bridge.sources.mockImplementation(() => ok({ sources }));
+    await mount(bridge);
+    fireEvent.click(screen.getByRole("tab", { name: "sources" }));
+    const github = within(await screen.findByTestId("work-sync-sources")).getByRole("listitem", { name: "GitHub" });
+    expect(within(github).getByTestId("work-source-status").textContent).toBe("Connected (gh login)");
+  });
+
   test("GitHub connects with the gh login or a token and an Enterprise URL; Jira points at Tasks", async () => {
     const onOpenTasks = vi.fn();
     const bridge = await mount(fakeBridge(), { onOpenTasks });

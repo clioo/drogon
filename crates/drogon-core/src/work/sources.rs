@@ -282,13 +282,7 @@ impl Engine {
                 Err(e) => (false, None, None, Some(e.message)),
             },
             _ => match self.source_connection(info.id) {
-                Ok(Some(c)) => (
-                    true,
-                    c.account
-                        .or_else(|| (c.via == "gh").then(|| "gh login".to_string())),
-                    Some(c.via),
-                    None,
-                ),
+                Ok(Some(c)) => (true, c.account, Some(c.via), None),
                 Ok(None) => (false, None, None, None),
                 Err(e) => (false, None, None, Some(e.message)),
             },
