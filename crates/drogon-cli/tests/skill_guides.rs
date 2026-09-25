@@ -96,7 +96,7 @@ fn expect_parse(invocation: &str) {
 #[test]
 fn every_backticked_cli_invocation_parses() {
     let guides = canonical_guides();
-    assert_eq!(guides.len(), 2, "exactly the two contracted guides");
+    assert_eq!(guides.len(), 3, "exactly the three contracted guides");
     let mut checked = 0;
     for guide in &guides {
         for span in backticked_spans(guide.markdown) {
@@ -228,6 +228,24 @@ fn guides_cover_the_contracted_surface() {
         assert!(
             orch.markdown.contains(needle),
             "orchestration guide is missing {needle:?}"
+        );
+    }
+    let qa = guides
+        .iter()
+        .find(|guide| guide.name == "feature-qa")
+        .expect("feature-qa guide");
+    for needle in [
+        "orchestrator-status",
+        "test-monitor",
+        "session.forget",
+        "usage-add",
+        "qa-bot-",
+        "drogon-ui.mjs",
+        "A skipped spec is never a pass",
+    ] {
+        assert!(
+            qa.markdown.contains(needle),
+            "feature-qa guide is missing {needle:?}"
         );
     }
 }
@@ -393,7 +411,7 @@ fn skills_list_and_get_work_without_a_runtime() {
         .iter()
         .map(|topic| topic["name"].as_str().expect("topic name"))
         .collect();
-    assert_eq!(names, vec!["drogon-cli", "orchestration"]);
+    assert_eq!(names, vec!["drogon-cli", "feature-qa", "orchestration"]);
     for topic in envelope["topics"].as_array().expect("topics array") {
         assert!(topic["description"].as_str().is_some_and(|d| !d.is_empty()));
     }
@@ -407,6 +425,21 @@ fn skills_list_and_get_work_without_a_runtime() {
         &text[..text.len().min(200)]
     );
     assert!(text.contains("terminal wait"), "stdout: {text}");
+
+    let output = run_cli(
+        &data_dir,
+        &["--json", "skills", "get", "--topic", "feature-qa"],
+    );
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let envelope: Value = serde_json::from_str(&stdout(&output)).expect("JSON get");
+    assert_eq!(envelope["name"], Value::from("feature-qa"));
+    assert_eq!(envelope["full"], Value::from(false));
+    assert!(
+        envelope["markdown"]
+            .as_str()
+            .is_some_and(|md| md.contains("# Feature QA")),
+        "JSON get carries the full markdown: {envelope}"
+    );
 
     let output = run_cli(
         &data_dir,
@@ -506,7 +539,7 @@ fn skills_install_dry_run_and_selection_parity() {
     assert_eq!(envelope["global"], Value::from(false));
     assert_eq!(
         envelope["command"],
-        Value::from("npx --yes skills update drogon-cli orchestration --project -y")
+        Value::from("npx --yes skills update drogon-cli feature-qa orchestration --project -y")
     );
 
     // --json on a real run is refused: npx's own stream is not JSON.
@@ -563,7 +596,7 @@ fn normalize(markdown: &str) -> String {
 fn skill_projections_compose_guide_frontmatter_with_stub_bodies() {
     let root = repo_root();
     let guides = canonical_guides();
-    assert_eq!(guides.len(), 2);
+    assert_eq!(guides.len(), 3);
     for guide in guides {
         let guide_source = normalize(
             &std::fs::read_to_string(root.join("skill-guides").join(format!("{}.md", guide.name)))

@@ -48,12 +48,13 @@ function parseFrontmatterValues(raw, sourcePath) {
 const SCRIPT_DIR = import.meta.dirname
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..')
 
-const CANONICAL_GUIDE_NAMES = ['drogon-cli', 'orchestration']
+const CANONICAL_GUIDE_NAMES = ['drogon-cli', 'feature-qa', 'orchestration']
 
 // Why: old discovery stubs can outlive a rename indefinitely, so aliases are
 // a compatibility ledger: add entries for renames, but never remove them.
 const GUIDE_ALIASES = {
   'drogon-cli': [],
+  'feature-qa': [],
   orchestration: []
 }
 
@@ -63,7 +64,7 @@ const GUIDE_ALIASES = {
 // the stub landing to converge — so entries are added as skills convert, never removed.
 // The stub body lives in skill-stubs/<topic>.md; the projection reuses the guide's own
 // frontmatter.
-const STUB_TOPICS = ['drogon-cli', 'orchestration']
+const STUB_TOPICS = ['drogon-cli', 'feature-qa', 'orchestration']
 
 const RUST_MODULE_PATH = path.join(REPO_ROOT, 'crates', 'drogon-cli', 'src', 'bundled_skill_guides.rs')
 // include_str! paths are relative to crates/drogon-cli/src/.
