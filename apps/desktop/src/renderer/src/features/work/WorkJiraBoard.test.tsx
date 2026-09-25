@@ -22,7 +22,7 @@ import type {
 } from "../../../../shared/work-contract";
 import { resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
 import { groupIssues } from "./WorkImportDialog";
-import { initials, priorityLevel, sprintDates, syncHeadline } from "./work-jira";
+import { initials, priorityLevel, sprintDates, syncHeadline } from "./work-sources";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
@@ -313,8 +313,18 @@ function fakeBridge(options: { importedBoards?: boolean } = {}) {
       ok({ ...find(input.ticketId), session: { id: "s9", workspaceId: "ws-1", verdict: "live" } }),
     ),
     ticketSessionRename: vi.fn((input: { ticketId: string }) => ok(find(input.ticketId))),
+    sources: vi.fn(() => ok({ sources: SOURCES })),
+    sourceUpdate: vi.fn(),
+    sourceConnect: vi.fn(),
+    sourceDisconnect: vi.fn(),
   };
 }
+
+const SOURCES = [
+  { id: "jira", name: "Jira", enabled: true, connected: true, account: "https://jira.local", via: "tasks", apiUrl: null, error: null, boardTerm: "board", sprintTerm: "sprint", connect: "tasks", helpUrl: null, boards: 1 },
+  { id: "linear", name: "Linear", enabled: false, connected: false, account: null, via: null, apiUrl: null, error: null, boardTerm: "team", sprintTerm: "cycle", connect: "api_key", helpUrl: "https://linear.app/settings/account/security", boards: 0 },
+  { id: "github", name: "GitHub", enabled: false, connected: false, account: null, via: null, apiUrl: null, error: null, boardTerm: "project or repository", sprintTerm: "iteration", connect: "gh_or_token", helpUrl: null, boards: 0 },
+];
 
 function issue(
   key: string,
@@ -370,16 +380,22 @@ async function openPlatform(bridge = fakeBridge(), onOpenSession = vi.fn()) {
 }
 
 describe("Jira boards on the Work page", () => {
-  test("an empty My work invites a Jira import; the dialog picks a board, then its issues", async () => {
+  test("an empty My work offers the allowed sources; the dialog picks a board, then its issues", async () => {
     const { bridge } = await mount(fakeBridge({ importedBoards: false }));
-    const empty = screen.getByTestId("work-import-empty");
-    expect(within(empty).getByText("Bring in a Jira Scrum board")).toBeTruthy();
-    expect(within(empty).getByText("Sprints, issues, and column prompts in one place")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Import Jira board/ }));
+    const card = await screen.findByTestId("work-sync-card");
+    expect(within(card).getByText("Sync a board")).toBeTruthy();
+    // Only allowed sources are offered (Linear and GitHub are off here).
+    expect(within(card).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "",
+      "Import a Jira boardhttps://jira.local",
+      "Manage sources",
+    ]);
+    fireEvent.click(within(card).getByRole("button", { name: /Import a Jira board/ }));
     const dialog = await screen.findByTestId("work-import-dialog");
     fireEvent.click(await within(dialog).findByRole("button", { name: "Choose Platform Delivery" }));
     await within(dialog).findByText("Columns: To Do · Review");
-    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7" });
+    expect(bridge.providerBoards).toHaveBeenCalledWith({ provider: "jira" });
+    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7", provider: "jira" });
     // Grouped like the board: active sprint, backlog, finished in a past sprint.
     expect(within(dialog).getByRole("region", { name: "Sprint 25 · Active" })).toBeTruthy();
     expect(within(dialog).getByRole("region", { name: "Backlog" })).toBeTruthy();
@@ -394,20 +410,29 @@ describe("Jira boards on the Work page", () => {
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Import 2 issues" }));
     });
-    expect(bridge.boardImport).toHaveBeenCalledWith({ externalBoardId: "7", issueKeys: ["APP-142", "APP-122"], projectId: "p1" });
+    expect(bridge.boardImport).toHaveBeenCalledWith({ provider: "jira", externalBoardId: "7", issueKeys: ["APP-142", "APP-122"], projectId: "p1" });
     // The page moves to the imported board.
     await waitFor(() => expect(bridge.board).toHaveBeenCalledWith({ boardId: "b7" }));
   });
 
-  test("the import dialog shows why Jira cannot be read", async () => {
+  test("the import dialog points an unconnected Jira at the Tasks page, and shows other errors", async () => {
     const bridge = fakeBridge();
     bridge.providerBoards.mockImplementation(() =>
       fail("Jira is not connected. Connect it from the Tasks page first.", "jira_not_connected") as never,
     );
     await mount(bridge);
-    fireEvent.click(screen.getByRole("button", { name: /Import Jira board/ }));
+    openMenu(screen.getByRole("button", { name: "Import board" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Import a Jira board/ }));
     const dialog = await screen.findByTestId("work-import-dialog");
-    expect((await within(dialog).findByRole("alert")).textContent).toContain("Connect it from the Tasks page");
+    expect((await within(dialog).findByTestId("work-connect-jira")).textContent).toContain(
+      "Work uses the Jira connection from the Tasks page.",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    bridge.providerBoards.mockImplementation(() => fail("Jira request timed out.", "jira_timeout") as never);
+    openMenu(screen.getByRole("button", { name: "Import board" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Import a Jira board/ }));
+    const again = await screen.findByTestId("work-import-dialog");
+    expect((await within(again).findByRole("alert")).textContent).toContain("Jira request timed out.");
   });
 
   test("an imported sprint board: pickers, cards with Jira fields and each sync state's action", async () => {
@@ -435,7 +460,7 @@ describe("Jira boards on the Work page", () => {
     expect(within(conflict).getByText("Jira: Done")).toBeTruthy();
     expect(within(conflict).getByText("Yours: In Review")).toBeTruthy();
     fireEvent.click(within(conflict).getByRole("button", { name: "Use Jira's" }));
-    await waitFor(() => expect(bridge.ticketResolve).toHaveBeenCalledWith({ ticketId: "t135", keep: "jira" }));
+    await waitFor(() => expect(bridge.ticketResolve).toHaveBeenCalledWith({ ticketId: "t135", keep: "theirs" }));
     fireEvent.click(within(conflict).getByRole("button", { name: "Push ours" }));
     await waitFor(() => expect(bridge.ticketResolve).toHaveBeenCalledWith({ ticketId: "t135", keep: "ours" }));
 
@@ -489,7 +514,7 @@ describe("Jira boards on the Work page", () => {
     // New ticket on an imported board brings issues in from Jira.
     fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
     await screen.findByText("Columns: To Do · Review");
-    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7" });
+    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7", provider: "jira" });
   });
 
   test("removing the board returns to My work", async () => {

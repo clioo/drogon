@@ -363,7 +363,14 @@ fn wait_bounded(
 /// The fork's `readJiraError`: Jira error bodies are
 /// `{ errorMessages[], errors{}, message }`; fall back to a status-only
 /// sentence when nothing parses.
+#[cfg(test)]
 fn read_jira_error(status: u32, body: &str) -> String {
+    read_service_error(status, body, "Jira")
+}
+
+/// The message a failed JSON API answer carries: Jira's `errorMessages` /
+/// `errors` map, GitHub's `message`, or a GraphQL `errors` list.
+fn read_service_error(status: u32, body: &str, service: &str) -> String {
     if let Ok(data) = serde_json::from_str::<serde_json::Value>(body) {
         let mut messages: Vec<String> = Vec::new();
         if let Some(error_messages) = data
@@ -374,6 +381,14 @@ fn read_jira_error(status: u32, body: &str) -> String {
                 error_messages
                     .iter()
                     .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string),
+            );
+        }
+        if let Some(errors) = data.get("errors").and_then(serde_json::Value::as_array) {
+            messages.extend(
+                errors
+                    .iter()
+                    .filter_map(|e| e.get("message").and_then(serde_json::Value::as_str))
                     .map(str::to_string),
             );
         }
@@ -393,7 +408,7 @@ fn read_jira_error(status: u32, body: &str) -> String {
             return messages.join("; ");
         }
     }
-    format!("Jira request failed ({status})")
+    format!("{service} request failed ({status})")
 }
 
 /// Parse the final header block out of a curl `-D` dump (redirects prepend
@@ -439,6 +454,15 @@ fn http_date_to_delay_secs(value: &str) -> Option<u64> {
 /// Execute one authenticated Jira request and parse the JSON body — the
 /// fork's `jiraRequest`. The full URL rides on the request.
 pub fn jira_request(request: &HttpRequest<'_>) -> Result<serde_json::Value, JiraRequestError> {
+    http_json(request, "Jira")
+}
+
+/// One JSON request over curl to any service (Jira, Linear, GitHub): the
+/// same bounded transport, with `service` naming it in error messages.
+pub(crate) fn http_json(
+    request: &HttpRequest<'_>,
+    service: &str,
+) -> Result<serde_json::Value, JiraRequestError> {
     let mut files = TempFiles::new(&format!("req-{}", next_temp_counter()))
         .map_err(|e| JiraRequestError::Network(format!("cannot stage jira response files: {e}")))?;
     let outcome = spawn_curl(request, &mut files, request.timeout.as_secs().max(1) + 1);
@@ -448,7 +472,7 @@ pub fn jira_request(request: &HttpRequest<'_>) -> Result<serde_json::Value, Jira
     if !(200..300).contains(&status) {
         let (_, retry_after) = parse_last_header_block(&outcome.headers);
         return Err(JiraRequestError::Api {
-            message: read_jira_error(status, &outcome.body),
+            message: read_service_error(status, &outcome.body, service),
             status,
             retry_after,
         });
@@ -456,8 +480,12 @@ pub fn jira_request(request: &HttpRequest<'_>) -> Result<serde_json::Value, Jira
     if status == 204 {
         return Ok(serde_json::Value::Null);
     }
-    serde_json::from_str(&outcome.body)
-        .map_err(|e| JiraRequestError::Network(format!("jira returned a non-JSON response: {e}")))
+    serde_json::from_str(&outcome.body).map_err(|e| {
+        JiraRequestError::Network(format!(
+            "{} returned a non-JSON response: {e}",
+            service.to_lowercase()
+        ))
+    })
 }
 
 /// Serialize the auth failure prefix the fork adds for surfaced site
@@ -506,6 +534,24 @@ mod tests {
         assert_eq!(
             read_jira_error(503, "<html>nope</html>"),
             "Jira request failed (503)"
+        );
+    }
+
+    #[test]
+    fn other_services_errors_read_as_their_own_messages() {
+        let graphql =
+            r#"{"errors": [{"message": "Entity not found: Issue"}, {"message": "second"}]}"#;
+        assert_eq!(
+            read_service_error(400, graphql, "Linear"),
+            "Entity not found: Issue; second"
+        );
+        assert_eq!(
+            read_service_error(401, r#"{"message": "Bad credentials"}"#, "GitHub"),
+            "Bad credentials"
+        );
+        assert_eq!(
+            read_service_error(502, "", "GitHub"),
+            "GitHub request failed (502)"
         );
     }
 

@@ -12,12 +12,12 @@ import {
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
 import type { WorkColumn, WorkTicket } from "../../../../shared/work-contract";
-import { providerLabel, syncHeadline } from "./work-jira";
+import { providerLabel, syncHeadline } from "./work-sources";
 import { WorkColumnIcon } from "./work-icons";
 
 export type WorkSyncHandlers = {
   onPush: (ticket: WorkTicket) => void;
-  onResolve: (ticket: WorkTicket, keep: "jira" | "ours") => void;
+  onResolve: (ticket: WorkTicket, keep: "theirs" | "ours") => void;
   onMapStatus: (ticket: WorkTicket, column: WorkColumn) => void;
 };
 
@@ -92,7 +92,7 @@ export function WorkSyncActions({
           ) : null}
           {ticket.sync === "conflict" ? (
             <>
-              <Button size="xs" variant="outline" className="h-6 bg-background px-2 text-[11px]" onClick={() => handlers.onResolve(ticket, "jira")}>
+              <Button size="xs" variant="outline" className="h-6 bg-background px-2 text-[11px]" onClick={() => handlers.onResolve(ticket, "theirs")}>
                 Use {provider}'s
               </Button>
               <Button size="xs" variant="outline" className="h-6 bg-background px-2 text-[11px]" onClick={() => handlers.onResolve(ticket, "ours")}>

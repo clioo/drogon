@@ -45,7 +45,7 @@ pub fn set_gh_bin_override(path: Option<PathBuf>) {
     *GH_BIN_OVERRIDE.lock().unwrap() = path;
 }
 
-fn gh_bin() -> PathBuf {
+pub(crate) fn gh_bin() -> PathBuf {
     GH_BIN_OVERRIDE
         .lock()
         .unwrap()

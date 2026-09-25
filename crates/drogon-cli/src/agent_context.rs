@@ -1907,7 +1907,8 @@ pub fn all_commands() -> Vec<AgentCommand> {
 /// The Work board verbs (`work.v1`).
 fn work_commands() -> Vec<AgentCommand> {
     const REQUIRES: &str = "Requires work.v1. Columns and tickets accept an id, or a column name / ticket key (DRG-41).";
-    const BOARDS: &str = "Requires work.boards.v1. Boards accept an id or name; tickets an id, Drogon key or provider key (APP-128).";
+    const BOARDS: &str = "Requires work.boards.v1. Boards accept an id or name; tickets an id, Drogon key or source key (APP-128, ENG-12, owner/repo#12).";
+    const SOURCES: &str = "Requires work.sources.v1. Sources: jira, linear, github.";
     vec![
         entry(
             "work board",
@@ -1938,16 +1939,80 @@ fn work_commands() -> Vec<AgentCommand> {
             &["Requires work.boards.v1."],
         ),
         entry(
+            "work sources",
+            &["work", "sources"],
+            "List the ticket sources (Jira, Linear, GitHub): which are allowed and how each is connected",
+            "drogon-cli work sources",
+            &[],
+            &[],
+            &["drogon-cli work sources --json"],
+            &[
+                SOURCES,
+                "Every source starts allowed; a source that is off is never read or written.",
+            ],
+        ),
+        entry(
+            "work source enable",
+            &["work", "source", "enable"],
+            "Allow a ticket source: its boards can be imported, synced and pushed",
+            "drogon-cli work source enable --provider <SOURCE>",
+            &["provider"],
+            &[],
+            &["drogon-cli work source enable --provider linear"],
+            &[SOURCES],
+        ),
+        entry(
+            "work source disable",
+            &["work", "source", "disable"],
+            "Turn a ticket source off: no import, no sync, no push (its boards stay)",
+            "drogon-cli work source disable --provider <SOURCE>",
+            &["provider"],
+            &[],
+            &["drogon-cli work source disable --provider jira"],
+            &[SOURCES],
+        ),
+        entry(
+            "work source connect",
+            &["work", "source", "connect"],
+            "Connect Linear (API key) or GitHub (token, or the gh login when none is given)",
+            "drogon-cli work source connect --provider <linear|github> [--api-key-stdin] [--api-url <URL>]",
+            &["api-key-stdin", "api-url", "provider"],
+            &[],
+            &[
+                "drogon-cli work source connect --provider linear --api-key-stdin",
+                "drogon-cli work source connect --provider github",
+            ],
+            &[
+                SOURCES,
+                "The key is checked against the service, then sealed on disk; it is never printed. Jira connects on the Tasks page.",
+                "GitHub without a key uses `gh auth token`; --api-url names a GitHub Enterprise API (https://ghe.example/api/v3).",
+            ],
+        ),
+        entry(
+            "work source disconnect",
+            &["work", "source", "disconnect"],
+            "Forget a source's stored key (imported boards stay; the gh login is untouched)",
+            "drogon-cli work source disconnect --provider <linear|github>",
+            &["provider"],
+            &[],
+            &["drogon-cli work source disconnect --provider linear"],
+            &[SOURCES],
+        ),
+        entry(
             "work import boards",
             &["work", "import", "boards"],
-            "List a ticket provider's boards (Jira), marking the ones already imported",
+            "List a source's boards (Jira boards, Linear teams, GitHub projects and repositories), marking the ones already imported",
             "drogon-cli work import boards [--provider <PROVIDER>] [--site <SITE>]",
             &["provider", "site"],
             &[],
-            &["drogon-cli work import boards --json"],
+            &[
+                "drogon-cli work import boards --json",
+                "drogon-cli work import boards --provider github",
+            ],
             &[
                 BOARDS,
-                "Jira uses the connection made on the Tasks page; without one the reply is jira_not_connected.",
+                "--provider defaults to jira. Jira uses the Tasks page's connection; Linear and GitHub connect with `work source connect`.",
+                "GitHub board ids are project:<id> (a Project: Status columns, Iteration sprints) or repo:<owner>/<name> (a repository's issues: Open/Closed).",
             ],
         ),
         entry(
@@ -2048,13 +2113,13 @@ fn work_commands() -> Vec<AgentCommand> {
             "work ticket resolve",
             &["work", "ticket", "resolve"],
             "Settle a status conflict on an imported ticket: keep the provider's status or push yours",
-            "drogon-cli work ticket resolve --ticket <TICKET> --keep <jira|ours>",
+            "drogon-cli work ticket resolve --ticket <TICKET> --keep <theirs|ours>",
             &["keep", "ticket"],
             &[],
-            &["drogon-cli work ticket resolve --ticket APP-142 --keep jira"],
+            &["drogon-cli work ticket resolve --ticket APP-142 --keep theirs"],
             &[
                 BOARDS,
-                "jira moves the card to the provider status's column; ours pushes the pending move.",
+                "theirs (or jira, linear, github) moves the card to the source status's column; ours pushes the pending move.",
             ],
         ),
         entry(

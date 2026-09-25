@@ -33,4 +33,8 @@ export const work: WorkBridge = {
   ticketSprint: (input) => call("ticketSprint", input),
   ticketSessionStart: (input) => call("ticketSessionStart", input),
   ticketSessionRename: (input) => call("ticketSessionRename", input),
+  sources: () => call("sources", {}),
+  sourceUpdate: (input) => call("sourceUpdate", input),
+  sourceConnect: (input) => call("sourceConnect", input),
+  sourceDisconnect: (input) => call("sourceDisconnect", input),
 };

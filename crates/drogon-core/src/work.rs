@@ -29,15 +29,22 @@ use serde_json::{Value, json};
 use crate::{Engine, error};
 use drogon_protocol::RpcError;
 
+mod github;
+mod linear;
 pub(crate) mod provider;
+mod sources;
 mod sync;
 
 pub(crate) const WORK_CAPABILITY: &str = "work.v1";
 pub(crate) const WORK_BOARDS_CAPABILITY: &str = "work.boards.v1";
+/// Linear and GitHub beside Jira, the allowed-sources switch and source
+/// connections (`work.sources`, `work.source_*`).
+pub(crate) const WORK_SOURCES_CAPABILITY: &str = "work.sources.v1";
 pub(crate) const SCHEMA_COMPONENT: &str = "work";
 /// v1: local board. v2: imported provider boards (Jira), column↔status
-/// mapping, sprints, sync state and the ticket activity log.
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+/// mapping, sprints, sync state and the ticket activity log. v3: the
+/// sources the owner allows and their connections (Linear, GitHub).
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 /// How often a watched pull request is re-read (`gh pr view`).
 pub(crate) const PR_POLL_MS: i64 = 5 * 60_000;
@@ -105,6 +112,9 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
     }
     if existing.unwrap_or(0) < 2 {
         apply_v2(tx)?;
+    }
+    if existing.unwrap_or(0) < 3 {
+        apply_v3(tx)?;
     }
     tx.execute(
         "INSERT INTO schema_versions (component, version) VALUES (?1, ?2)
@@ -204,6 +214,21 @@ fn add_column(tx: &Transaction, table: &str, column: &str, decl: &str) -> rusqli
         tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
     }
     Ok(())
+}
+
+/// Additive: a row per source the owner changed; an absent row is an
+/// allowed, unconnected source.
+fn apply_v3(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS work_sources (
+            provider TEXT PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            api_url TEXT,
+            site_url TEXT,
+            account TEXT,
+            updated_at INTEGER NOT NULL
+        );",
+    )
 }
 
 /// Additive: every v1 row keeps its meaning (`board_id` NULL = My work).

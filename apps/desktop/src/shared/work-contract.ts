@@ -10,6 +10,9 @@ export const WORK_CAPABILITY = "work.v1";
 /** Boards imported from a ticket provider (Jira first): import, sync, push,
  *  sprints. A daemon without it serves My work only. */
 export const WORK_BOARDS_CAPABILITY = "work.boards.v1";
+/** Linear and GitHub beside Jira, which sources are allowed, and how each
+ *  connects (`work.sources`, `work.source_*`). */
+export const WORK_SOURCES_CAPABILITY = "work.sources.v1";
 /** The board id `work.board` uses for the local board. */
 export const WORK_LOCAL_BOARD = "local";
 
@@ -197,6 +200,28 @@ export type WorkBoard = {
   view?: WorkView;
 };
 
+/** A ticket source a board can sync with, and its connection. */
+export type WorkSource = {
+  id: "jira" | "linear" | "github" | string;
+  name: string;
+  /** Allowed by the owner (every source starts allowed). */
+  enabled: boolean;
+  connected: boolean;
+  account: string | null;
+  /** `tasks` (Jira's Tasks connection), `token` (a stored key) or `gh`. */
+  via: string | null;
+  apiUrl: string | null;
+  error: string | null;
+  boardTerm: string;
+  /** The plural for lists ("teams", "projects and repositories"). */
+  boardsTerm?: string;
+  sprintTerm: string;
+  /** How it connects: `tasks`, `api_key` or `gh_or_token`. */
+  connect: string;
+  helpUrl: string | null;
+  boards: number;
+};
+
 export type WorkProviderBoard = {
   id: string;
   name: string;
@@ -329,10 +354,15 @@ export interface WorkBridge {
   boardPush(input: { boardId: string }): Promise<Result<{ results: WorkPushResult[]; pushed: number; failed: number }>>;
   boardDelete(input: { boardId: string }): Promise<Result<{ deleted: string; name: string; tickets: number }>>;
   ticketPush(input: { ticketId: string }): Promise<Result<WorkPushResult>>;
-  ticketResolve(input: { ticketId: string; keep: "jira" | "ours" }): Promise<Result<WorkTicket>>;
+  ticketResolve(input: { ticketId: string; keep: "theirs" | "ours" }): Promise<Result<WorkTicket>>;
   ticketSprint(input: { ticketId: string; to: string }): Promise<Result<WorkTicket>>;
   ticketSessionStart(input: { ticketId: string; harnessId?: string; prompt?: string }): Promise<Result<WorkTicket & { session: WorkSession }>>;
   ticketSessionRename(input: { ticketId: string; sessionId: string; title: string }): Promise<Result<WorkTicket>>;
+  // Sources (`work.sources.v1`).
+  sources(): Promise<Result<{ sources: WorkSource[] }>>;
+  sourceUpdate(input: { provider: string; enabled: boolean }): Promise<Result<WorkSource>>;
+  sourceConnect(input: { provider: string; apiKey?: string; apiUrl?: string }): Promise<Result<WorkSource>>;
+  sourceDisconnect(input: { provider: string }): Promise<Result<WorkSource>>;
 }
 
 declare module "./session-contract" {
@@ -458,6 +488,18 @@ export const workBoardPushSchema = z.looseObject({
   pushed: z.number(),
   failed: z.number(),
 });
+const sourceSchema = z.looseObject({
+  id: z.string(),
+  name: z.string(),
+  enabled: z.boolean(),
+  connected: z.boolean(),
+  account: z.string().nullable(),
+  boardTerm: z.string(),
+  sprintTerm: z.string(),
+  connect: z.string(),
+  boards: z.number(),
+});
+export const workSourcesSchema = z.looseObject({ sources: z.array(sourceSchema) });
 export const workBoardDeleteSchema = z.looseObject({ deleted: z.string(), name: z.string(), tickets: z.number() });
 export const workSendsSchema = z.looseObject({ sends: z.array(sendSchema) });
 export const workPreviewSchema = z.looseObject({
@@ -507,6 +549,10 @@ export const WORK_OPS = {
   ticketSprint: { method: "work.ticket_sprint", schema: workTicketSchema },
   ticketSessionStart: { method: "work.ticket_session_start", schema: workTicketSchema },
   ticketSessionRename: { method: "work.ticket_session_rename", schema: workTicketSchema },
+  sources: { method: "work.sources", schema: workSourcesSchema },
+  sourceUpdate: { method: "work.source_update", schema: sourceSchema },
+  sourceConnect: { method: "work.source_connect", schema: sourceSchema },
+  sourceDisconnect: { method: "work.source_disconnect", schema: sourceSchema },
 } as const;
 
 export type WorkOp = keyof typeof WORK_OPS;

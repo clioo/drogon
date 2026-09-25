@@ -33,7 +33,7 @@ const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("coordination_access", 1, &[]),
     ("orchestration_mail", 1, &[]),
     ("orchestration_attempts", 1, &[]),
-    ("work", 2, &[("work-v1", 1)]),
+    ("work", 3, &[("work-v1", 1), ("work-v2", 2)]),
 ];
 
 /// Same cap as `db::PRE_MIGRATION_BACKUP_RETENTION`.
@@ -55,6 +55,7 @@ fn fixture_sql(fixture: &str) -> &'static str {
         "bot_delegation-v2" => include_str!("fixtures/upgrades/bot_delegation-v2.sql"),
         "graph-v1" => include_str!("fixtures/upgrades/graph-v1.sql"),
         "work-v1" => include_str!("fixtures/upgrades/work-v1.sql"),
+        "work-v2" => include_str!("fixtures/upgrades/work-v2.sql"),
         "projects-v1" => include_str!("fixtures/upgrades/projects-v1.sql"),
         "main-schema-v1" => include_str!("fixtures/upgrades/main-schema-v1.sql"),
         "workspaces-only-pre-projects" => {
@@ -751,7 +752,7 @@ fn fresh_install_backfill_is_a_no_op_with_no_pre_existing_workspaces() {
 fn work_v1_board_survives_the_imported_boards_step() {
     let (dir, engine) = open_seeded("work-v1-rows", "work-v1");
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "work"), 2);
+    assert_eq!(version_of(&conn, "work"), 3);
     // The v1 rows are intact and land on My work (board_id NULL).
     let (key, board, column): (String, Option<String>, String) = conn
         .query_row(
@@ -810,4 +811,49 @@ fn work_v1_board_survives_the_imported_boards_step() {
         1,
         "no default columns are re-seeded"
     );
+}
+
+#[test]
+fn work_v2_imported_board_survives_the_sources_step() {
+    let (dir, engine) = open_seeded("work-v2-rows", "work-v2");
+    let conn = read_db(&dir);
+    assert_eq!(version_of(&conn, "work"), 3);
+    let (ext_key, board): (String, String) = conn
+        .query_row(
+            "SELECT ext_key, board_id FROM work_tickets WHERE id = 'tkt-jira'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (ext_key.as_str(), board.as_str()),
+        ("APP-128", "board-seed")
+    );
+    let sources: i64 = conn
+        .query_row("SELECT COUNT(*) FROM work_sources", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(sources, 0, "no source is turned off by the upgrade");
+    let reply = engine.dispatch(drogon_protocol::Request {
+        protocol: drogon_protocol::PROTOCOL_VERSION,
+        request_id: "work-v2-sources".into(),
+        auth: None,
+        method: "work.sources".into(),
+        params: serde_json::json!({}),
+    });
+    let sources = reply.result.expect("work.sources after upgrade");
+    let jira = sources["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == "jira")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (jira["enabled"].clone(), jira["boards"].clone()),
+        (serde_json::json!(true), serde_json::json!(1))
+    );
+    let activity: i64 = conn
+        .query_row("SELECT COUNT(*) FROM work_activity", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(activity, 1);
 }

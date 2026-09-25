@@ -33,7 +33,7 @@ describe("work bridge", () => {
       "columnSend", "ticketCreate", "ticketUpdate", "ticketMove", "ticketDelete", "linkSession",
       "unlinkSession", "sessionOpen", "providerBoards", "importPreview", "boardImport", "boardSync",
       "boardPush", "boardDelete", "ticketPush", "ticketResolve", "ticketSprint", "ticketSessionStart",
-      "ticketSessionRename",
+      "ticketSessionRename", "sources", "sourceUpdate", "sourceConnect", "sourceDisconnect",
     ]) {
       await dispatchWorkRequest({ op, params: {} }, call);
     }
@@ -44,6 +44,7 @@ describe("work bridge", () => {
       "work.ticket_unlink_session", "work.session_open", "work.provider_boards", "work.import_preview",
       "work.board_import", "work.board_sync", "work.board_push", "work.board_delete", "work.ticket_push",
       "work.ticket_resolve", "work.ticket_sprint", "work.ticket_session_start", "work.ticket_session_rename",
+      "work.sources", "work.source_update", "work.source_connect", "work.source_disconnect",
     ]);
   });
 

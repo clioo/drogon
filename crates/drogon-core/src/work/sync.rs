@@ -28,7 +28,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::provider::{ExtBoard, ExtIssue, ExtSprint, IssueScope, WorkProvider, provider_for};
+use super::provider::{ExtBoard, ExtIssue, ExtSprint, IssueRef, IssueScope, WorkProvider};
 use super::*;
 
 pub(super) const LOCAL_BOARD: &str = "local";
@@ -936,10 +936,9 @@ fn clip(text: &str, max: usize) -> String {
 }
 
 pub(super) fn provider_label(provider: &str) -> &'static str {
-    match provider {
-        "jira" => "Jira",
-        _ => "the provider",
-    }
+    super::sources::source_info(provider)
+        .map(|s| s.name)
+        .unwrap_or("the provider")
 }
 
 /// What one sync did to one ticket.
@@ -1114,7 +1113,7 @@ fn provider_error(error: super::provider::ProviderError) -> RpcError {
 
 impl Engine {
     fn board_provider(&self, board: &Board) -> Result<Box<dyn WorkProvider + '_>, RpcError> {
-        provider_for(&board.provider, &self.jira, Some(&board.site_id)).map_err(provider_error)
+        self.work_provider(&board.provider, Some(&board.site_id))
     }
 
     fn provider_param<'a>(
@@ -1123,7 +1122,7 @@ impl Engine {
     ) -> Result<Box<dyn WorkProvider + 'a>, RpcError> {
         let kind = str_field(params, "provider")?.unwrap_or("jira");
         let site = str_field(params, "siteId")?.filter(|s| !s.trim().is_empty());
-        provider_for(kind, &self.jira, site).map_err(provider_error)
+        self.work_provider(kind, site)
     }
 
     /// `work.provider_boards`: the provider's boards, marking the ones
@@ -1248,7 +1247,7 @@ impl Engine {
         let ext_board: ExtBoard = provider.board(&external).map_err(provider_error)?;
         let ext_columns = provider.board_columns(&external).map_err(provider_error)?;
         let ext_sprints = provider.list_sprints(&external).map_err(provider_error)?;
-        let catalogue = provider.list_statuses().map_err(provider_error)?;
+        let catalogue = provider.list_statuses(&external).map_err(provider_error)?;
         let issues = provider
             .list_issues(&external, &IssueScope::Board)
             .map_err(provider_error)?;
@@ -1276,17 +1275,7 @@ impl Engine {
             }
             None => issues.iter().collect(),
         };
-        let (site_id, site_url) = match provider.kind() {
-            "jira" => {
-                let jira = super::provider::JiraProvider::new(
-                    &self.jira,
-                    str_field(params, "siteId")?.filter(|s| !s.trim().is_empty()),
-                )
-                .map_err(provider_error)?;
-                (jira.site_id().to_string(), jira.site_url().to_string())
-            }
-            other => (other.to_string(), String::new()),
-        };
+        let (site_id, site_url) = provider.site();
         let mut conn = self.db.lock().unwrap();
         let project_id = str_field(params, "projectId")?
             .map(|p| resolve_project(&conn, p))
@@ -1438,16 +1427,18 @@ impl Engine {
             let sprints = provider
                 .list_sprints(&board.external_id)
                 .map_err(provider_error)?;
-            let catalogue = provider.list_statuses().map_err(provider_error)?;
+            let catalogue = provider
+                .list_statuses(&board.external_id)
+                .map_err(provider_error)?;
             let issues = provider
                 .list_issues(&board.external_id, &IssueScope::Board)
                 .map_err(provider_error)?;
-            let known: Vec<(String, String)> = {
+            let known: Vec<(String, String, Option<String>)> = {
                 let conn = self.db.lock().unwrap();
                 let mut stmt = conn
-                    .prepare("SELECT id, ext_key FROM work_tickets WHERE board_id = ?1 AND ext_key IS NOT NULL")
+                    .prepare("SELECT id, ext_key, ext_id FROM work_tickets WHERE board_id = ?1 AND ext_key IS NOT NULL")
                     .map_err(error::from_sqlite)?;
-                stmt.query_map(params![board.id], |r| Ok((r.get(0)?, r.get(1)?)))
+                stmt.query_map(params![board.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
                     .map_err(error::from_sqlite)?
                     .collect::<Result<_, _>>()
                     .map_err(error::from_sqlite)?
@@ -1455,11 +1446,17 @@ impl Engine {
             // Tickets whose issue left the board's listing: read each one
             // directly (it may have moved board) before calling it gone.
             let mut off_board = HashMap::new();
-            for (_, key) in &known {
+            for (_, key, ext_id) in &known {
                 if !issues.iter().any(|i| i.key == *key) {
+                    let issue = IssueRef {
+                        key,
+                        id: ext_id.as_deref(),
+                    };
                     off_board.insert(
                         key.clone(),
-                        provider.get_issue(key).map_err(provider_error)?,
+                        provider
+                            .get_issue(&board.external_id, issue)
+                            .map_err(provider_error)?,
                     );
                 }
             }
@@ -1489,7 +1486,7 @@ impl Engine {
                 remember_status(&tx, &mut board, status)?;
             }
             let columns = list_columns(&tx, Some(&board.id))?;
-            for (ticket_id, key) in &known {
+            for (ticket_id, key, _) in &known {
                 let ticket = get_ticket(&tx, ticket_id)?;
                 let issue = issues
                     .iter()
@@ -1616,10 +1613,14 @@ impl Engine {
             )));
         }
         let provider = self.board_provider(&board)?;
+        let issue = IssueRef {
+            key: &ext_key,
+            id: ticket.ext.id.as_deref(),
+        };
         let mut failure: Option<String> = None;
         let mut pushed = Vec::new();
         if let Some(pending) = &ticket.ext.pending_status_id {
-            match provider.set_status(&ext_key, pending) {
+            match provider.set_status(&board.external_id, issue, pending) {
                 Ok(()) => {
                     let name = status_name(&board, &columns, pending);
                     let category = board
@@ -1647,7 +1648,11 @@ impl Engine {
             }
         }
         if failure.is_none() && sprint_pending {
-            match provider.move_to_sprint(&ext_key, ticket.ext.sprint_id.as_deref()) {
+            match provider.move_to_sprint(
+                &board.external_id,
+                issue,
+                ticket.ext.sprint_id.as_deref(),
+            ) {
                 Ok(()) => {
                     let conn = self.db.lock().unwrap();
                     conn.execute(
@@ -1760,7 +1765,7 @@ impl Engine {
             let board = get_board(&conn, ticket.ext.board_id.as_deref().unwrap())?;
             let label = provider_label(&board.provider);
             match keep.as_str() {
-                "provider" | "jira" | "theirs" | "remote" => {
+                "provider" | "theirs" | "remote" | "jira" | "linear" | "github" => {
                     conn.execute(
                         "UPDATE work_tickets SET pending_status_id = NULL, status_conflict = 0, push_error = NULL WHERE id = ?1",
                         params![ticket.id],
@@ -1818,7 +1823,7 @@ impl Engine {
                 }
                 other => {
                     return Err(error::invalid_argument(format!(
-                        "keep must be jira (the provider's status) or ours, not {other}"
+                        "keep must be theirs (the source's status; also jira, linear, github) or ours, not {other}"
                     )));
                 }
             }
@@ -2008,9 +2013,11 @@ impl Engine {
             list_boards(&conn).unwrap_or_default()
         };
         for board in boards {
-            if board
-                .last_synced_at
-                .is_some_and(|at| now - at < SYNC_INTERVAL_MS)
+            // A source the owner turned off is left alone, not failed.
+            if !self.source_enabled(&board.provider)
+                || board
+                    .last_synced_at
+                    .is_some_and(|at| now - at < SYNC_INTERVAL_MS)
             {
                 continue;
             }

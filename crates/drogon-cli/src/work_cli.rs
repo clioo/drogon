@@ -33,8 +33,18 @@ pub enum WorkAction {
     /// List the boards: My work and every imported board, with how many
     /// moves wait to be pushed
     Boards,
-    /// Bring a provider board (Jira) in: list its boards, preview one,
-    /// import the chosen issues, or remove an imported board
+    /// The ticket sources a board can sync with (Jira, Linear, GitHub):
+    /// which are allowed and how each is connected
+    Sources,
+    /// Allow or turn off a source, connect it (Linear API key, GitHub token
+    /// or gh login) or forget its key
+    Source {
+        #[command(subcommand)]
+        action: WorkSourceAction,
+    },
+    /// Bring a source's board in (a Jira board, a Linear team, a GitHub
+    /// project or repository): list its boards, preview one, import the
+    /// chosen issues, or remove an imported board
     Import {
         #[command(subcommand)]
         action: WorkImportAction,
@@ -85,6 +95,42 @@ pub enum WorkAction {
         /// Newest first, 1..=200 (default 50)
         #[arg(long, value_name = "N")]
         limit: Option<u32>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WorkSourceAction {
+    /// Allow a source: its boards can be imported and synced
+    Enable {
+        /// jira | linear | github
+        #[arg(long, value_name = "SOURCE")]
+        provider: String,
+    },
+    /// Turn a source off: no import, no sync, no push (boards stay)
+    Disable {
+        /// jira | linear | github
+        #[arg(long, value_name = "SOURCE")]
+        provider: String,
+    },
+    /// Connect Linear (a personal API key) or GitHub (a token, or the gh
+    /// login when none is given); the key is checked, then kept sealed
+    Connect {
+        /// linear | github
+        #[arg(long, value_name = "SOURCE")]
+        provider: String,
+        /// Read the API key or token from stdin (keeps it out of shell
+        /// history)
+        #[arg(long)]
+        api_key_stdin: bool,
+        /// GitHub Enterprise API URL (`https://ghe.example/api/v3`)
+        #[arg(long, value_name = "URL")]
+        api_url: Option<String>,
+    },
+    /// Forget a source's stored key (the gh login itself is left alone)
+    Disconnect {
+        /// linear | github
+        #[arg(long, value_name = "SOURCE")]
+        provider: String,
     },
 }
 
@@ -349,9 +395,9 @@ pub enum WorkTicketAction {
         /// Ticket id or key
         #[arg(long, value_name = "TICKET")]
         ticket: String,
-        /// jira (keep the provider's status; the card goes to its column) |
-        /// ours (push your move)
-        #[arg(long, value_name = "jira|ours")]
+        /// theirs (keep the source's status; the card goes to its column;
+        /// `jira`, `linear` and `github` also work) | ours (push your move)
+        #[arg(long, value_name = "theirs|ours")]
         keep: String,
     },
     /// Scrum boards: carry a ticket over to the active sprint, send it to
@@ -452,7 +498,13 @@ pub fn validate(action: &WorkAction) -> Result<(), CliError> {
                 }
             }
         }
-        WorkAction::Boards => {}
+        WorkAction::Boards | WorkAction::Sources => {}
+        WorkAction::Source { action } => match action {
+            WorkSourceAction::Enable { provider }
+            | WorkSourceAction::Disable { provider }
+            | WorkSourceAction::Disconnect { provider }
+            | WorkSourceAction::Connect { provider, .. } => nonempty("provider", provider)?,
+        },
         WorkAction::Import { action } => match action {
             WorkImportAction::Boards { .. } => {}
             WorkImportAction::Preview { board, .. } | WorkImportAction::Remove { board } => {
@@ -522,8 +574,8 @@ pub fn validate(action: &WorkAction) -> Result<(), CliError> {
             | WorkTicketAction::NewSession { ticket, .. } => nonempty("ticket", ticket)?,
             WorkTicketAction::Resolve { ticket, keep } => {
                 nonempty("ticket", ticket)?;
-                if keep != "jira" && keep != "ours" {
-                    return Err(usage("--keep must be jira or ours"));
+                if !["theirs", "ours", "jira", "linear", "github"].contains(&keep.as_str()) {
+                    return Err(usage("--keep must be theirs or ours"));
                 }
             }
             WorkTicketAction::Sprint { ticket, to } => {
@@ -563,6 +615,10 @@ pub async fn run(
     action: &WorkAction,
 ) -> Result<RunOutcome, CliError> {
     crate::commands::require_capability(client, request_id, "work.v1", "the Work board").await?;
+    if needs_sources(action) {
+        crate::commands::require_capability(client, request_id, "work.sources.v1", "Work sources")
+            .await?;
+    }
     if needs_boards(action) {
         crate::commands::require_capability(
             client,
@@ -583,6 +639,8 @@ pub async fn run(
             render_board,
         ),
         WorkAction::Boards => ("work.board", json!({}), render_boards),
+        WorkAction::Sources => ("work.sources", json!({}), render_sources),
+        WorkAction::Source { action } => source_call(action)?,
         WorkAction::Import { action } => import_call(action),
         WorkAction::Sync { board } => ("work.board_sync", json!({ "boardId": board }), render_sync),
         WorkAction::Push { board, ticket } => match (board, ticket) {
@@ -627,6 +685,7 @@ pub async fn run(
             | "work.ticket_resolve"
             | "work.ticket_session_start"
             | "work.column_update"
+            | "work.source_connect"
     ) {
         SEND_TIMEOUT
     } else {
@@ -645,11 +704,102 @@ pub async fn run(
     crate::commands::emit_call(call, json_mode, move || human(&result))
 }
 
+/// Verbs that only exist with Linear/GitHub sources (`work.sources.v1`).
+fn needs_sources(action: &WorkAction) -> bool {
+    matches!(action, WorkAction::Sources | WorkAction::Source { .. })
+}
+
+fn source_call(action: &WorkSourceAction) -> Result<WorkCall, CliError> {
+    Ok(match action {
+        WorkSourceAction::Enable { provider } => (
+            "work.source_update",
+            json!({ "provider": provider, "enabled": true }),
+            render_source,
+        ),
+        WorkSourceAction::Disable { provider } => (
+            "work.source_update",
+            json!({ "provider": provider, "enabled": false }),
+            render_source,
+        ),
+        WorkSourceAction::Disconnect { provider } => (
+            "work.source_disconnect",
+            json!({ "provider": provider }),
+            render_source,
+        ),
+        WorkSourceAction::Connect {
+            provider,
+            api_key_stdin,
+            api_url,
+        } => {
+            let mut params = json!({ "provider": provider });
+            if *api_key_stdin {
+                let mut key = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut key)
+                    .map_err(|err| usage(format!("cannot read the key from stdin: {err}")))?;
+                let key = key.trim();
+                if key.is_empty() {
+                    return Err(usage("--api-key-stdin read an empty key"));
+                }
+                params["apiKey"] = json!(key);
+            }
+            if let Some(url) = api_url {
+                params["apiUrl"] = json!(url);
+            }
+            ("work.source_connect", params, render_source)
+        }
+    })
+}
+
+fn render_source(s: &Value) -> String {
+    let state = if s["enabled"] == false {
+        "off".to_string()
+    } else if s["connected"] == true {
+        match (s["account"].as_str(), s["via"].as_str()) {
+            (Some(account), Some("gh")) => format!("connected as {account} (gh login)"),
+            (Some(account), _) => format!("connected as {account}"),
+            _ => "connected".to_string(),
+        }
+    } else {
+        match s["connect"].as_str() {
+            Some("tasks") => "not connected (connect Jira on the Tasks page)".to_string(),
+            Some("api_key") => "not connected (work source connect --api-key-stdin)".to_string(),
+            _ => {
+                "not connected (gh auth login, or work source connect --api-key-stdin)".to_string()
+            }
+        }
+    };
+    let mut line = format!(
+        "{}  {}  — boards: {}, sprints: {}s, {} imported",
+        text(&s["name"]),
+        state,
+        s["boardsTerm"].as_str().unwrap_or("boards"),
+        text(&s["sprintTerm"]),
+        s["boards"]
+    );
+    if let Some(error) = s["error"].as_str() {
+        line.push_str(&format!("\n  {error}"));
+    }
+    line
+}
+
+fn render_sources(v: &Value) -> String {
+    v["sources"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(render_source)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Verbs that only exist with imported boards (`work.boards.v1`).
 fn needs_boards(action: &WorkAction) -> bool {
     match action {
         WorkAction::Board { board, sprint, .. } => board.is_some() || sprint.is_some(),
         WorkAction::Boards
+        | WorkAction::Sources
+        | WorkAction::Source { .. }
         | WorkAction::Import { .. }
         | WorkAction::Sync { .. }
         | WorkAction::Push { .. } => true,
@@ -1150,13 +1300,18 @@ fn session_summary(s: &Value) -> String {
     )
 }
 
+fn source_name(provider: &Value) -> &str {
+    match provider.as_str() {
+        Some("jira") => "Jira",
+        Some("linear") => "Linear",
+        Some("github") => "GitHub",
+        _ => "the source",
+    }
+}
+
 /// What an imported ticket's card says about its sync state.
 fn sync_note(t: &Value) -> Option<String> {
-    let provider = if t["provider"] == "jira" {
-        "Jira"
-    } else {
-        "the provider"
-    };
+    let provider = source_name(&t["provider"]);
     match t["sync"].as_str()? {
         "pending" if t["pendingStatus"].is_object() => Some(format!(
             "not synced to {provider} → {}",
@@ -1215,15 +1370,7 @@ fn board_heading(board: &Value) -> Option<String> {
         return None;
     }
     let view = &board["view"];
-    let mut heading = format!(
-        "{} · {}",
-        text(&b["name"]),
-        if b["provider"] == "jira" {
-            "Jira"
-        } else {
-            text(&b["provider"])
-        }
-    );
+    let mut heading = format!("{} · {}", text(&b["name"]), source_name(&b["provider"]));
     match view["kind"].as_str() {
         Some("backlog") => heading.push_str(" · Backlog (prompts paused)"),
         Some("sprint") => {

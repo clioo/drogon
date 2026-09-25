@@ -2,11 +2,13 @@
 //!
 //! The board speaks to one trait, [`WorkProvider`]: list boards, read a
 //! board's columns and sprints, list and read issues, change an issue's
-//! status, and move it between sprints. Jira is the first implementation
+//! status, and move it between sprints. Implementations: Jira
 //! ([`JiraProvider`], agile REST API over the Tasks page's saved Jira
-//! connection); another system (Linear, GitHub Projects…) plugs in by
-//! implementing the same trait and registering in [`provider_for`], without
-//! touching the board, sync or UI code that consumes [`ExtIssue`].
+//! connection), Linear (`linear.rs`: teams, workflow states and cycles over
+//! GraphQL) and GitHub (`github.rs`: Projects and repository issues). A new
+//! source plugs in by implementing the trait, adding its entry to
+//! `sources.rs` and one match arm in `Engine::work_provider`; the board,
+//! sync and UI code only ever see [`ExtIssue`].
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -17,8 +19,13 @@ use crate::jira::mapping::{as_record, as_string, as_string_or};
 use crate::jira::ops::{ClientForSite, encode_path_segment, first_client};
 use drogon_protocol::RpcError;
 
-/// Provider kinds the board knows; the only one today is Jira.
-pub(crate) const PROVIDERS: &[&str] = &["jira"];
+/// An issue as the board knows it: its key (`APP-128`, `ENG-12`,
+/// `owner/repo#12`) and, when imported, the provider's own id for it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct IssueRef<'a> {
+    pub key: &'a str,
+    pub id: Option<&'a str>,
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -94,7 +101,7 @@ pub(crate) struct ProviderError {
 }
 
 impl ProviderError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_string(),
             message: message.into(),
@@ -112,40 +119,29 @@ pub(crate) type ProviderResult<T> = Result<T, ProviderError>;
 
 pub(crate) trait WorkProvider {
     fn kind(&self) -> &'static str;
+    /// The account/site boards are imported from: an id (stable across
+    /// reconnects) and the site's web URL.
+    fn site(&self) -> (String, String);
     fn list_boards(&self) -> ProviderResult<Vec<ExtBoard>>;
     fn board(&self, board_id: &str) -> ProviderResult<ExtBoard>;
     fn board_columns(&self, board_id: &str) -> ProviderResult<Vec<ExtColumn>>;
     /// Every status the site knows (what a column can be mapped to).
-    fn list_statuses(&self) -> ProviderResult<Vec<ExtStatus>>;
+    fn list_statuses(&self, board_id: &str) -> ProviderResult<Vec<ExtStatus>>;
     /// Every sprint of a scrum board (empty for a kanban board).
     fn list_sprints(&self, board_id: &str) -> ProviderResult<Vec<ExtSprint>>;
     fn list_issues(&self, board_id: &str, scope: &IssueScope) -> ProviderResult<Vec<ExtIssue>>;
     /// `Ok(None)` when the issue no longer exists (or is no longer visible).
-    fn get_issue(&self, key: &str) -> ProviderResult<Option<ExtIssue>>;
-    /// Move the issue to `status_id` through the workflow; refuses when no
-    /// transition from its current status leads there.
-    fn set_status(&self, key: &str, status_id: &str) -> ProviderResult<()>;
+    fn get_issue(&self, board_id: &str, issue: IssueRef) -> ProviderResult<Option<ExtIssue>>;
+    /// Move the issue to `status_id`; refuses when the provider's workflow
+    /// does not allow it.
+    fn set_status(&self, board_id: &str, issue: IssueRef, status_id: &str) -> ProviderResult<()>;
     /// Put the issue in `sprint_id`, or in the backlog for `None`.
-    fn move_to_sprint(&self, key: &str, sprint_id: Option<&str>) -> ProviderResult<()>;
-}
-
-/// The provider for a board source. `site` selects the account/site within
-/// the provider (a Jira site id; `None` = the provider's default).
-pub(crate) fn provider_for<'a>(
-    kind: &str,
-    jira: &'a JiraState,
-    site: Option<&str>,
-) -> ProviderResult<Box<dyn WorkProvider + 'a>> {
-    match kind {
-        "jira" => Ok(Box::new(JiraProvider::new(jira, site)?)),
-        other => Err(ProviderError::new(
-            "invalid_argument",
-            format!(
-                "unknown ticket provider {other}; supported: {}",
-                PROVIDERS.join(", ")
-            ),
-        )),
-    }
+    fn move_to_sprint(
+        &self,
+        board_id: &str,
+        issue: IssueRef,
+        sprint_id: Option<&str>,
+    ) -> ProviderResult<()>;
 }
 
 // ------------------------------------------------------------------ Jira --
@@ -175,14 +171,6 @@ impl<'a> JiraProvider<'a> {
                 )
             })?;
         Ok(Self { state, client })
-    }
-
-    pub(crate) fn site_id(&self) -> &str {
-        &self.client.site.id
-    }
-
-    pub(crate) fn site_url(&self) -> &str {
-        &self.client.site.site_url
     }
 
     fn api(&self) -> &'static str {
@@ -349,6 +337,13 @@ impl WorkProvider for JiraProvider<'_> {
         "jira"
     }
 
+    fn site(&self) -> (String, String) {
+        (
+            self.client.site.id.clone(),
+            self.client.site.site_url.clone(),
+        )
+    }
+
     fn list_boards(&self) -> ProviderResult<Vec<ExtBoard>> {
         Ok(self
             .paged(&format!("{AGILE}/board"), "values")?
@@ -413,7 +408,7 @@ impl WorkProvider for JiraProvider<'_> {
             .collect())
     }
 
-    fn list_statuses(&self) -> ProviderResult<Vec<ExtStatus>> {
+    fn list_statuses(&self, _board_id: &str) -> ProviderResult<Vec<ExtStatus>> {
         self.statuses()
     }
 
@@ -452,7 +447,8 @@ impl WorkProvider for JiraProvider<'_> {
             .collect())
     }
 
-    fn get_issue(&self, key: &str) -> ProviderResult<Option<ExtIssue>> {
+    fn get_issue(&self, _board_id: &str, issue: IssueRef) -> ProviderResult<Option<ExtIssue>> {
+        let key = issue.key;
         match self.call(
             "GET",
             &format!(
@@ -467,7 +463,8 @@ impl WorkProvider for JiraProvider<'_> {
         }
     }
 
-    fn set_status(&self, key: &str, status_id: &str) -> ProviderResult<()> {
+    fn set_status(&self, _board_id: &str, issue: IssueRef, status_id: &str) -> ProviderResult<()> {
+        let key = issue.key;
         let listed = self.get(&format!(
             "{}/issue/{}/transitions",
             self.api(),
@@ -516,7 +513,13 @@ impl WorkProvider for JiraProvider<'_> {
         .map_err(|e| jira_error(&e))
     }
 
-    fn move_to_sprint(&self, key: &str, sprint_id: Option<&str>) -> ProviderResult<()> {
+    fn move_to_sprint(
+        &self,
+        _board_id: &str,
+        issue: IssueRef,
+        sprint_id: Option<&str>,
+    ) -> ProviderResult<()> {
+        let key = issue.key;
         let path = match sprint_id {
             Some(id) => format!("{AGILE}/sprint/{}/issue", encode_path_segment(id)),
             None => format!("{AGILE}/backlog/issue"),
@@ -554,12 +557,10 @@ mod tests {
     }
 
     #[test]
-    fn unknown_providers_are_refused_by_name() {
+    fn jira_without_a_connection_says_where_to_connect() {
         let dir = tempfile::tempdir().unwrap();
         let jira = JiraState::new(dir.path());
-        let error = provider_for("linear", &jira, None).err().unwrap();
-        assert!(error.message.contains("unknown ticket provider linear"));
-        let error = provider_for("jira", &jira, None).err().unwrap();
+        let error = JiraProvider::new(&jira, None).err().unwrap();
         assert_eq!(error.code, "jira_not_connected");
     }
 }

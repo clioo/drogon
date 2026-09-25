@@ -1,7 +1,9 @@
-// Import a provider board (Jira): pick the board that frames the import,
-// then choose which of its issues come in. The first import creates the
-// board's columns from the provider's (mapped to its statuses); later ones
-// add issues, and issues already on the board are shown as such.
+// Import a source's board (a Jira board, a Linear team, a GitHub project or
+// repository): pick the board that frames the import, then choose which of
+// its issues come in. The first import creates the board's columns from the
+// source's (mapped to its statuses); later ones add issues, and issues
+// already on the board are shown as such. A source that is allowed but not
+// connected yet shows its connect form first.
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "../../components/ui/button";
@@ -20,14 +22,16 @@ import type {
   WorkImportPreview,
   WorkProviderBoard,
   WorkProviderIssue,
+  WorkSource,
 } from "../../../../shared/work-contract";
-import { IssueTypeBadge, ProviderMark } from "./work-jira";
+import { IssueTypeBadge, ProviderMark, capitalize } from "./work-sources";
+import { boardsTerm, WorkSourceConnectForm } from "./WorkSources";
 
 type Group = { id: string; label: string; issues: WorkProviderIssue[] };
 
 /** Issues grouped the way a scrum board reads: active sprint, upcoming
  *  sprints, backlog, then what already finished in a past sprint. */
-export function groupIssues(preview: WorkImportPreview): Group[] {
+export function groupIssues(preview: WorkImportPreview, sprintTerm = "sprint"): Group[] {
   if (preview.board.kind !== "scrum") {
     return [{ id: "all", label: "Issues", issues: preview.issues }];
   }
@@ -47,26 +51,39 @@ export function groupIssues(preview: WorkImportPreview): Group[] {
   const finished = unsprinted.filter((i) => i.status.category === "done" && i.closedSprints.length > 0);
   const backlog = unsprinted.filter((i) => !finished.includes(i));
   if (backlog.length) groups.push({ id: "backlog", label: "Backlog", issues: backlog });
-  if (finished.length) groups.push({ id: "finished", label: "Finished in past sprints", issues: finished });
+  if (finished.length) groups.push({ id: "finished", label: `Finished in past ${sprintTerm}s`, issues: finished });
   return groups;
 }
 
 export function WorkImportDialog({
   open,
   bridge,
+  source,
   projects,
   initialBoard,
   onClose,
   onImported,
+  onOpenExternal,
+  onOpenTasks,
+  onSourceChanged,
 }: {
   open: boolean;
   bridge: WorkBridge;
+  /** The source to import from. */
+  source: WorkSource;
   projects: { id: string; name: string }[];
   /** Skip straight to the issue picker of this provider board. */
   initialBoard?: { externalId: string; projectId?: string | null } | null;
   onClose: () => void;
   onImported: (board: WorkBoardSummary, imported: number) => void;
+  onOpenExternal: (url: string) => void;
+  onOpenTasks?: () => void;
+  /** A connection made from the dialog: the page reloads its sources. */
+  onSourceChanged?: () => void;
 }) {
+  const provider = source.id;
+  const [needsConnect, setNeedsConnect] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [boards, setBoards] = useState<WorkProviderBoard[] | null>(null);
   const [external, setExternal] = useState<string | null>(null);
   const [preview, setPreview] = useState<WorkImportPreview | null>(null);
@@ -82,25 +99,27 @@ export function WorkImportDialog({
     setChosen(new Set());
     setProjectId(initialBoard?.projectId ?? "");
     setExternal(initialBoard?.externalId ?? null);
+    setNeedsConnect(false);
     if (initialBoard) return;
     setBoards(null);
     let cancelled = false;
-    void bridge.providerBoards({}).then((result) => {
+    void bridge.providerBoards({ provider }).then((result) => {
       if (cancelled) return;
       if (result.ok) setBoards(result.result.boards);
+      else if (/_not_connected$/.test(result.error.code)) setNeedsConnect(true);
       else setError(result.error.message);
     });
     return () => {
       cancelled = true;
     };
-  }, [open, bridge, initialBoard]);
+  }, [open, bridge, initialBoard, provider, attempt]);
 
   useEffect(() => {
     if (!open || !external) return;
     let cancelled = false;
     setPreview(null);
     setError(null);
-    void bridge.importPreview({ externalBoardId: external }).then((result) => {
+    void bridge.importPreview({ externalBoardId: external, provider }).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
         setError(result.error.message);
@@ -117,9 +136,9 @@ export function WorkImportDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, bridge, external]);
+  }, [open, bridge, external, provider]);
 
-  const groups = useMemo(() => (preview ? groupIssues(preview) : []), [preview]);
+  const groups = useMemo(() => (preview ? groupIssues(preview, source.sprintTerm) : []), [preview, source.sprintTerm]);
   const toggle = (keys: string[], on: boolean) =>
     setChosen((current) => {
       const next = new Set(current);
@@ -136,6 +155,7 @@ export function WorkImportDialog({
     setError(null);
     try {
       const result = await bridge.boardImport({
+        provider,
         externalBoardId: external,
         issueKeys: [...chosen],
         projectId: projectId || undefined,
@@ -155,13 +175,15 @@ export function WorkImportDialog({
       <DialogContent className="max-w-2xl" data-testid="work-import-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ProviderMark provider="jira" className="size-4" />
-            {preview ? `Import from ${preview.board.name}` : "Import Jira board"}
+            <ProviderMark provider={provider} className="size-4" />
+            {preview ? `Import from ${preview.board.name}` : `Import a ${source.name} ${source.boardTerm}`}
           </DialogTitle>
           <DialogDescription>
             {preview
-              ? "Choose the issues to bring in. Each keeps its Jira key, and its column's prompts reach the sessions you link to it."
-              : "Pick the Jira board that frames the import: its columns and sprints come with it."}
+              ? `Choose the issues to bring in. Each keeps its ${source.name} key, and its column's prompts reach the sessions you link to it.`
+              : needsConnect
+                ? `Connect ${source.name} to see its ${boardsTerm(source)}.`
+                : `Pick the ${source.name} ${source.boardTerm} that frames the import: its columns and ${source.sprintTerm}s come with it.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -171,13 +193,25 @@ export function WorkImportDialog({
           </p>
         ) : null}
 
-        {!external ? (
+        {needsConnect && !external ? (
+          <WorkSourceConnectForm
+            source={source}
+            bridge={bridge}
+            onOpenExternal={onOpenExternal}
+            onOpenTasks={onOpenTasks}
+            onConnected={() => {
+              onSourceChanged?.();
+              setNeedsConnect(false);
+              setAttempt((n) => n + 1);
+            }}
+          />
+        ) : !external ? (
           boards === null && !error ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Loading Jira boards…
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Loading {source.name} {boardsTerm(source)}…
             </p>
           ) : (
-            <ul className="max-h-[360px] space-y-1 overflow-y-auto" aria-label="Jira boards">
+            <ul className="max-h-[360px] space-y-1 overflow-y-auto" aria-label={`${source.name} boards`}>
               {(boards ?? []).map((b) => (
                 <li key={b.id}>
                   <button
@@ -186,12 +220,13 @@ export function WorkImportDialog({
                     onClick={() => setExternal(b.id)}
                     aria-label={`Choose ${b.name}`}
                   >
-                    <ProviderMark provider="jira" />
+                    <ProviderMark provider={provider} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium text-foreground">{b.name}</span>
                       <span className="block text-xs text-muted-foreground">
-                        {b.kind === "scrum" ? "Scrum" : "Kanban"}
+                        {b.kind === "scrum" ? `${capitalize(source.sprintTerm)}s` : "Kanban"}
                         {b.projectKey ? ` · ${b.projectKey}` : ""}
+                        {b.projectName && b.projectName !== b.name ? ` · ${b.projectName}` : ""}
                       </span>
                     </span>
                     {b.importedBoardId ? (
@@ -201,7 +236,9 @@ export function WorkImportDialog({
                 </li>
               ))}
               {boards && boards.length === 0 ? (
-                <li className="text-sm text-muted-foreground">Jira has no boards this account can see.</li>
+                <li className="text-sm text-muted-foreground">
+                  {source.name} has no {boardsTerm(source)} this account can see.
+                </li>
               ) : null}
             </ul>
           )
@@ -273,7 +310,7 @@ export function WorkImportDialog({
         <DialogFooter>
           {external && !initialBoard ? (
             <Button variant="ghost" className="mr-auto" onClick={() => setExternal(null)}>
-              <ArrowLeft /> Boards
+              <ArrowLeft /> {capitalize(boardsTerm(source))}
             </Button>
           ) : null}
           <Button variant="outline" onClick={onClose}>

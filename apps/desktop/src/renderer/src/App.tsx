@@ -6757,6 +6757,7 @@ export function App() {
                     active={route === WORK_ROUTE_ID}
                     workspaces={workspaces.map((w) => ({ id: w.id, name: w.name }))}
                     onOpenSession={openWorkSession}
+                    onOpenTasks={() => setRoute(TASKS_ROUTE_ID)}
                     onClose={() => closePageRoute(WORK_ROUTE_ID)}
                   />
                 )}

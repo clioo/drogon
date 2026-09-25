@@ -1,22 +1,54 @@
-// Imported-ticket vocabulary for the Work board: the provider mark, issue
-// type and priority badges, the assignee avatar, and the words a card uses
-// for its sync state. Pure presentation; no bridge calls.
+// Imported-ticket vocabulary for the Work board, per source (Jira, Linear,
+// GitHub): each source's mark, name and words for a board and a sprint, the
+// issue type and priority badges, the assignee avatar, and the words a card
+// uses for its sync state. Pure presentation; no bridge calls. A new source
+// adds one entry to SOURCE_UI.
 import { ArrowRight, BookOpen, Bug, CheckSquare, Lightbulb, Sparkles, Wrench } from "lucide-react";
 import { JiraIcon } from "../../components/icons/JiraIcon";
+import { LinearIcon } from "../../components/icons/LinearIcon";
+import { GithubIcon } from "../tasks/github-icon";
 import type { WorkBoardSummary, WorkSprint, WorkTicket } from "../../../../shared/work-contract";
 
+type SourceUi = {
+  name: string;
+  Icon: (props: { className?: string }) => React.JSX.Element;
+  tone: string;
+  /** What a board and a sprint are called there. */
+  board: string;
+  sprint: string;
+};
+
+export const SOURCE_UI: Record<string, SourceUi> = {
+  jira: { name: "Jira", Icon: JiraIcon, tone: "text-blue-500", board: "board", sprint: "sprint" },
+  linear: { name: "Linear", Icon: LinearIcon, tone: "text-indigo-500 dark:text-indigo-400", board: "team", sprint: "cycle" },
+  github: { name: "GitHub", Icon: GithubIcon, tone: "text-foreground", board: "project or repository", sprint: "iteration" },
+};
+
 export function ProviderMark({ provider, className = "size-3.5" }: { provider?: string | null; className?: string }) {
-  if (provider !== "jira") return null;
-  return <JiraIcon className={`${className} shrink-0 text-blue-500`} />;
+  const ui = provider ? SOURCE_UI[provider] : undefined;
+  if (!ui) return null;
+  const { Icon } = ui;
+  return <Icon className={`${className} shrink-0 ${ui.tone}`} />;
 }
 
 export function providerLabel(provider?: string | null): string {
-  return provider === "jira" ? "Jira" : provider ? provider : "Drogon";
+  return (provider && SOURCE_UI[provider]?.name) || provider || "Drogon";
 }
 
-/** The key a person sees: the provider's (APP-128) when imported. */
+/** What the source calls a sprint (`sprint`, `cycle`, `iteration`). */
+export function sprintTerm(provider?: string | null): string {
+  return (provider && SOURCE_UI[provider]?.sprint) || "sprint";
+}
+
+export function capitalize(word: string): string {
+  return word ? word[0]!.toUpperCase() + word.slice(1) : word;
+}
+
+/** The key a person sees: the source's (APP-128, ENG-12, drogon#12) when
+ *  imported; a GitHub key drops its owner on cards. */
 export function ticketDisplayKey(ticket: WorkTicket): string {
-  return ticket.externalKey ?? ticket.key;
+  const key = ticket.externalKey ?? ticket.key;
+  return ticket.provider === "github" ? key.replace(/^[^/]+\//, "") : key;
 }
 
 const TYPE_STYLES: { match: RegExp; Icon: typeof Bug; tone: string }[] = [

@@ -1,0 +1,410 @@
+// @vitest-environment jsdom
+// Ticket sources on the Work page against a recording fake bridge: every
+// source starts allowed and the Sources tab turns them off and on,
+// connects Linear with an API key and GitHub with the gh login or a token
+// (plus an Enterprise URL), and forgets a key; the "Import board" menu and
+// the dismissible "Sync a board" card offer only allowed sources; the
+// import dialog connects a source in place; and a Linear board speaks in
+// cycles, a GitHub one in iterations.
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
+import { TooltipProvider } from "../../components/ui/tooltip";
+import type { Result } from "../../../../shared/session-contract";
+import type { WorkBoard, WorkBridge, WorkColumn, WorkSource, WorkTicket } from "../../../../shared/work-contract";
+import { resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
+import { importLabel, SYNC_CARD_DISMISSED_KEY } from "./WorkSources";
+import { providerLabel, sprintTerm, ticketDisplayKey } from "./work-sources";
+
+vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+
+beforeAll(() => installRadixJsdomStubs());
+beforeEach(() => localStorage.clear());
+afterEach(() => {
+  cleanup();
+  resetWorkViewMemoryForTests();
+});
+
+const ok = <T,>(result: T): Promise<Result<T>> => Promise.resolve({ ok: true, result });
+const fail = (message: string, code: string): Promise<Result<never>> =>
+  Promise.resolve({ ok: false, error: { code, message, retryable: false } });
+
+function source(overrides: Partial<WorkSource> & { id: string; name: string }): WorkSource {
+  return {
+    enabled: true,
+    connected: false,
+    account: null,
+    via: null,
+    apiUrl: null,
+    error: null,
+    boardTerm: "board",
+    sprintTerm: "sprint",
+    connect: "tasks",
+    helpUrl: null,
+    boards: 0,
+    ...overrides,
+  };
+}
+
+function initialSources(): WorkSource[] {
+  return [
+    source({ id: "jira", name: "Jira" }),
+    source({ id: "linear", name: "Linear", boardTerm: "team", sprintTerm: "cycle", connect: "api_key", helpUrl: "https://linear.app/settings/account/security" }),
+    source({ id: "github", name: "GitHub", boardTerm: "project or repository", boardsTerm: "projects and repositories", sprintTerm: "iteration", connect: "gh_or_token", helpUrl: "https://github.com/settings/tokens/new" }),
+  ];
+}
+
+function col(overrides: Partial<WorkColumn>): WorkColumn {
+  return {
+    id: "c",
+    name: "C",
+    icon: "todo",
+    position: 0,
+    sendOnEnter: false,
+    cron: null,
+    prWatch: false,
+    message: "",
+    recipients: "all",
+    harnessId: null,
+    nextRunAt: null,
+    ticketCount: 0,
+    lastSentAt: null,
+    lastSentCount: 0,
+    ...overrides,
+  };
+}
+
+const LINEAR_BOARD = {
+  id: "bl",
+  provider: "linear",
+  name: "Engineering",
+  kind: "scrum",
+  externalId: "team-eng",
+  statuses: [],
+  pendingCount: 0,
+  ticketCount: 1,
+};
+const LOCAL = { id: "local", provider: null, name: "My work", kind: "local", statuses: [], pendingCount: 0, ticketCount: 0 };
+
+function linearTicket(): WorkTicket {
+  return {
+    id: "t1",
+    key: "DRG-1",
+    title: "Resume Linear sessions",
+    description: "",
+    projectId: null,
+    projectName: null,
+    workspaceId: null,
+    columnId: "review",
+    position: 0,
+    prUrl: null,
+    prNumber: null,
+    sourceUrl: null,
+    nextStep: "",
+    createdAt: 1,
+    updatedAt: 1,
+    sessions: [],
+    boardId: "bl",
+    provider: "linear",
+    externalKey: "ENG-1",
+    externalUrl: "https://linear.app/drogon/issue/ENG-1",
+    issueType: "backend",
+    priority: "High",
+    assignee: "Jon Doe",
+    externalStatus: { id: "st-review", name: "In Review", category: "indeterminate" },
+    sync: "pending",
+    pendingStatus: { id: "st-done", name: "Done" },
+    sprintId: "cy-12",
+    sprintName: "Cycle 12",
+    sprints: [],
+  };
+}
+
+function fakeBridge(options: { withLinearBoard?: boolean } = {}) {
+  let sources = initialSources();
+  const cycles = [
+    { id: "cy-11", name: "Cycle 11", state: "closed", start: null, end: null },
+    { id: "cy-12", name: "Cycle 12", state: "active", start: null, end: null },
+  ];
+  const board = vi.fn((input?: { boardId?: string }): Promise<Result<WorkBoard>> => {
+    if (input?.boardId === "bl") {
+      return ok({
+        columns: [col({ id: "review", name: "In Review", boardId: "bl" }), col({ id: "done", name: "Done", icon: "done", position: 1, boardId: "bl" })],
+        tickets: [linearTicket()],
+        projects: [],
+        board: LINEAR_BOARD,
+        boards: [LOCAL, LINEAR_BOARD],
+        view: { kind: "sprint", sprint: cycles[1]!, readOnly: false, promptsPaused: false, sprints: cycles },
+      });
+    }
+    return ok({
+      columns: [col({ id: "todo", name: "To do" })],
+      tickets: [],
+      projects: [],
+      board: LOCAL,
+      boards: options.withLinearBoard ? [LOCAL, LINEAR_BOARD] : [LOCAL],
+      view: { kind: "all", readOnly: false, promptsPaused: false, sprints: [] },
+    });
+  });
+  const update = (id: string, patch: Partial<WorkSource>) => {
+    sources = sources.map((s) => (s.id === id ? { ...s, ...patch } : s));
+    return sources.find((s) => s.id === id)!;
+  };
+  let linearConnected = false;
+  return {
+    board,
+    ticketShow: vi.fn(() => ok({ ...linearTicket(), sends: [], activity: [] })),
+    sends: vi.fn(() => ok({ sends: [] })),
+    columnUpdate: vi.fn(),
+    ticketMove: vi.fn(),
+    ticketPush: vi.fn(() => ok({ ticketId: "t1", key: "ENG-1", pushed: true, error: null })),
+    ticketResolve: vi.fn(),
+    sources: vi.fn(() => ok({ sources })),
+    sourceUpdate: vi.fn((input: { provider: string; enabled: boolean }) => ok(update(input.provider, { enabled: input.enabled }))),
+    sourceConnect: vi.fn((input: { provider: string; apiKey?: string; apiUrl?: string }) => {
+      if (input.provider === "linear") {
+        if (input.apiKey !== "lin_api_good") return fail("Authentication required, not authenticated", "linear_auth_required");
+        linearConnected = true;
+        return ok(update("linear", { connected: true, account: "Jon Doe · Drogon", via: "token" }));
+      }
+      return ok(update("github", { connected: true, account: "octo", via: input.apiKey ? "token" : "gh", apiUrl: input.apiUrl ?? null }));
+    }),
+    sourceDisconnect: vi.fn((input: { provider: string }) => ok(update(input.provider, { connected: false, account: null, via: null }))),
+    providerBoards: vi.fn((input: { provider: string }) =>
+      input.provider === "linear" && !linearConnected
+        ? fail("Linear is not connected. Connect it in Work → Sources with a Linear API key.", "linear_not_connected")
+        : ok({
+            provider: input.provider,
+            boards: [{ id: "team-eng", name: "Engineering", kind: "scrum", projectKey: "ENG", projectName: "Engineering", importedBoardId: null }],
+          }),
+    ),
+    importPreview: vi.fn(() =>
+      ok({
+        provider: "linear",
+        board: { id: "team-eng", name: "Engineering", kind: "scrum" },
+        columns: [{ name: "Todo", statuses: [] }, { name: "In Review", statuses: [] }],
+        sprints: cycles,
+        issues: [
+          {
+            id: "li-1", key: "ENG-1", url: "", title: "Resume Linear sessions", issueType: null, priority: "High", assignee: null,
+            status: { id: "st-review", name: "In Review", category: "indeterminate" }, sprint: cycles[1]!, closedSprints: [], importedTicketId: null,
+          },
+          {
+            id: "li-4", key: "ENG-4", url: "", title: "Old leftover", issueType: null, priority: null, assignee: null,
+            status: { id: "st-done", name: "Done", category: "done" }, sprint: null, closedSprints: [cycles[0]!], importedTicketId: null,
+          },
+        ],
+      }),
+    ),
+    boardImport: vi.fn(() => ok({ board: LINEAR_BOARD, imported: 1, refreshed: 0 })),
+    boardSync: vi.fn(),
+    boardPush: vi.fn(),
+    boardDelete: vi.fn(),
+  };
+}
+
+async function mount(bridge = fakeBridge(), extra: { onOpenExternal?: (url: string) => void; onOpenTasks?: () => void } = {}) {
+  render(
+    <TooltipProvider>
+      <WorkPage
+        bridge={bridge as unknown as WorkBridge}
+        workspaces={[]}
+        onOpenSession={vi.fn()}
+        onOpenExternal={extra.onOpenExternal ?? vi.fn()}
+        onOpenTasks={extra.onOpenTasks}
+        listSessions={vi.fn(async () => []) as never}
+      />
+    </TooltipProvider>,
+  );
+  await waitFor(() => expect(bridge.sources).toHaveBeenCalled());
+  await screen.findByRole("region", { name: "To do column" });
+  return bridge;
+}
+
+function openMenu(trigger: HTMLElement) {
+  fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 });
+  fireEvent.click(trigger);
+}
+
+async function importMenuItems(): Promise<string[]> {
+  openMenu(await screen.findByRole("button", { name: "Import board" }));
+  const items = (await screen.findAllByRole("menuitem")).map((i) => (i.textContent ?? "").trim());
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+  return items;
+}
+
+describe("Work sources", () => {
+  test("every source starts allowed: the import menu and the card offer all three", async () => {
+    await mount();
+    expect(await importMenuItems()).toEqual([
+      "Import a Jira board…",
+      "Import a Linear team…",
+      "Import a GitHub project or repository…",
+      "Manage sources…",
+    ]);
+    const card = await screen.findByTestId("work-sync-card");
+    expect(within(card).getByText("Sync a board")).toBeTruthy();
+    expect(within(card).getByText(/Optional/)).toBeTruthy();
+    expect(within(card).getByRole("button", { name: /Import a Linear team/ })).toBeTruthy();
+    expect(within(card).getByRole("button", { name: /Import a GitHub project or repository/ })).toBeTruthy();
+  });
+
+  test("the card is dismissible, stays dismissed, and can come back from Sources", async () => {
+    await mount();
+    fireEvent.click(within(await screen.findByTestId("work-sync-card")).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByTestId("work-sync-card")).toBeNull();
+    expect(localStorage.getItem(SYNC_CARD_DISMISSED_KEY)).toBe("1");
+    // Import stays available from the header.
+    expect(screen.getByRole("button", { name: "Import board" })).toBeTruthy();
+    cleanup();
+    resetWorkViewMemoryForTests();
+    await mount();
+    expect(screen.queryByTestId("work-sync-card")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "sources" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Sync a board" card/ }));
+    fireEvent.click(screen.getByRole("tab", { name: "board" }));
+    expect(await screen.findByTestId("work-sync-card")).toBeTruthy();
+  });
+
+  test("Sources turns a source off and on; an off source leaves the menu and the card", async () => {
+    const bridge = await mount();
+    fireEvent.click(screen.getByRole("tab", { name: "sources" }));
+    const panel = await screen.findByTestId("work-sync-sources");
+    expect(within(within(panel).getByRole("listitem", { name: "GitHub" })).getByText(/Projects and repositories, iterations/)).toBeTruthy();
+    const jira = within(panel).getByRole("listitem", { name: "Jira" });
+    expect(within(jira).getByTestId("work-source-status").textContent).toBe("Not connected");
+    fireEvent.click(within(jira).getByRole("switch", { name: "Allow Jira" }));
+    await waitFor(() => expect(bridge.sourceUpdate).toHaveBeenCalledWith({ provider: "jira", enabled: false }));
+    await waitFor(() =>
+      expect(within(within(panel).getByRole("listitem", { name: "Jira" })).getByTestId("work-source-status").textContent).toBe(
+        "Off: not imported, synced or pushed",
+      ),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "board" }));
+    expect(await importMenuItems()).toEqual([
+      "Import a Linear team…",
+      "Import a GitHub project or repository…",
+      "Manage sources…",
+    ]);
+    expect(within(screen.getByTestId("work-sync-card")).queryByRole("button", { name: /Jira/ })).toBeNull();
+
+    // Everything off: no import menu, no card.
+    fireEvent.click(screen.getByRole("tab", { name: "sources" }));
+    for (const name of ["Linear", "GitHub"]) {
+      fireEvent.click(within(await screen.findByTestId("work-sync-sources")).getByRole("switch", { name: `Allow ${name}` }));
+      await waitFor(() => expect(bridge.sourceUpdate).toHaveBeenCalledWith({ provider: name.toLowerCase(), enabled: false }));
+    }
+    fireEvent.click(screen.getByRole("tab", { name: "board" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Import board" })).toBeNull());
+    expect(screen.queryByTestId("work-sync-card")).toBeNull();
+  });
+
+  test("Linear connects with an API key: its settings page opens, a bad key shows Linear's error", async () => {
+    const onOpenExternal = vi.fn();
+    const bridge = await mount(fakeBridge(), { onOpenExternal });
+    fireEvent.click(screen.getByRole("tab", { name: "sources" }));
+    const linear = within(await screen.findByTestId("work-sync-sources")).getByRole("listitem", { name: "Linear" });
+    fireEvent.click(within(linear).getByRole("button", { name: "Connect" }));
+    const form = within(linear).getByRole("form", { name: "Connect Linear" });
+    fireEvent.click(within(form).getByRole("button", { name: /Get a Linear API key/ }));
+    expect(onOpenExternal).toHaveBeenCalledWith("https://linear.app/settings/account/security");
+    const key = within(form).getByLabelText("Linear API key");
+    expect(key.getAttribute("type")).toBe("password");
+    fireEvent.change(key, { target: { value: "lin_api_bad" } });
+    fireEvent.submit(form);
+    expect((await within(form).findByRole("alert")).textContent).toContain("Authentication required");
+    fireEvent.change(key, { target: { value: "lin_api_good" } });
+    fireEvent.submit(form);
+    await waitFor(() => expect(bridge.sourceConnect).toHaveBeenLastCalledWith({ provider: "linear", apiKey: "lin_api_good" }));
+    await waitFor(() =>
+      expect(
+        within(within(screen.getByTestId("work-sync-sources")).getByRole("listitem", { name: "Linear" })).getByTestId("work-source-status")
+          .textContent,
+      ).toBe("Connected as Jon Doe · Drogon"),
+    );
+    fireEvent.click(within(within(screen.getByTestId("work-sync-sources")).getByRole("listitem", { name: "Linear" })).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(bridge.sourceDisconnect).toHaveBeenCalledWith({ provider: "linear" }));
+  });
+
+  test("GitHub connects with the gh login or a token and an Enterprise URL; Jira points at Tasks", async () => {
+    const onOpenTasks = vi.fn();
+    const bridge = await mount(fakeBridge(), { onOpenTasks });
+    fireEvent.click(screen.getByRole("tab", { name: "sources" }));
+    const panel = await screen.findByTestId("work-sync-sources");
+    fireEvent.click(within(within(panel).getByRole("listitem", { name: "Jira" })).getByRole("button", { name: "Connect" }));
+    expect(onOpenTasks).toHaveBeenCalled();
+    const github = within(panel).getByRole("listitem", { name: "GitHub" });
+    fireEvent.click(within(github).getByRole("button", { name: "Connect" }));
+    fireEvent.click(within(github).getByRole("button", { name: "Use my gh login" }));
+    await waitFor(() => expect(bridge.sourceConnect).toHaveBeenCalledWith({ provider: "github" }));
+    await waitFor(() =>
+      expect(within(within(panel).getByRole("listitem", { name: "GitHub" })).getByTestId("work-source-status").textContent).toBe(
+        "Connected as octo (gh login)",
+      ),
+    );
+    const again = within(panel).getByRole("listitem", { name: "GitHub" });
+    fireEvent.click(within(again).getByRole("button", { name: "Change" }));
+    fireEvent.click(within(again).getByRole("button", { name: "GitHub Enterprise?" }));
+    fireEvent.change(within(again).getByLabelText("GitHub Enterprise API URL"), { target: { value: "https://ghe.example/api/v3" } });
+    fireEvent.change(within(again).getByLabelText("GitHub token"), { target: { value: "ghp_x" } });
+    fireEvent.submit(within(again).getByRole("form", { name: "Connect GitHub" }));
+    await waitFor(() =>
+      expect(bridge.sourceConnect).toHaveBeenLastCalledWith({ provider: "github", apiKey: "ghp_x", apiUrl: "https://ghe.example/api/v3" }),
+    );
+  });
+
+  test("importing from an unconnected Linear connects in place, then lists its teams", async () => {
+    const bridge = await mount();
+    fireEvent.click(within(await screen.findByTestId("work-sync-card")).getByRole("button", { name: /Import a Linear team/ }));
+    const dialog = await screen.findByTestId("work-import-dialog");
+    expect(within(dialog).getByText("Import a Linear team")).toBeTruthy();
+    const form = await within(dialog).findByRole("form", { name: "Connect Linear" });
+    fireEvent.change(within(form).getByLabelText("Linear API key"), { target: { value: "lin_api_good" } });
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Choose Engineering" }));
+    await within(dialog).findByText("Columns: Todo · In Review");
+    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "team-eng", provider: "linear" });
+    expect(within(dialog).getByRole("region", { name: "Cycle 12 · Active" })).toBeTruthy();
+    expect(within(dialog).getByRole("region", { name: "Finished in past cycles" })).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Import 1 issue" }));
+    });
+    expect(bridge.boardImport).toHaveBeenCalledWith({ provider: "linear", externalBoardId: "team-eng", issueKeys: ["ENG-1"], projectId: undefined });
+    await waitFor(() => expect(bridge.board).toHaveBeenCalledWith({ boardId: "bl" }));
+  });
+
+  test("a Linear board speaks in cycles and pushes to Linear", async () => {
+    const bridge = await mount(fakeBridge({ withLinearBoard: true }));
+    openMenu(screen.getByRole("button", { name: "Board" }));
+    const items = (await screen.findAllByRole("menuitem")).map((i) => (i.textContent ?? "").trim());
+    expect(items).toContain("Import a Linear team…");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Engineering · Linear" }));
+    await screen.findByText("Resume Linear sessions");
+    expect(screen.getByRole("button", { name: "Cycle" }).textContent).toContain("Cycle 12 · Active");
+    expect(screen.getByRole("button", { name: "Past cycles" })).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Done column" })).getByText("Tickets moved here will stay in this cycle.")).toBeTruthy();
+    const card = screen.getByRole("article", { name: /ENG-1/ });
+    expect(within(card).getByText("Not synced to Linear")).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "Push to Linear" }));
+    await waitFor(() => expect(bridge.ticketPush).toHaveBeenCalledWith({ ticketId: "t1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open ENG-1: Resume Linear sessions" }));
+    const panel = await screen.findByRole("complementary", { name: "Ticket ENG-1" });
+    expect(within(panel).getByRole("region", { name: "Linear details" }).textContent).toContain("Team");
+  });
+});
+
+describe("source vocabulary", () => {
+  test("names, sprint words, keys and import labels per source", () => {
+    expect(providerLabel("linear")).toBe("Linear");
+    expect(providerLabel("github")).toBe("GitHub");
+    expect(providerLabel("gitlab")).toBe("gitlab");
+    expect(sprintTerm("linear")).toBe("cycle");
+    expect(sprintTerm("github")).toBe("iteration");
+    expect(sprintTerm(null)).toBe("sprint");
+    expect(ticketDisplayKey({ ...linearTicket(), provider: "github", externalKey: "clioo/drogon#12" })).toBe("drogon#12");
+    expect(ticketDisplayKey(linearTicket())).toBe("ENG-1");
+    expect(importLabel(initialSources()[2]!)).toBe("Import a GitHub project or repository");
+  });
+});

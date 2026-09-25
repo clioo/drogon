@@ -22,7 +22,8 @@ describe("preload work bridge", () => {
     for (const op of Object.keys(WORK_OPS) as WorkOp[]) {
       invoke.mockClear();
       await (work[op] as (input: object) => Promise<unknown>)(params);
-      expect(invoke).toHaveBeenCalledWith("drogon:work", { op, params });
+      // `sources` takes no input.
+      expect(invoke).toHaveBeenCalledWith("drogon:work", { op, params: op === "sources" ? {} : params });
     }
   });
 
@@ -31,5 +32,7 @@ describe("preload work bridge", () => {
     expect(invoke).toHaveBeenLastCalledWith("drogon:work", { op: "board", params: {} });
     await work.providerBoards();
     expect(invoke).toHaveBeenLastCalledWith("drogon:work", { op: "providerBoards", params: {} });
+    await work.sources();
+    expect(invoke).toHaveBeenLastCalledWith("drogon:work", { op: "sources", params: {} });
   });
 });

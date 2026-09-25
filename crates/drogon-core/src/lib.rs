@@ -169,6 +169,8 @@ const CAPABILITIES: &[&str] = &[
     // Work boards imported from a ticket provider (Jira first): import,
     // sync, push, sprints (work/sync.rs).
     work::WORK_BOARDS_CAPABILITY,
+    // Linear and GitHub sources, which sources are allowed, connections.
+    work::WORK_SOURCES_CAPABILITY,
     // The work graph (`.drogon/graph.json`): the two-halves store, the
     // graph→recipe compiler and node-level resume/retry. The graph replaces
     // the Mentu tab as the authoring surface; the runtime underneath is
@@ -728,6 +730,13 @@ impl Engine {
             "work.ticket_session_rename" => {
                 self.mutating(request, Self::do_work_ticket_session_rename)
             }
+            // Ticket sources: which are allowed and how each connects
+            // (work/sources.rs). `source_connect` carries a secret, so it
+            // stays out of the mutation ledger, like `jira.connect`.
+            "work.sources" => self.work_sources(&request.params),
+            "work.source_update" => self.mutating(request, Self::do_work_source_update),
+            "work.source_connect" => self.work_source_connect(&request.params),
+            "work.source_disconnect" => self.mutating(request, Self::do_work_source_disconnect),
             "mentu.recipes" => self.mentu_recipes(&request.params),
             "mentu.recipe" => self.mentu_recipe(&request.params),
             "mentu.recipe_save" => self.mentu_recipe_save(request),

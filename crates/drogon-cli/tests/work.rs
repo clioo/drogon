@@ -43,6 +43,11 @@ impl Fixture {
         std::fs::write(&claude, FIXTURE_CLAUDE).expect("fixture");
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        // A logged-out `gh` shadows the real one: the owner's GitHub login
+        // is never read by a test.
+        let gh = bin.join("gh");
+        std::fs::write(&gh, "#!/bin/sh\nexit 1\n").expect("fixture gh");
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).expect("mode");
         let mut path = vec![bin.clone()];
         path.extend(std::env::split_paths(
             &std::env::var_os("PATH").unwrap_or_default(),
@@ -93,6 +98,27 @@ impl Fixture {
         common::scrub_environment(&mut command, &self.data_dir);
         command.env("HOME", &self.home);
         command.output().expect("spawn drogon-cli")
+    }
+
+    /// Human form with `input` on stdin.
+    fn text_with_stdin(&self, args: &[&str], input: &str) -> std::process::Output {
+        use std::io::Write as _;
+        let mut command = Command::new(env!("CARGO_BIN_EXE_drogon-cli"));
+        command.args(args);
+        common::scrub_environment(&mut command, &self.data_dir);
+        command
+            .env("HOME", &self.home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().expect("spawn drogon-cli");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        child.wait_with_output().expect("drogon-cli output")
     }
 
     fn run(&self, args: &[&str]) -> Result<Value, String> {
@@ -735,5 +761,202 @@ fn a_jira_board_is_imported_synced_and_pushed_from_the_cli() {
     assert!(
         fx.text(&["work", "boards"]).lines().count() == 2,
         "only My work is left"
+    );
+}
+
+/// The fake Linear/GitHub (`scripts/fixtures/work-sources`), 127.0.0.1 only.
+struct FakeSources {
+    child: Child,
+    url: String,
+}
+
+impl FakeSources {
+    fn start() -> Self {
+        use std::io::BufRead as _;
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let script = root.join("scripts/fixtures/work-sources/fake-sources-server.mjs");
+        let mut child =
+            Command::new(std::env::var("DROGON_TEST_NODE").unwrap_or_else(|_| "node".into()))
+                .arg(&script)
+                .args(["--port", "0"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn the fake sources server");
+        let line = std::io::BufReader::new(child.stdout.take().unwrap())
+            .lines()
+            .next()
+            .unwrap()
+            .unwrap();
+        let port = line.trim().strip_prefix("LISTEN ").unwrap().to_string();
+        FakeSources {
+            child,
+            url: format!("http://127.0.0.1:{port}"),
+        }
+    }
+}
+
+impl Drop for FakeSources {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn sources_are_listed_toggled_connected_and_a_linear_team_imported_from_the_cli() {
+    let fx = Fixture::start();
+    let fake = FakeSources::start();
+    let status = fx.json(&["status"]);
+    assert!(
+        status["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c == "work.sources.v1")
+    );
+
+    let listed = fx.text(&["work", "sources"]);
+    assert!(
+        listed.contains("Jira  not connected (connect Jira on the Tasks page)"),
+        "{listed}"
+    );
+    assert!(listed.contains("Linear  not connected (work source connect --api-key-stdin)  — boards: teams, sprints: cycles"), "{listed}");
+    assert!(
+        listed.contains("GitHub  not connected (gh auth login"),
+        "{listed}"
+    );
+
+    let off = fx.text(&["work", "source", "disable", "--provider", "linear"]);
+    assert!(off.starts_with("Linear  off"), "{off}");
+    let refused = fx.command(&["work", "import", "boards", "--provider", "linear"]);
+    assert!(
+        stderr(&refused).contains("Linear is turned off for Work"),
+        "{}",
+        stderr(&refused)
+    );
+    fx.text(&["work", "source", "enable", "--provider", "linear"]);
+
+    // The key goes in on stdin and never comes back out.
+    let api = format!("{}/linear", fake.url);
+    let bad = fx.text_with_stdin(
+        &[
+            "work",
+            "source",
+            "connect",
+            "--provider",
+            "linear",
+            "--api-key-stdin",
+            "--api-url",
+            &api,
+        ],
+        "lin_api_wrong\n",
+    );
+    assert_eq!(bad.status.code(), Some(1));
+    assert!(
+        stderr(&bad).contains("Authentication required"),
+        "{}",
+        stderr(&bad)
+    );
+    let empty = fx.text_with_stdin(
+        &[
+            "work",
+            "source",
+            "connect",
+            "--provider",
+            "linear",
+            "--api-key-stdin",
+        ],
+        "\n",
+    );
+    assert_eq!(empty.status.code(), Some(2));
+    let connected = fx.text_with_stdin(
+        &[
+            "work",
+            "source",
+            "connect",
+            "--provider",
+            "linear",
+            "--api-key-stdin",
+            "--api-url",
+            &api,
+        ],
+        "lin_api_fixture\n",
+    );
+    assert!(connected.status.success(), "{}", stderr(&connected));
+    let out = stdout(&connected);
+    assert!(
+        out.contains("Linear  connected as Jon Doe · Drogon Fixture"),
+        "{out}"
+    );
+    assert!(!out.contains("lin_api_fixture"));
+
+    let teams = fx.text(&["work", "import", "boards", "--provider", "linear"]);
+    assert!(
+        teams.contains("team-eng  Engineering (scrum)  project ENG"),
+        "{teams}"
+    );
+    fx.json(&["project", "add", project_path(&fx).to_str().unwrap()]);
+    let imported = fx.text(&[
+        "work",
+        "import",
+        "run",
+        "--provider",
+        "linear",
+        "--board",
+        "team-eng",
+        "--issue",
+        "ENG-1",
+        "--issue",
+        "ENG-2",
+        "--project",
+        "Drogon",
+    ]);
+    assert!(
+        imported.contains("Imported 2 issue(s) into Engineering"),
+        "{imported}"
+    );
+    let board = fx.text(&["work", "board", "--board", "Engineering"]);
+    assert!(
+        board.starts_with("Engineering · Linear · Cycle 12 · Resume polish (active)"),
+        "{board}"
+    );
+    assert!(
+        board.contains("ENG-1  Resume Linear sessions after review  [backend · High · Jon Doe]"),
+        "{board}"
+    );
+    let moved = fx.text(&[
+        "work",
+        "ticket",
+        "move",
+        "--ticket",
+        "ENG-2",
+        "--column",
+        "In Progress",
+        "--sprint",
+        "cy-12",
+    ]);
+    assert!(
+        moved.contains("(not synced to Linear → In Progress)"),
+        "{moved}"
+    );
+    assert!(
+        fx.text(&["work", "push", "--ticket", "ENG-2"])
+            .contains("ENG-2: pushed.")
+    );
+    assert!(fx.text(&["work", "sources"]).contains("Linear  connected as Jon Doe · Drogon Fixture  — boards: teams, sprints: cycles, 1 imported"));
+
+    let resolve = fx.command(&[
+        "work", "ticket", "resolve", "--ticket", "ENG-2", "--keep", "maybe",
+    ]);
+    assert_eq!(resolve.status.code(), Some(2));
+    let gone = fx.text(&["work", "source", "disconnect", "--provider", "linear"]);
+    assert!(gone.contains("Linear  not connected"), "{gone}");
+    let github = fx.command(&["work", "source", "connect", "--provider", "github"]);
+    assert!(
+        stderr(&github).contains("No GitHub login"),
+        "{}",
+        stderr(&github)
     );
 }

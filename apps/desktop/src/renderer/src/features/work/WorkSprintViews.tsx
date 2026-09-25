@@ -17,13 +17,15 @@ import {
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import type { WorkSprint, WorkTicket, WorkView } from "../../../../shared/work-contract";
-import { ProviderMark, providerLabel, sprintDates, ticketDisplayKey } from "./work-jira";
+import { ProviderMark, capitalize, providerLabel, sprintDates, sprintTerm, ticketDisplayKey } from "./work-sources";
 
 export function ClosedSprintBanner({
   sprint,
+  term = "sprint",
   onSummary,
 }: {
   sprint: WorkSprint;
+  term?: string;
   onSummary: () => void;
 }) {
   return (
@@ -40,7 +42,7 @@ export function ClosedSprintBanner({
         <p className="text-xs text-muted-foreground">Historical snapshot · prompts paused</p>
       </div>
       <Button variant="outline" size="sm" onClick={onSummary}>
-        Sprint summary
+        {capitalize(term)} summary
       </Button>
     </div>
   );
@@ -55,10 +57,12 @@ function find(tickets: WorkTicket[], id: string): WorkTicket | undefined {
 export function SprintOutcomePanel({
   outcome,
   tickets,
+  term = "sprint",
   onOpenTicket,
 }: {
   outcome: Outcome;
   tickets: WorkTicket[];
+  term?: string;
   onOpenTicket: (ticket: WorkTicket) => void;
 }) {
   const carried = outcome.carried.map((c) => ({ ...c, ticket: find(tickets, c.ticketId) })).filter((c) => c.ticket);
@@ -66,11 +70,11 @@ export function SprintOutcomePanel({
   return (
     <aside
       className="flex w-[300px] shrink-0 flex-col gap-5 border-l border-border px-5 py-4 text-sm"
-      aria-label="Sprint outcome"
+      aria-label={`${capitalize(term)} outcome`}
       data-testid="work-sprint-outcome"
     >
       <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
-        <BarChart3 className="size-4" aria-hidden="true" /> Sprint outcome
+        <BarChart3 className="size-4" aria-hidden="true" /> {capitalize(term)} outcome
       </h2>
       <ul className="space-y-2">
         <li className="flex items-center gap-2">
@@ -87,8 +91,8 @@ export function SprintOutcomePanel({
         </li>
       </ul>
       {carried.length ? (
-        <section className="space-y-2" aria-label="Carried over to next sprint">
-          <h3 className="font-semibold text-foreground">Carried over to next sprint</h3>
+        <section className="space-y-2" aria-label={`Carried over to next ${term}`}>
+          <h3 className="font-semibold text-foreground">Carried over to next {term}</h3>
           {carried.map((c) => (
             <button
               key={c.ticketId}
@@ -99,7 +103,7 @@ export function SprintOutcomePanel({
               <ProviderMark provider={c.ticket!.provider} />
               <span className="font-mono text-xs">{ticketDisplayKey(c.ticket!)}</span>
               <ArrowRight className="size-3.5 text-muted-foreground" aria-hidden="true" />
-              <span className="flex-1 truncate">{c.toSprintName ?? "next sprint"}</span>
+              <span className="flex-1 truncate">{c.toSprintName ?? `next ${term}`}</span>
               {c.pending ? <span className="text-[11px] text-amber-500">unsynced</span> : null}
             </button>
           ))}
@@ -135,6 +139,7 @@ export function SprintSummary({
   onCarry: (ticket: WorkTicket) => void;
   onBacklog: (ticket: WorkTicket) => void;
 }) {
+  const term = sprintTerm(tickets[0]?.provider);
   const completed = outcome.completed.map((id) => find(tickets, id)).filter(Boolean) as WorkTicket[];
   const carried = outcome.carried.map((c) => ({ ...c, ticket: find(tickets, c.ticketId) })).filter((c) => c.ticket);
   const backlog = outcome.backlog.map((b) => ({ ...b, ticket: find(tickets, b.ticketId) })).filter((b) => b.ticket);
@@ -157,7 +162,7 @@ export function SprintSummary({
           icon={<CircleCheck className="size-7 text-green-500" aria-hidden="true" />}
           title="Completed"
           count={completed.length}
-          blurb="Issues finished during this sprint."
+          blurb={`Issues finished during this ${term}.`}
         >
           {completed.map((t) => (
             <SummaryRow key={t.id} ticket={t} glyph={<CircleCheck className="size-6 text-green-500" aria-hidden="true" />} onOpen={() => onOpenTicket(t)}>
@@ -170,7 +175,7 @@ export function SprintSummary({
           icon={<RefreshCw className="size-7 text-amber-500" aria-hidden="true" />}
           title="Carried forward"
           count={carried.length}
-          blurb="Not completed in this sprint. Moved to a future sprint."
+          blurb={`Not completed in this ${term}. Moved to a future ${term}.`}
         >
           {carried.map((c) => (
             <SummaryRow
@@ -186,7 +191,7 @@ export function SprintSummary({
               }
             >
               <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/60 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
-                <ArrowRight className="size-3.5" aria-hidden="true" /> {c.toSprintName ?? "Next sprint"}
+                <ArrowRight className="size-3.5" aria-hidden="true" /> {c.toSprintName ?? `Next ${term}`}
                 {c.pending ? " · unsynced" : ""}
               </span>
               <div className="flex gap-2">
@@ -205,7 +210,7 @@ export function SprintSummary({
           icon={<Undo2 className="size-7 text-muted-foreground" aria-hidden="true" />}
           title="Returned to backlog"
           count={backlog.length}
-          blurb="Moved back to backlog during this sprint."
+          blurb={`Moved back to backlog during this ${term}.`}
         >
           {backlog.map((b) => (
             <SummaryRow key={b.ticketId} ticket={b.ticket!} glyph={<Undo2 className="size-6 text-muted-foreground" aria-hidden="true" />} onOpen={() => onOpenTicket(b.ticket!)}>
@@ -224,10 +229,10 @@ export function SprintSummary({
           ))}
         </SummarySection>
       </div>
-      <aside className="w-[300px] shrink-0 space-y-3 border-l border-border px-5 py-2 text-sm" aria-label="Sprint continuity">
-        <h3 className="text-base font-semibold text-foreground">Sprint continuity</h3>
+      <aside className="w-[300px] shrink-0 space-y-3 border-l border-border px-5 py-2 text-sm" aria-label={`${capitalize(term)} continuity`}>
+        <h3 className="text-base font-semibold text-foreground">{capitalize(term)} continuity</h3>
         <p className="text-muted-foreground">
-          Track how work moves between sprints while keeping one set of sessions and notes.
+          Track how work moves between {term}s while keeping one set of sessions and notes.
         </p>
         <div className="flex items-center gap-3 rounded-lg border border-border p-3">
           <div className="flex-1 rounded-md bg-muted/50 px-3 py-2 text-center">
@@ -313,10 +318,10 @@ function ProviderTag({ ticket }: { ticket: WorkTicket }) {
   );
 }
 
-export function BackToActive({ onClick }: { onClick: () => void }) {
+export function BackToActive({ term = "sprint", onClick }: { term?: string; onClick: () => void }) {
   return (
     <Button variant="link" size="sm" className="h-auto px-1 text-blue-500" onClick={onClick}>
-      <ArrowLeft /> Back to active sprint
+      <ArrowLeft /> Back to active {term}
     </Button>
   );
 }

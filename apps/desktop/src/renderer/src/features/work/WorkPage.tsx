@@ -3,12 +3,13 @@
 // (Sources). A column's "…" opens its prompt panel; a ticket opens its own
 // panel, where each linked session opens (or resumes) in one click.
 //
-// The board picker holds My work and every imported board (Jira). An
-// imported scrum board shows one sprint at a time (the active one by
+// The board picker holds My work and every imported board (Jira, Linear,
+// GitHub; the Sources tab says which sources are allowed and connects
+// them). An imported sprint board shows one sprint at a time (the active one by
 // default), the backlog, or a closed sprint — read-only, with its outcome —
-// and every card says where it stands against Jira (unsynced, conflict,
+// and every card says where it stands against its source (unsynced, conflict,
 // refused, unmapped, gone) with the action that settles it.
-import { useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Check,
@@ -18,6 +19,7 @@ import {
   ExternalLink,
   FileText,
   Filter,
+  Import,
   Folder,
   GitPullRequest,
   LayoutList,
@@ -63,6 +65,7 @@ import {
   type WorkBridge,
   type WorkColumn,
   type WorkSession,
+  type WorkSource,
   type WorkSprint,
   type WorkTicket,
 } from "../../../../shared/work-contract";
@@ -99,11 +102,20 @@ import {
   PriorityBadge,
   ProviderMark,
   providerLabel,
+  capitalize,
   sprintLabel,
+  sprintTerm,
   sprintStateDot,
   ticketDisplayKey,
-} from "./work-jira";
-import { JiraIcon } from "../../components/icons/JiraIcon";
+} from "./work-sources";
+import {
+  allowedSources,
+  importLabel,
+  SyncSourcesCard,
+  useSyncCardDismissed,
+  useWorkSources,
+  WorkSourcesPanel,
+} from "./WorkSources";
 
 const TICKET_MIME = "application/x-drogon-work-ticket";
 
@@ -140,6 +152,7 @@ export function WorkPage({
     void (window as unknown as { drogon?: { shell?: { openExternal?: (u: string) => unknown } } }).drogon?.shell?.openExternal?.(url);
   },
   listSessions = defaultListSessions,
+  onOpenTasks,
   onClose,
 }: {
   bridge: WorkBridge | null;
@@ -149,6 +162,8 @@ export function WorkPage({
   onOpenSession: (target: WorkSessionTarget) => void;
   onOpenExternal?: (url: string) => void;
   listSessions?: () => Promise<Session[]>;
+  /** Opens the Tasks page, where Jira connects. */
+  onOpenTasks?: () => void;
   onClose?: () => void;
 }) {
   const [selection, setSelectionState] = useState<Selection>(lastView.selection);
@@ -175,7 +190,15 @@ export function WorkPage({
   };
   const [newTicketColumn, setNewTicketColumn] = useState<string | null>(null);
   const [newColumnOpen, setNewColumnOpen] = useState(false);
-  const [importing, setImporting] = useState<null | { externalId: string; projectId?: string | null } | "pick">(null);
+  /** The import dialog: a source, and the board to start from (Import
+   *  more issues) or none (pick one). */
+  const [importing, setImporting] = useState<null | {
+    source: WorkSource;
+    board?: { externalId: string; projectId?: string | null };
+  }>(null);
+  const sourcesState = useWorkSources(bridge, active);
+  const allowed = allowedSources(sourcesState.sources);
+  const [cardDismissed, dismissCard, restoreCard] = useSyncCardDismissed();
   const [syncing, setSyncing] = useState(false);
 
   const notice = (message: string, kind: "error" | "success" = "success") => {
@@ -217,7 +240,7 @@ export function WorkPage({
       const result = await state.run(() => bridge.ticketResolve({ ticketId: ticket.id, keep }));
       if (!result.ok) notice(result.error, "error");
       else if (keep === "ours" && result.value.sync === "error") notice(result.value.pushError ?? "Push refused", "error");
-      else notice(keep === "jira" ? `Kept ${providerLabel(ticket.provider)}'s status` : "Pushed your move");
+      else notice(keep === "theirs" ? `Kept ${providerLabel(ticket.provider)}'s status` : "Pushed your move");
     },
     onMapStatus: async (ticket, column) => {
       if (!bridge || !ticket.externalStatus) return;
@@ -227,6 +250,17 @@ export function WorkPage({
       else notice(`'${ticket.externalStatus.name}' now maps to ${column.name}`);
     },
   };
+
+  /** The source of the board shown (for Import more issues). */
+  const summarySource = (): WorkSource | undefined =>
+    summary?.provider ? sourcesState.sources.find((s) => s.id === summary.provider) : undefined;
+  const importMore = () => {
+    const source = summarySource();
+    if (source && summary) setImporting({ source, board: { externalId: summary.externalId ?? "", projectId: summary.projectId } });
+    else if (summary?.provider) notice(`${providerLabel(summary.provider)} is turned off; turn it on in Sources`, "error");
+  };
+  const term = sprintTerm(summary?.provider);
+  const Term = capitalize(term);
 
   const syncNow = async () => {
     if (!bridge || !summary?.provider) return;
@@ -352,7 +386,7 @@ export function WorkPage({
                         Push all pending moves ({summary.pendingCount}) to {providerLabel(summary.provider)}
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        onSelect={() => setImporting({ externalId: summary.externalId ?? "", projectId: summary.projectId })}
+                        onSelect={importMore}
                       >
                         Import more issues…
                       </DropdownMenuItem>
@@ -374,16 +408,27 @@ export function WorkPage({
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
-              ) : supportsImport && bridge ? (
-                <Button variant="outline" className="border-blue-500/60" onClick={() => setImporting("pick")}>
-                  <JiraIcon className="size-4 text-blue-500" /> Import Jira board
-                </Button>
+              ) : supportsImport && bridge && allowed.length ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" aria-label="Import board">
+                      <Import /> Import board <ChevronDown className="opacity-60" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {allowed.map((s) => (
+                      <DropdownMenuItem key={s.id} onSelect={() => setImporting({ source: s })}>
+                        <ProviderMark provider={s.id} className="size-4" /> {importLabel(s)}…
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => setTab("sources")}>Manage sources…</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               ) : null}
               <Button
                 onClick={() =>
-                  imported && summary
-                    ? setImporting({ externalId: summary.externalId ?? "", projectId: summary.projectId })
-                    : setNewTicketColumn(board?.columns[0]?.id ?? "")
+                  imported && summary ? importMore() : setNewTicketColumn(board?.columns[0]?.id ?? "")
                 }
                 disabled={!board || readOnly}
               >
@@ -417,7 +462,8 @@ export function WorkPage({
                     setPanel(null);
                     setSelection({ boardId: b.id });
                   }}
-                  onImport={() => setImporting("pick")}
+                  sources={allowed}
+                  onImport={(source) => setImporting({ source })}
                 />
               ) : null}
               {imported && summary?.kind === "scrum" ? (
@@ -425,12 +471,13 @@ export function WorkPage({
                   <SprintPicker
                     sprints={sprints}
                     view={view?.kind === "backlog" ? "backlog" : (view?.sprint ?? null)}
+                    term={Term}
                     onSelect={(sprint) =>
                       selectSprint(sprint === "backlog" ? "backlog" : sprint.state === "active" ? undefined : sprint.id)
                     }
                   />
                   {readOnly || view?.kind === "backlog" ? (
-                    <BackToActive onClick={() => selectSprint(undefined)} />
+                    <BackToActive term={term} onClick={() => selectSprint(undefined)} />
                   ) : (
                     <>
                       <Button variant="link" size="sm" className="h-auto px-1 text-muted-foreground underline" onClick={() => selectSprint("backlog")}>
@@ -443,7 +490,7 @@ export function WorkPage({
                           className="h-auto px-1 text-blue-500 underline"
                           onClick={() => selectSprint(closedSprints[closedSprints.length - 1]!.id, true)}
                         >
-                          Past sprints
+                          Past {term}s
                         </Button>
                       ) : null}
                     </>
@@ -520,10 +567,10 @@ export function WorkPage({
             />
           ) : tab === "board" ? (
             <>
-              {closedSprint ? <ClosedSprintBanner sprint={closedSprint} onSummary={() => selectSprint(closedSprint.id, true)} /> : null}
+              {closedSprint ? <ClosedSprintBanner sprint={closedSprint} term={term} onSummary={() => selectSprint(closedSprint.id, true)} /> : null}
               {view?.kind === "backlog" ? (
                 <p className="mx-6 mb-3 text-xs text-muted-foreground" role="status">
-                  Backlog · prompts fire only in the active sprint
+                  Backlog · prompts fire only in the active {term}
                 </p>
               ) : null}
               <div className="relative flex min-h-0 flex-1">
@@ -540,7 +587,7 @@ export function WorkPage({
                   onOpenTicket={(id) => setPanel({ kind: "ticket", id })}
                   onNewTicket={(columnId) =>
                     imported && summary
-                      ? setImporting({ externalId: summary.externalId ?? "", projectId: summary.projectId })
+                      ? importMore()
                       : setNewTicketColumn(columnId)
                   }
                   onNewColumn={() => setNewColumnOpen(true)}
@@ -578,16 +625,14 @@ export function WorkPage({
                     if (!result.ok) notice(result.error, "error");
                   }}
                 />
-                {emptyStart ? (
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center" data-testid="work-import-empty">
-                    <div className="pointer-events-auto w-[420px] rounded-xl border border-border bg-card px-8 py-7 text-center shadow-sm">
-                      <JiraIcon className="mx-auto size-9 text-blue-500" />
-                      <h2 className="mt-4 text-lg font-semibold text-foreground">Bring in a Jira Scrum board</h2>
-                      <p className="mt-1 text-sm text-muted-foreground">Sprints, issues, and column prompts in one place</p>
-                      <Button variant="link" className="mt-3 text-muted-foreground" onClick={() => setImporting("pick")}>
-                        Choose a board to start
-                      </Button>
-                    </div>
+                {emptyStart && !cardDismissed && allowed.length ? (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <SyncSourcesCard
+                      sources={allowed}
+                      onImport={(source) => setImporting({ source })}
+                      onDismiss={dismissCard}
+                      onManage={() => setTab("sources")}
+                    />
                   </div>
                 ) : null}
               </div>
@@ -595,7 +640,24 @@ export function WorkPage({
           ) : tab === "list" ? (
             <ListView board={board} tickets={visibleTickets} onOpenTicket={(id) => setPanel({ kind: "ticket", id })} />
           ) : (
-            <SourcesView tickets={visibleTickets} onOpenTicket={(id) => setPanel({ kind: "ticket", id })} onOpenExternal={onOpenExternal} />
+            <SourcesView
+              tickets={visibleTickets}
+              onOpenTicket={(id) => setPanel({ kind: "ticket", id })}
+              onOpenExternal={onOpenExternal}
+              manage={
+                bridge ? (
+                  <WorkSourcesPanel
+                    state={sourcesState}
+                    bridge={bridge}
+                    onOpenExternal={onOpenExternal}
+                    onOpenTasks={onOpenTasks}
+                    onNotice={notice}
+                  />
+                ) : null
+              }
+              cardDismissed={cardDismissed && allowed.length > 0}
+              onRestoreCard={restoreCard}
+            />
           )}
         </div>
         {bridge && board && panelColumn ? (
@@ -625,7 +687,7 @@ export function WorkPage({
           />
         ) : null}
         {board && !panelColumn && !panelTicket && closedSprint && view?.outcome && !showSummary && tab === "board" ? (
-          <SprintOutcomePanel outcome={view.outcome} tickets={board.tickets} onOpenTicket={openTicket} />
+          <SprintOutcomePanel outcome={view.outcome} tickets={board.tickets} term={term} onOpenTicket={openTicket} />
         ) : null}
       </div>
       {bridge && board ? (
@@ -660,19 +722,24 @@ export function WorkPage({
           }}
         />
       ) : null}
-      {bridge ? (
+      {bridge && importing ? (
         <WorkImportDialog
-          open={importing !== null}
+          open
           bridge={bridge}
+          source={importing.source}
           projects={board?.projects ?? []}
-          initialBoard={importing && importing !== "pick" ? importing : null}
+          initialBoard={importing.board ?? null}
           onClose={() => setImporting(null)}
+          onOpenExternal={onOpenExternal}
+          onOpenTasks={onOpenTasks}
+          onSourceChanged={() => void sourcesState.reload()}
           onImported={(imported, count) => {
             setImporting(null);
             setPanel(null);
             setSelection({ boardId: imported.id });
             notice(`Imported ${count} ${count === 1 ? "issue" : "issues"} into ${imported.name}`);
             void state.reload();
+            void sourcesState.reload();
           }}
         />
       ) : null}
@@ -940,7 +1007,13 @@ function BoardColumn({
           <div className="flex flex-col items-center gap-1 px-3 pt-16 text-center text-xs text-muted-foreground" data-testid="work-column-empty">
             <CircleCheck className="mb-1 size-7 opacity-50" aria-hidden="true" />
             <p className="text-sm">{readOnly ? "No tickets" : "No tickets yet"}</p>
-            <p>{readOnly ? "Nothing ended this sprint here." : "Tickets moved here will stay in this sprint."}</p>
+            <p>
+              {board.board?.kind !== "scrum"
+                ? "Drop a ticket here to move it."
+                : readOnly
+                  ? `Nothing ended this ${sprintTerm(board.board?.provider)} here.`
+                  : `Tickets moved here will stay in this ${sprintTerm(board.board?.provider)}.`}
+            </p>
           </div>
         ) : null}
       </div>
@@ -1032,7 +1105,7 @@ function TicketCard({
               <>
                 {activeSprint && ticket.sprintId !== activeSprint.id ? (
                   <DropdownMenuItem onSelect={() => onSprint("active")}>
-                    {closedSprint ? "Carry over to active sprint" : `Move to ${activeSprint.name}`}
+                    {closedSprint ? `Carry over to active ${sprintTerm(ticket.provider)}` : `Move to ${activeSprint.name}`}
                   </DropdownMenuItem>
                 ) : null}
                 {ticket.sprintId ? (
@@ -1138,13 +1211,16 @@ function TicketCard({
 function BoardPicker({
   boards,
   current,
+  sources,
   onSelect,
   onImport,
 }: {
   boards: WorkBoardSummary[];
   current: WorkBoardSummary | null;
+  /** The allowed sources: one "Import a … " entry each. */
+  sources: WorkSource[];
   onSelect: (board: WorkBoardSummary) => void;
-  onImport: () => void;
+  onImport: (source: WorkSource) => void;
 }) {
   return (
     <DropdownMenu>
@@ -1164,10 +1240,12 @@ function BoardPicker({
             {current?.id === b.id ? <Check className="size-4" /> : null}
           </DropdownMenuItem>
         ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onImport}>
-          <JiraIcon className="size-4 text-blue-500" /> Import Jira board…
-        </DropdownMenuItem>
+        {sources.length ? <DropdownMenuSeparator /> : null}
+        {sources.map((s) => (
+          <DropdownMenuItem key={s.id} onSelect={() => onImport(s)}>
+            <ProviderMark provider={s.id} className="size-4" /> {importLabel(s)}…
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -1176,10 +1254,13 @@ function BoardPicker({
 function SprintPicker({
   sprints,
   view,
+  term,
   onSelect,
 }: {
   sprints: WorkSprint[];
   view: WorkSprint | "backlog" | null;
+  /** What the source calls a sprint, capitalized (Sprint, Cycle, Iteration). */
+  term: string;
   onSelect: (sprint: WorkSprint | "backlog") => void;
 }) {
   const ordered = [
@@ -1187,12 +1268,12 @@ function SprintPicker({
     ...sprints.filter((s) => s.state === "future"),
     ...sprints.filter((s) => s.state === "closed").reverse(),
   ];
-  const label = view === "backlog" ? "Backlog" : view ? sprintLabel(view) : "No active sprint";
+  const label = view === "backlog" ? "Backlog" : view ? sprintLabel(view) : `No active ${term.toLowerCase()}`;
   const currentId = view === "backlog" ? "backlog" : view?.id;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="h-9 gap-2" aria-label="Sprint">
+        <Button variant="outline" className="h-9 gap-2" aria-label={term}>
           {view && view !== "backlog" ? (
             <span className={`size-2 rounded-full ${sprintStateDot(view.state)}`} aria-hidden="true" />
           ) : (
@@ -1282,10 +1363,17 @@ function SourcesView({
   tickets,
   onOpenTicket,
   onOpenExternal,
+  manage,
+  cardDismissed,
+  onRestoreCard,
 }: {
   tickets: WorkTicket[];
   onOpenTicket: (id: string) => void;
   onOpenExternal: (url: string) => void;
+  /** The sync sources panel (allow, connect). */
+  manage?: ReactNode;
+  cardDismissed?: boolean;
+  onRestoreCard?: () => void;
 }) {
   const linked = tickets.filter((t) => t.sourceUrl);
   const groups = new Map<string, WorkTicket[]>();
@@ -1296,6 +1384,12 @@ function SourcesView({
   const unlinked = tickets.length - linked.length;
   return (
     <div className="min-h-0 flex-1 space-y-5 overflow-auto px-6 pb-4" data-testid="work-sources">
+      {manage}
+      {cardDismissed && onRestoreCard ? (
+        <button type="button" className="text-xs text-muted-foreground underline" onClick={onRestoreCard}>
+          Show the "Sync a board" card on an empty My work again
+        </button>
+      ) : null}
       <p className="text-sm text-muted-foreground">
         Tickets are Drogon records; each can link the ticket it tracks in another system.
         {unlinked > 0 ? ` ${unlinked} ticket${unlinked === 1 ? " has" : "s have"} no source link.` : ""}

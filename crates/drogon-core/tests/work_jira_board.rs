@@ -212,9 +212,9 @@ fn import_lists_boards_and_brings_only_the_chosen_issues() {
     assert_eq!(refused.code, "jira_not_connected");
     assert!(refused.message.contains("Connect it from the Tasks page"));
     assert!(
-        ctx.err("work.provider_boards", json!({"provider": "linear"}))
+        ctx.err("work.provider_boards", json!({"provider": "gitlab"}))
             .message
-            .contains("unknown ticket provider linear")
+            .contains("unknown ticket source gitlab")
     );
     ctx.connect(&server);
 

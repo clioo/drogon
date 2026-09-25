@@ -26,6 +26,14 @@
 //     and opens it.
 // 12. A closed sprint is read-only with its outcome; its summary carries a
 //     ticket over, and "Push all pending" moves it in Jira.
+// 13. Sources: every source starts allowed; turning one off takes it out of
+//     the Import board menu; the "Sync a board" card is dismissible and
+//     comes back from Sources.
+// 14. GitHub connects from the UI (token + Enterprise API URL on the fake
+//     GitHub); a GitHub Project imports with its Status columns and
+//     iterations; a drop + Push sets the item's Status on GitHub.
+// 15. A Linear team imports (key connected over the CLI's rpc) and reads in
+//     cycles; Linear moving an issue moves its card on Sync.
 //
 // Usage: node scripts/accept-work-board.mjs [--bundle <Drogon.app>]
 import assert from "node:assert/strict";
@@ -125,6 +133,47 @@ async function jiraControl(pathname, body) {
 async function jiraIssue(key) {
   const preview = await cli(["work", "import", "preview", "--board", "7"]);
   return preview.issues.find((i) => i.key === key);
+}
+
+const fakeSources = path.join(root, "scripts", "fixtures", "work-sources", "fake-sources-server.mjs");
+let sources = null;
+let sourcesUrl = null;
+
+async function startSources() {
+  sources = startAcceptanceProcess(process.execPath, [fakeSources, "--port", "0", "--log", path.join(fixture, "sources.jsonl")], {
+    stdio: ["ignore", "pipe", "ignore"],
+    env,
+  });
+  ownedPids.add(sources.pid);
+  const port = await new Promise((resolve, reject) => {
+    let buffered = "";
+    const timer = setTimeout(() => reject(new Error("fake sources never listened")), 15000);
+    sources.stdout.on("data", (bytes) => {
+      buffered += bytes.toString();
+      const match = buffered.match(/LISTEN (\d+)/);
+      if (match) {
+        clearTimeout(timer);
+        resolve(match[1]);
+      }
+    });
+  });
+  sourcesUrl = `http://127.0.0.1:${port}`;
+}
+
+async function sourcesControl(pathname, body) {
+  const response = await fetch(`${sourcesUrl}/__fixture/${pathname}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  assert.equal(response.status, 200, `fixture control ${pathname}`);
+}
+
+async function importMenu() {
+  await page.getByRole("button", { name: "Import board", exact: true }).click();
+  const items = (await page.getByRole("menuitem").allTextContents()).map((t) => t.trim());
+  await page.keyboard.press("Escape");
+  return items;
 }
 
 const report = {
@@ -265,6 +314,25 @@ try {
     "page",
   );
   check("sidebar-work-row-opens-the-board-with-default-columns");
+  // The optional card lists every allowed source; dismissed, it stays gone
+  // until Sources brings it back.
+  const syncCard = page.getByTestId("work-sync-card");
+  await syncCard.getByRole("button", { name: /Import a Linear team/ }).waitFor();
+  await syncCard.getByRole("button", { name: /Import a GitHub project or repository/ }).waitFor();
+  await shot("sync-card");
+  await syncCard.getByRole("button", { name: "Dismiss" }).click();
+  await syncCard.waitFor({ state: "detached" });
+  assert.deepEqual(await importMenu(), [
+    "Import a Jira board…",
+    "Import a Linear team…",
+    "Import a GitHub project or repository…",
+    "Manage sources…",
+  ]);
+  await page.getByRole("tab", { name: "sources" }).click();
+  await page.getByRole("button", { name: /Sync a board" card/ }).click();
+  await page.getByRole("tab", { name: "board" }).click();
+  await syncCard.waitFor();
+  check("the-sync-card-is-dismissible-and-returns-from-sources");
 
   // 2. Configure the Review column's prompt in its panel.
   await page.getByRole("button", { name: "Review column actions" }).click();
@@ -397,10 +465,11 @@ try {
   await page.getByRole("tab", { name: "board" }).click();
   check("list-and-sources-views-show-the-ticket");
 
-  // 8. Import a Jira board from the empty-state flow.
+  // 8. Import a Jira board from the Import board menu.
   await startJira();
   await cli(["rpc", "jira.connect", "--params", JSON.stringify({ siteUrl: jiraUrl, email: "carlos@example.com", apiToken: "fixture-token" })]);
-  await page.getByRole("button", { name: /Import Jira board/ }).first().click();
+  await page.getByRole("button", { name: "Import board", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Import a Jira board/ }).click();
   const importDialog = page.getByTestId("work-import-dialog");
   await importDialog.getByRole("button", { name: "Choose Platform Delivery" }).click();
   await importDialog.getByTestId("work-import-columns").getByText("Columns: To Do · In Progress · Review · QA · Done").waitFor();
@@ -418,7 +487,7 @@ try {
   const boards = await cli(["work", "boards"]);
   assert.deepEqual(boards.boards.map((b) => b.name), ["My work", "Platform Delivery"]);
   await shot("jira-board");
-  check("a-jira-board-and-chosen-issues-import-from-the-empty-state-flow");
+  check("a-jira-board-and-chosen-issues-import-from-the-import-menu");
 
   // 9. Jira moves APP-130; Sync moves the card and Review's prompt fires.
   await page.getByRole("button", { name: "Review column actions" }).click();
@@ -500,6 +569,74 @@ try {
   await waitFor("APP-122 in Sprint 25 on Jira", async () => (await jiraIssue("APP-122")).sprint?.name === "Sprint 25");
   check("a-closed-sprint-is-read-only-and-its-summary-carries-a-ticket-over");
 
+  // 13. Sources: turning Jira off takes it out of the import menus.
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.getByRole("menuitem", { name: "My work" }).click();
+  await page.getByRole("tab", { name: "sources" }).click();
+  const panel = page.getByTestId("work-sync-sources");
+  const row = (name) => panel.getByRole("listitem", { name });
+  await row("Jira").getByTestId("work-source-status").getByText(/Connected as/).waitFor();
+  await row("GitHub").getByTestId("work-source-status").getByText("Not connected").waitFor();
+  await row("Jira").getByRole("switch", { name: "Allow Jira" }).click();
+  await row("Jira").getByTestId("work-source-status").getByText("Off: not imported, synced or pushed").waitFor();
+  assert.equal((await cli(["work", "sources"])).sources.find((s) => s.id === "jira").enabled, false);
+  await page.getByRole("tab", { name: "board" }).click();
+  assert.deepEqual(await importMenu(), ["Import a Linear team…", "Import a GitHub project or repository…", "Manage sources…"]);
+  await page.getByRole("tab", { name: "sources" }).click();
+  await row("Jira").getByRole("switch", { name: "Allow Jira" }).click();
+  await row("Jira").getByTestId("work-source-status").getByText(/Connected as/).waitFor();
+  check("sources-start-allowed-and-an-off-source-leaves-the-import-menu");
+
+  // 14. GitHub, connected from the UI, and a Project imported.
+  await startSources();
+  await row("GitHub").getByRole("button", { name: "Connect" }).click();
+  await row("GitHub").getByRole("button", { name: "GitHub Enterprise?" }).click();
+  await row("GitHub").getByLabel("GitHub Enterprise API URL").fill(`${sourcesUrl}/github`);
+  await row("GitHub").getByLabel("GitHub token").fill("ghp_fixture");
+  await shot("sources-connect-github");
+  await row("GitHub").getByRole("button", { name: "Connect", exact: true }).last().click();
+  await row("GitHub").getByTestId("work-source-status").getByText("Connected as octo-fixture").waitFor();
+  await shot("sources");
+  await page.getByRole("tab", { name: "board" }).click();
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Import a GitHub project or repository/ }).click();
+  const ghDialog = page.getByTestId("work-import-dialog");
+  await ghDialog.getByRole("button", { name: "Choose Drogon Roadmap" }).click();
+  await ghDialog.getByTestId("work-import-columns").getByText("Columns: No Status · Todo · In Progress · Done").waitFor();
+  await ghDialog.getByRole("region", { name: "Iteration 2 · Active" }).waitFor();
+  await ghDialog.getByRole("button", { name: /^Import \d+ issues?$/ }).click();
+  await ghDialog.waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Iteration", exact: true }).getByText("Iteration 2 · Active").waitFor();
+  const ghCard = page.getByRole("article", { name: /drogon#11 Iteration picker/ });
+  await ghCard.getByTestId("work-issue-type").getByText("Issue").waitFor();
+  await shot("github-board");
+  await ghCard.dragTo(page.getByRole("region", { name: "Done column" }));
+  const ghPending = page.getByRole("region", { name: "Done column" }).getByRole("article", { name: /drogon#11/ });
+  await ghPending.getByRole("button", { name: "Push to GitHub" }).click();
+  await waitFor("GitHub item status Done", async () => {
+    const preview = await cli(["work", "import", "preview", "--provider", "github", "--board", "project:PVT_roadmap"]);
+    return preview.issues.find((i) => i.key === "clioo/drogon#11")?.status.name === "Done";
+  });
+  await ghPending.getByText("Not synced to GitHub").waitFor({ state: "detached" });
+  check("github-connects-from-the-ui-and-a-project-round-trips-a-status");
+
+  // 15. Linear: key over the CLI's rpc (the UI form is covered by vitest).
+  await cli(["rpc", "work.source_connect", "--params", JSON.stringify({ provider: "linear", apiKey: "lin_api_fixture", apiUrl: `${sourcesUrl}/linear` })]);
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.getByRole("menuitem", { name: /Import a Linear team/ }).click();
+  const linDialog = page.getByTestId("work-import-dialog");
+  await linDialog.getByRole("button", { name: "Choose Engineering" }).click();
+  await linDialog.getByRole("region", { name: "Cycle 12 · Resume polish · Active" }).waitFor();
+  await linDialog.getByRole("button", { name: /^Import \d+ issues?$/ }).click();
+  await linDialog.waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Cycle", exact: true }).getByText("Cycle 12 · Resume polish · Active").waitFor();
+  await page.getByRole("button", { name: "Past cycles" }).waitFor();
+  await sourcesControl("linear/issue/ENG-2", { state: "In Progress" });
+  await page.getByRole("button", { name: "Sync Engineering" }).click();
+  await page.getByRole("region", { name: "In Progress column" }).getByRole("article", { name: /ENG-2/ }).waitFor({ timeout: 20000 });
+  await shot("linear-board");
+  check("a-linear-team-imports-in-cycles-and-follows-linear-on-sync");
+
   // Light theme, chosen through the real Settings pane (the app's theme does
   // not follow an emulated color scheme): the board and both panels.
   await selectSettingsTheme(page, "light");
@@ -510,6 +647,9 @@ try {
     await page.screenshot({ path: path.join(output, file), animations: "disabled" });
     report.screenshots.push(file);
   };
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Platform Delivery · Jira" }).click();
+  await page.getByRole("button", { name: "Sprint", exact: true }).waitFor();
   await light("jira-board-light.png");
   await page.getByRole("button", { name: "Open APP-128: Handle session resume after PR review" }).click();
   await jiraPanel.waitFor();
@@ -555,6 +695,10 @@ try {
     if (jira) {
       await stopAcceptanceProcess(jira).catch(() => {});
       report.processes.jira = "exited";
+    }
+    if (sources) {
+      await stopAcceptanceProcess(sources).catch(() => {});
+      report.processes.sources = "exited";
     }
     await delay(500);
     const { stdout } = await runAcceptanceProcess("/bin/ps", ["-axo", "pid=,command="], { timeout: 5000 });

@@ -48,9 +48,11 @@ import {
   PriorityBadge,
   ProviderMark,
   providerLabel,
+  capitalize,
   sprintDates,
+  sprintTerm,
   ticketDisplayKey,
-} from "./work-jira";
+} from "./work-sources";
 import { WorkSyncActions, type WorkSyncHandlers } from "./WorkSyncActions";
 
 export type WorkWorkspace = { id: string; name: string };
@@ -148,6 +150,7 @@ export function WorkTicketPanel({
   const workspaceName = useMemo(() => new Map(workspaces.map((w) => [w.id, w.name])), [workspaces]);
   const column = board.columns.find((c) => c.id === ticket.columnId);
   const provider = providerLabel(ticket.provider);
+  const Term = capitalize(sprintTerm(ticket.provider));
 
   const update = async (patch: Omit<WorkTicketUpdate, "ticketId">) => {
     const result = await state.run(() => bridge.ticketUpdate({ ticketId: ticket.id, ...patch }));
@@ -385,9 +388,9 @@ export function WorkTicketPanel({
         {tab === "details" ? (
           <>
             {imported && timeline.length ? (
-              <section className="space-y-2" aria-label="Sprint continuity">
+              <section className="space-y-2" aria-label={`${Term} continuity`}>
                 <h3 className="flex items-center gap-1.5 text-base font-semibold text-foreground">
-                  Sprint continuity <Info className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                  {Term} continuity <Info className="size-3.5 text-muted-foreground" aria-hidden="true" />
                 </h3>
                 <p className="text-muted-foreground">One ticket, continuous notes and sessions.</p>
                 <ol className="relative ml-1.5 space-y-4 border-l border-border pl-5 pt-1">
@@ -462,7 +465,7 @@ export function WorkTicketPanel({
               <section className="space-y-2" aria-label={`${provider} details`}>
                 <h3 className="text-base font-semibold text-foreground">{provider} details</h3>
                 <dl className="grid grid-cols-[96px_1fr] gap-x-3 gap-y-2.5">
-                  <dt className="text-muted-foreground">Board</dt>
+                  <dt className="text-muted-foreground">{ticket.provider === "linear" ? "Team" : ticket.provider === "github" ? "Project" : "Board"}</dt>
                   <dd className="flex items-center gap-1.5">
                     <ProviderMark provider={ticket.provider} /> {board.board?.projectName ?? board.board?.name}
                   </dd>
@@ -480,7 +483,7 @@ export function WorkTicketPanel({
                   </dd>
                   <dt className="text-muted-foreground">Status</dt>
                   <dd>{ticket.externalStatus?.name ?? "—"}</dd>
-                  <dt className="text-muted-foreground">Sprint</dt>
+                  <dt className="text-muted-foreground">{Term}</dt>
                   <dd>{ticket.sprintName ?? "Backlog"}</dd>
                   <dt className="text-muted-foreground">Issue</dt>
                   <dd>
