@@ -386,6 +386,44 @@ fn linear_connects_with_an_api_key_and_round_trips_a_team() {
     assert_eq!(imported["board"]["siteUrl"], "https://linear.app/drogon");
     let view = ctx.ok("work.board", json!({"boardId": board}));
     assert_eq!(view["view"]["sprint"]["name"], "Cycle 12 · Resume polish");
+    // Canceled starts collapsed; any column folds and unfolds.
+    let collapsed: Vec<(&str, bool)> = view["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["name"].as_str().unwrap(),
+                c["collapsed"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        collapsed,
+        [
+            ("Backlog", false),
+            ("Todo", false),
+            ("In Progress", false),
+            ("In Review", false),
+            ("Done", false),
+            ("Canceled", true)
+        ]
+    );
+    let done = column_id(&view, "Done");
+    assert_eq!(
+        ctx.ok(
+            "work.column_update",
+            json!({"columnId": done, "collapsed": true})
+        )["collapsed"],
+        true
+    );
+    assert_eq!(
+        ctx.ok(
+            "work.column_update",
+            json!({"columnId": done, "collapsed": false})
+        )["collapsed"],
+        false
+    );
     assert_eq!(keys(&view), ["ENG-1", "ENG-2"]);
     assert_eq!(
         keys(&ctx.ok(
@@ -917,6 +955,11 @@ fn a_large_linear_team_fits_in_one_reply_and_keeps_whole_descriptions() {
         "board is {} bytes",
         frame(&view)
     );
+    assert!(
+        frame(&view) / 400 < 1200,
+        "{} bytes per ticket",
+        frame(&view) / 400
+    );
     let card = view["tickets"]
         .as_array()
         .unwrap()
@@ -924,7 +967,7 @@ fn a_large_linear_team_fits_in_one_reply_and_keeps_whole_descriptions() {
         .find(|t| t["externalKey"] == "OPS-1006")
         .unwrap();
     assert_eq!(card["descriptionTruncated"], true);
-    assert!(card["description"].as_str().unwrap().chars().count() <= 281);
+    assert!(card["description"].as_str().unwrap().chars().count() <= 141);
     let whole = ctx.ok("work.ticket_show", json!({"ticketId": "OPS-1006"}));
     assert_eq!(whole["descriptionTruncated"], false);
     assert_eq!(whole["description"].as_str().unwrap().len(), 6000);

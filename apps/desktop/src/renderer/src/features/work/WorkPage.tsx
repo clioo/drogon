@@ -260,6 +260,30 @@ export function WorkPage({
     if (source && summary) setImporting({ source, board: { externalId: summary.externalId ?? "", projectId: summary.projectId } });
     else if (summary?.provider) notice(`${providerLabel(summary.provider)} is turned off; turn it on in Sources`, "error");
   };
+  const setBoardProject = async (projectId: string | null) => {
+    if (!bridge || !summary?.provider) return;
+    const result = await state.run(() => bridge.boardUpdate({ boardId: summary.id, projectId }));
+    if (!result.ok) notice(result.error, "error");
+    else {
+      const name = board?.projects.find((p) => p.id === projectId)?.name;
+      notice(name ? `Sessions for ${summary.name} start in ${name}` : `${summary.name} has no project for sessions`);
+    }
+  };
+  /** Folds the columns with no card on this view, or unfolds them all. */
+  const foldColumns = async (which: "empty" | "all") => {
+    if (!bridge || !board) return;
+    const targets = board.columns.filter((c) =>
+      which === "all" ? c.collapsed === true : !c.collapsed && !board.tickets.some((t) => t.columnId === c.id),
+    );
+    for (const column of targets) {
+      const result = await bridge.columnUpdate({ columnId: column.id, collapsed: which === "empty" });
+      if (!result.ok) {
+        notice(result.error.message, "error");
+        break;
+      }
+    }
+    await state.reload();
+  };
   const term = sprintTerm(summary?.provider);
   const Term = capitalize(term);
 
@@ -399,6 +423,22 @@ export function WorkPage({
                       >
                         Import new issues assigned to me
                       </DropdownMenuCheckboxItem>
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>Sessions start in</DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent>
+                          <DropdownMenuRadioGroup
+                            value={summary.projectId ?? ""}
+                            onValueChange={(value) => void setBoardProject(value || null)}
+                          >
+                            {(board?.projects ?? []).map((p) => (
+                              <DropdownMenuRadioItem key={p.id} value={p.id}>
+                                {p.name}
+                              </DropdownMenuRadioItem>
+                            ))}
+                            <DropdownMenuRadioItem value="">No project</DropdownMenuRadioItem>
+                          </DropdownMenuRadioGroup>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
                       <DropdownMenuItem
                         onSelect={importMore}
                       >
@@ -553,9 +593,38 @@ export function WorkPage({
                         </DropdownMenuRadioItem>
                       ))}
                   </DropdownMenuRadioGroup>
+                  {board && !readOnly ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={() => void foldColumns("empty")}>Collapse empty columns</DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => void foldColumns("all")}>Expand all columns</DropdownMenuItem>
+                    </>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
+            {imported && summary && !summary.projectId ? (
+              <div
+                className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/8 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300"
+                role="status"
+                data-testid="work-board-no-project"
+              >
+                New sessions on this board need a Drogon project to start in.
+                <select
+                  aria-label="Sessions start in"
+                  className="h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+                  value=""
+                  onChange={(event) => event.target.value && void setBoardProject(event.target.value)}
+                >
+                  <option value="">Choose a project…</option>
+                  {(board?.projects ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
             {summary?.lastSyncError ? (
               <p className="mb-2 text-xs text-destructive" role="alert">
                 Last sync with {providerLabel(summary.provider)} failed: {summary.lastSyncError}
@@ -631,6 +700,11 @@ export function WorkPage({
                   onIconColumn={async (column, icon) => {
                     if (!bridge) return;
                     const result = await state.run(() => bridge.columnUpdate({ columnId: column.id, icon }));
+                    if (!result.ok) notice(result.error, "error");
+                  }}
+                  onCollapseColumn={async (column, collapsed) => {
+                    if (!bridge) return;
+                    const result = await state.run(() => bridge.columnUpdate({ columnId: column.id, collapsed }));
                     if (!result.ok) notice(result.error, "error");
                   }}
                   onDeleteTicket={async (ticket) => {
@@ -786,6 +860,7 @@ function BoardView({
   onColumnAction,
   onRenameColumn,
   onIconColumn,
+  onCollapseColumn,
   onDeleteTicket,
 }: {
   board: WorkBoard;
@@ -803,6 +878,7 @@ function BoardView({
   onColumnAction: (column: WorkColumn, action: "left" | "right" | "delete") => void;
   onRenameColumn: (column: WorkColumn, name: string) => void;
   onIconColumn: (column: WorkColumn, icon: string) => void;
+  onCollapseColumn: (column: WorkColumn, collapsed: boolean) => void;
   onDeleteTicket: (ticket: WorkTicket) => void;
 }) {
   return (
@@ -830,6 +906,7 @@ function BoardView({
           onColumnAction={onColumnAction}
           onRenameColumn={onRenameColumn}
           onIconColumn={onIconColumn}
+          onCollapseColumn={onCollapseColumn}
           onDeleteTicket={onDeleteTicket}
         />
       ))}
@@ -863,6 +940,7 @@ function BoardColumn({
   onColumnAction,
   onRenameColumn,
   onIconColumn,
+  onCollapseColumn,
   onDeleteTicket,
 }: {
   board: WorkBoard;
@@ -883,6 +961,7 @@ function BoardColumn({
   onColumnAction: (column: WorkColumn, action: "left" | "right" | "delete") => void;
   onRenameColumn: (column: WorkColumn, name: string) => void;
   onIconColumn: (column: WorkColumn, icon: string) => void;
+  onCollapseColumn: (column: WorkColumn, collapsed: boolean) => void;
   onDeleteTicket: (ticket: WorkTicket) => void;
 }) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -899,31 +978,63 @@ function BoardColumn({
     return at === -1 ? cards.length : at;
   };
 
+  const dropHandlers = {
+    onDragOver: (event: React.DragEvent<HTMLElement>) => {
+      if (readOnly || !event.dataTransfer.types.includes(TICKET_MIME)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDropIndex(indexAt(event.clientY));
+    },
+    onDragLeave: (event: React.DragEvent<HTMLElement>) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropIndex(null);
+    },
+    onDrop: (event: React.DragEvent<HTMLElement>) => {
+      const ticketId = event.dataTransfer.getData(TICKET_MIME);
+      const index = indexAt(event.clientY);
+      setDropIndex(null);
+      if (!ticketId) return;
+      event.preventDefault();
+      const ticket = board.tickets.find((t) => t.id === ticketId);
+      // Dropping below itself in the same column shifts the index by one.
+      const own = ticket?.columnId === column.id ? tickets.findIndex((t) => t.id === ticketId) : -1;
+      onMove(ticketId, column.id, own !== -1 && own < index ? index - 1 : index);
+    },
+  };
+
+  // A collapsed column is a narrow strip: its name, its count, and still a
+  // place to drop a card.
+  if (column.collapsed) {
+    return (
+      <section
+        className={`flex w-11 shrink-0 flex-col items-center gap-2 border-r border-border/60 pt-3 last:border-r-0 ${dropIndex !== null ? "bg-accent/30" : ""}`}
+        aria-label={`${column.name} column`}
+        data-work-column={column.id}
+        data-collapsed="true"
+        {...dropHandlers}
+      >
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`Expand ${column.name} column`}
+          title={`Expand ${column.name}`}
+          onClick={() => onCollapseColumn(column, false)}
+        >
+          <WorkColumnIcon icon={column.icon} className="size-4" />
+        </Button>
+        <span className="rounded-md bg-muted px-1.5 text-xs text-muted-foreground" aria-label={`${tickets.length} tickets`}>
+          {tickets.length}
+        </span>
+        <span className="text-xs font-medium text-muted-foreground [writing-mode:vertical-rl]">{column.name}</span>
+      </section>
+    );
+  }
+
   return (
     <section
       className={`flex w-[272px] shrink-0 flex-col border-r border-border/60 px-2 last:border-r-0 ${dropIndex !== null ? "bg-accent/30" : ""}`}
       aria-label={`${column.name} column`}
       data-work-column={column.id}
-      onDragOver={(event) => {
-        if (readOnly || !event.dataTransfer.types.includes(TICKET_MIME)) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        setDropIndex(indexAt(event.clientY));
-      }}
-      onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropIndex(null);
-      }}
-      onDrop={(event) => {
-        const ticketId = event.dataTransfer.getData(TICKET_MIME);
-        const index = indexAt(event.clientY);
-        setDropIndex(null);
-        if (!ticketId) return;
-        event.preventDefault();
-        const ticket = board.tickets.find((t) => t.id === ticketId);
-        // Dropping below itself in the same column shifts the index by one.
-        const own = ticket?.columnId === column.id ? tickets.findIndex((t) => t.id === ticketId) : -1;
-        onMove(ticketId, column.id, own !== -1 && own < index ? index - 1 : index);
-      }}
+      {...dropHandlers}
     >
       <div className="flex items-start gap-2 px-1 pt-3 pb-2">
         <WorkColumnIcon icon={column.icon} className="mt-0.5 size-5" />
@@ -973,6 +1084,7 @@ function BoardColumn({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={() => onOpenColumn(column.id)}>Configure prompt…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onCollapseColumn(column, true)}>Collapse</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setRenaming(true)}>Rename</DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Icon</DropdownMenuSubTrigger>

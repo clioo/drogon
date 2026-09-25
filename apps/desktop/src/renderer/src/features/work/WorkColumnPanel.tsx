@@ -17,8 +17,11 @@ import {
 } from "../../../../shared/work-contract";
 import type { WorkBoardState } from "./use-work-board";
 import { deliverySummary, formatClock, scheduleLabel, WORK_SCHEDULES } from "./work-format";
+import { templatesFor } from "./work-prompt-templates";
+import { providerLabel, sprintTerm } from "./work-sources";
 
-const PLACEHOLDERS = "{ticket.id} {ticket.title} {ticket.pr} {ticket.url} {ticket.next} {ticket.project} {ticket.status}";
+const PLACEHOLDERS =
+  "{ticket.id} {ticket.title} {ticket.description} {ticket.pr} {ticket.url} {ticket.next} {ticket.project} {ticket.status} {column.next}";
 
 export function WorkColumnPanel({
   column,
@@ -59,7 +62,8 @@ export function WorkColumnPanel({
 
   const tickets = board.tickets.filter((t) => t.columnId === column.id);
   const imported = Boolean(column.boardId);
-  const provider = board.board?.provider === "jira" ? "Jira" : "the provider";
+  const provider = providerLabel(board.board?.provider);
+  const [editingStatuses, setEditingStatuses] = useState(false);
   const statuses = board.board?.statuses ?? [];
   const mapped = new Set((column.statuses ?? []).map((s) => s.id));
   const ownerOf = (statusId: string) =>
@@ -104,7 +108,7 @@ export function WorkColumnPanel({
         </Button>
       </header>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4">
-        <section className="space-y-3" aria-label="Send when">
+        <section className="shrink-0 space-y-3" aria-label="Send when">
           <h3 className="text-sm font-semibold text-foreground">Send when</h3>
           <label className="flex items-center gap-2.5 text-sm">
             <Checkbox
@@ -174,12 +178,32 @@ export function WorkColumnPanel({
         </section>
 
         {imported ? (
-          <section className="space-y-2" aria-label={`${provider} statuses`}>
-            <h3 className="text-sm font-semibold text-foreground">{provider} statuses</h3>
-            <p className="text-xs text-muted-foreground">
-              A card dropped here asks {provider} for the first status (after you push). A card whose{" "}
-              {provider} status is mapped here moves here on sync. None mapped: a Drogon-only column.
-            </p>
+          <section className="shrink-0 space-y-2" aria-label={`${provider} statuses`}>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-foreground">{provider} statuses</h3>
+              <Button variant="ghost" size="xs" onClick={() => setEditingStatuses((v) => !v)}>
+                {editingStatuses ? "Done" : "Change"}
+              </Button>
+            </div>
+            {!editingStatuses ? (
+              <p className="flex flex-wrap gap-1.5 text-xs" data-testid="work-column-mapped">
+                {(column.statuses ?? []).length ? (
+                  (column.statuses ?? []).map((s) => (
+                    <span key={s.id} className="rounded-md border border-border px-1.5 py-0.5 text-foreground">
+                      {s.name}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-muted-foreground">None: a Drogon-only column.</span>
+                )}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                A card dropped here asks {provider} for the first status (after you push). A card whose{" "}
+                {provider} status is mapped here moves here on sync. None mapped: a Drogon-only column.
+              </p>
+            )}
+            {editingStatuses ? (
             <ul className="space-y-1.5" data-testid="work-column-statuses">
               {statuses.map((status) => {
                 const owner = ownerOf(status.id);
@@ -201,11 +225,34 @@ export function WorkColumnPanel({
                 );
               })}
             </ul>
+            ) : null}
           </section>
         ) : null}
 
-        <section className="flex min-h-0 flex-col gap-2" aria-label="Message to sessions">
-          <h3 className="text-sm font-semibold text-foreground">Message to sessions</h3>
+        <section className="flex shrink-0 flex-col gap-2" aria-label="Message to sessions">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Message to sessions</h3>
+            <select
+              aria-label="Use a template"
+              className="h-7 rounded-md border border-input bg-transparent px-2 text-xs"
+              value=""
+              onChange={async (event) => {
+                const template = templatesFor(column.icon).find((t) => t.id === event.target.value);
+                if (!template) return;
+                if (message.trim() && message !== template.text && !window.confirm("Replace the current prompt with this template?")) return;
+                setMessage(template.text);
+                const saved = await save({ message: template.text });
+                if (saved) lastSaved.current = template.text;
+              }}
+            >
+              <option value="">Use a template…</option>
+              {templatesFor(column.icon).map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <Textarea
             aria-label="Message to sessions"
             className="min-h-[200px] text-sm leading-6"
@@ -217,7 +264,7 @@ export function WorkColumnPanel({
           <p className="text-[11px] text-muted-foreground">Placeholders: {PLACEHOLDERS}</p>
         </section>
 
-        <section className="space-y-2" aria-label="Recipients">
+        <section className="shrink-0 space-y-2" aria-label="Recipients">
           <h3 className="text-sm font-semibold text-foreground">Recipients</h3>
           <select
             aria-label="Recipients"
@@ -231,7 +278,7 @@ export function WorkColumnPanel({
           <p className="text-xs text-muted-foreground">
             Live sessions are typed into right away; a session that is no longer running is
             resumed; a ticket with nothing to resume gets a new session.
-            {board.board?.kind === "scrum" ? " Prompts reach only tickets in the active sprint." : ""}
+            {board.board?.kind === "scrum" ? ` Prompts reach only tickets in the active ${sprintTerm(board.board?.provider)}.` : ""}
           </p>
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             New sessions start with
@@ -252,7 +299,7 @@ export function WorkColumnPanel({
         </section>
 
         {preview ? (
-          <section className="space-y-2" aria-label="Preview" data-testid="work-column-preview">
+          <section className="shrink-0 space-y-2" aria-label="Preview" data-testid="work-column-preview">
             <h3 className="text-sm font-semibold text-foreground">Preview</h3>
             {preview.previews.length === 0 ? (
               <p className="text-xs text-muted-foreground">No tickets in this column: a send does nothing.</p>

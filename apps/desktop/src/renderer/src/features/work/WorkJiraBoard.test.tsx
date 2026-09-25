@@ -666,6 +666,8 @@ describe("Jira boards on the Work page", () => {
     openMenu(screen.getByRole("button", { name: "Review column actions" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Configure prompt…" }));
     const panel = await screen.findByRole("complementary", { name: "Review prompt" });
+    expect(within(panel).getByTestId("work-column-mapped").textContent).toContain("In Review");
+    fireEvent.click(within(panel).getByRole("button", { name: "Change" }));
     const statuses = within(panel).getByTestId("work-column-statuses");
     expect(within(statuses).getByRole("checkbox", { name: "Map In Review to Review" }).getAttribute("aria-checked")).toBe("true");
     expect(within(statuses).getByText("in In Progress")).toBeTruthy();
@@ -702,5 +704,128 @@ describe("Jira board helpers", () => {
       issues: [issue("APP-1", "x", null, STATUSES.todo)],
     });
     expect(groups.map((g) => g.label)).toEqual(["Issues"]);
+  });
+});
+
+describe("working on an imported board", () => {
+  /** The fake board with a change applied to every answer. */
+  function withBoard(change: (board: WorkBoard) => WorkBoard) {
+    const bridge = { ...fakeBridge(), boardUpdate: vi.fn(() => ok(PLATFORM)) };
+    const original = bridge.board;
+    bridge.board = vi.fn(async (input?: { boardId?: string; sprintId?: string }) => {
+      const result = await original(input);
+      return result.ok && input?.boardId ? { ok: true as const, result: change(result.result) } : result;
+    });
+    return bridge;
+  }
+
+  test("a column collapses to a strip that still takes a card, and expands again", async () => {
+    const bridge = withBoard((b) => ({ ...b, columns: b.columns.map((c) => (c.id === "done" ? { ...c, collapsed: true } : c)) }));
+    await openPlatform(bridge as never);
+    const strip = screen.getByRole("region", { name: "Done column" });
+    expect(strip.getAttribute("data-collapsed")).toBe("true");
+    expect(within(strip).getByText("Done")).toBeTruthy();
+    fireEvent.click(within(strip).getByRole("button", { name: "Expand Done column" }));
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "done", collapsed: false }));
+    // A card dropped on the strip moves there.
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      setData: (k: string, v: string) => data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+      get types() {
+        return [...data.keys()];
+      },
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    fireEvent.dragStart(screen.getByRole("article", { name: /APP-142/ }), { dataTransfer });
+    fireEvent.dragOver(strip, { dataTransfer, clientY: 10 });
+    fireEvent.drop(strip, { dataTransfer, clientY: 10 });
+    await waitFor(() =>
+      expect(bridge.ticketMove).toHaveBeenCalledWith({ ticketId: "t142", columnId: "done", index: 0, sprintId: "25" }),
+    );
+    openMenu(screen.getByRole("button", { name: "Review column actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Collapse" }));
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", collapsed: true }));
+  });
+
+  test("a board without a project for sessions says so, and choosing one applies it", async () => {
+    const bridge = withBoard((b) => ({ ...b, board: { ...b.board!, projectId: null } }));
+    await openPlatform(bridge as never);
+    const notice = screen.getByTestId("work-board-no-project");
+    expect(notice.textContent).toContain("New sessions on this board need a Drogon project");
+    fireEvent.change(within(notice).getByRole("combobox", { name: "Sessions start in" }), { target: { value: "p1" } });
+    await waitFor(() => expect(bridge.boardUpdate).toHaveBeenCalledWith({ boardId: "b7", projectId: "p1" }));
+    openMenu(screen.getByRole("button", { name: "Sync options" }));
+    const sub = await screen.findByRole("menuitem", { name: "Sessions start in" });
+    fireEvent.keyDown(sub, { key: "ArrowRight" });
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "No project" }));
+    await waitFor(() => expect(bridge.boardUpdate).toHaveBeenLastCalledWith({ boardId: "b7", projectId: null }));
+  });
+
+  test("the column panel offers prompt templates, suggested for the column first", async () => {
+    const bridge = withBoard((b) => b);
+    await openPlatform(bridge as never);
+    openMenu(screen.getByRole("button", { name: "Review column actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Configure prompt…" }));
+    const panel = await screen.findByRole("complementary", { name: "Review prompt" });
+    const picker = within(panel).getByRole("combobox", { name: "Use a template" }) as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent).slice(0, 3)).toEqual(["Use a template…", "Address review", "Rework after feedback"]);
+    fireEvent.change(picker, { target: { value: "review" } });
+    await waitFor(() =>
+      expect(bridge.columnUpdate).toHaveBeenCalledWith({
+        columnId: "review",
+        message: expect.stringContaining("drogon-cli work ticket move --ticket {ticket.key} --column \"{column.next}\""),
+      }),
+    );
+    expect((within(panel).getByRole("textbox", { name: "Message to sessions" }) as HTMLTextAreaElement).value).toContain("is in review");
+  });
+
+  test("the panel's sprint continuity comes from the full ticket, not the board listing", async () => {
+    const bridge = withBoard((b) => ({ ...b, tickets: b.tickets.map((t) => ({ ...t, sprints: undefined })) }));
+    await openPlatform(bridge as never);
+    fireEvent.click(screen.getByRole("button", { name: "Open APP-128: Handle session resume after PR review" }));
+    const panel = await screen.findByRole("complementary", { name: "Ticket APP-128" });
+    expect((await within(panel).findByRole("region", { name: "Sprint continuity" })).textContent).toContain("Sprint 24");
+  });
+});
+
+describe("reading a real board", () => {
+  test("descriptions render their markdown; empty Jira fields and a kanban's sprint row stay out", async () => {
+    const bridge = fakeBridge();
+    const original = bridge.board;
+    bridge.board = vi.fn(async (input?: { boardId?: string; sprintId?: string }) => {
+      const result = await original(input);
+      if (!result.ok || !input?.boardId) return result;
+      return { ok: true as const, result: { ...result.result, board: { ...result.result.board!, kind: "kanban" } } };
+    });
+    bridge.ticketShow.mockImplementation(((input: { ticketId: string }) =>
+      ok({
+        ...activeTickets().find((t) => t.id === input.ticketId)!,
+        description: "## Objetivo\n\nAgregar **imágenes** controladas.\n\n- una\n- dos",
+        priority: null,
+        issueType: null,
+        sends: [],
+        activity: [],
+      })) as never);
+    await openPlatform(bridge as never);
+    fireEvent.click(screen.getByRole("button", { name: "Open APP-128: Handle session resume after PR review" }));
+    const panel = await screen.findByRole("complementary", { name: "Ticket APP-128" });
+    const description = await within(panel).findByTestId("work-panel-description");
+    await waitFor(() => expect(within(description).getByRole("heading", { name: "Objetivo" })).toBeTruthy());
+    expect(within(description).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["una", "dos"]);
+    expect(description.textContent).not.toContain("##");
+    const details = within(panel).getByRole("region", { name: "Jira details" });
+    expect(within(details).queryByText("Sprint")).toBeNull();
+    expect(within(details).getByText("Assignee")).toBeTruthy();
+  });
+
+  test("Filter folds the empty columns of the view and unfolds them all", async () => {
+    const bridge = fakeBridge();
+    await openPlatform(bridge as never);
+    openMenu(screen.getByRole("button", { name: "Filter" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Collapse empty columns" }));
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "done", collapsed: true }));
+    expect(bridge.columnUpdate).toHaveBeenCalledTimes(1);
   });
 });

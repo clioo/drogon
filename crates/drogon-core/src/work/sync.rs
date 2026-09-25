@@ -225,6 +225,15 @@ fn status_name(board: &Board, columns: &[Column], status_id: &str) -> String {
         .unwrap_or_else(|| status_id.to_string())
 }
 
+/// Columns nobody works in (Canceled, Duplicate, Won't do, Archived) start
+/// collapsed on an imported board.
+fn starts_collapsed(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    ["cancel", "duplicate", "won't", "wont", "archiv", "obsolete"]
+        .iter()
+        .any(|w| lower.contains(w))
+}
+
 fn icon_for(name: &str, category: &str) -> &'static str {
     let lower = name.to_lowercase();
     if lower.contains("backlog") {
@@ -781,6 +790,12 @@ pub(super) fn board_view(
             "outcome": { "completed": completed, "carried": carried, "backlog": backlog },
         }),
     })
+}
+
+/// Assigned to the connected account and not finished: what `mine` and
+/// auto-import bring in.
+fn is_open_mine(issue: &ExtIssue, me: &str) -> bool {
+    issue.assignee_id.as_deref() == Some(me) && issue.status.category != "done"
 }
 
 // ------------------------------------------------------ import picker --
@@ -1399,7 +1414,7 @@ impl Engine {
         let all = bool_field(params, "all")?.unwrap_or(false);
         if keys.is_none() && !all && !mine {
             return Err(error::invalid_argument(
-                "choose the issues to import (issueKeys), mine: true (the ones assigned to you) or all: true",
+                "choose the issues to import (issueKeys), mine: true (your open ones) or all: true",
             ));
         }
         let provider = self.provider_param(params)?;
@@ -1448,11 +1463,8 @@ impl Engine {
         };
         // `mine` adds every issue assigned to the connected account.
         let mut chosen = chosen;
-        if mine {
-            for issue in issues
-                .iter()
-                .filter(|i| i.assignee_id.is_some() && i.assignee_id == me)
-            {
+        if let (true, Some(me)) = (mine, me.as_deref()) {
+            for issue in issues.iter().filter(|i| is_open_mine(i, me)) {
                 if !chosen.iter().any(|c| c.key == issue.key) {
                     chosen.push(issue);
                 }
@@ -1530,8 +1542,8 @@ impl Engine {
                         .map(|s| s.category.as_str())
                         .unwrap_or("");
                     tx.execute(
-                        "INSERT INTO work_columns (id, name, icon, position, board_id, statuses, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                        "INSERT INTO work_columns (id, name, icon, position, board_id, statuses, created_at, updated_at, collapsed)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8)",
                         params![
                             uuid::Uuid::new_v4().to_string(),
                             clip(&column.name, MAX_NAME),
@@ -1539,7 +1551,8 @@ impl Engine {
                             position as i64,
                             id,
                             serde_json::to_string(&statuses).unwrap(),
-                            now
+                            now,
+                            starts_collapsed(&column.name) as i64
                         ],
                     )
                     .map_err(error::from_sqlite)?;
@@ -1716,12 +1729,10 @@ impl Engine {
                     None => {}
                 }
             }
-            // New issues assigned to the owner come in by themselves.
+            // New open issues assigned to the owner come in by themselves
+            // (finished ones are history, not work).
             if let Some(me) = &me {
-                for issue in issues
-                    .iter()
-                    .filter(|i| i.assignee_id.as_deref() == Some(me.as_str()))
-                {
+                for issue in issues.iter().filter(|i| is_open_mine(i, me)) {
                     if known.iter().any(|(_, key, _)| *key == issue.key) {
                         continue;
                     }
@@ -1767,10 +1778,29 @@ impl Engine {
     }
 
     /// `work.board_update`: an imported board's own settings.
+    /// `projectId` is the Drogon project whose workspace the board's
+    /// sessions start in: it becomes the project of every ticket that had
+    /// none (or had the board's previous one), and of every ticket imported
+    /// later. `null` clears it.
     pub(crate) fn do_work_board_update(&self, params: &Value) -> Result<Value, RpcError> {
-        reject_unknown(params, &["boardId", "autoImportMine"])?;
+        reject_unknown(params, &["boardId", "autoImportMine", "projectId"])?;
         let conn = self.db.lock().unwrap();
         let board = get_board(&conn, &required(params, "boardId")?)?;
+        if let Some(project) = super::clearable(params, "projectId")? {
+            let project = project.map(|p| resolve_project(&conn, &p)).transpose()?;
+            let now = crate::now_unix_ms() as i64;
+            conn.execute(
+                "UPDATE work_tickets SET project_id = ?2, updated_at = ?4
+                 WHERE board_id = ?1 AND (project_id IS NULL OR project_id IS ?3)",
+                params![board.id, project, board.project_id, now],
+            )
+            .map_err(error::from_sqlite)?;
+            conn.execute(
+                "UPDATE work_boards SET project_id = ?2, updated_at = ?3 WHERE id = ?1",
+                params![board.id, project, now],
+            )
+            .map_err(error::from_sqlite)?;
+        }
         if let Some(on) = bool_field(params, "autoImportMine")? {
             conn.execute(
                 "UPDATE work_boards SET auto_import_mine = ?2, updated_at = ?3 WHERE id = ?1",
@@ -2161,7 +2191,7 @@ impl Engine {
         };
         let workspace = self.ticket_workspace(&ticket)?.ok_or_else(|| {
             error::invalid_argument(format!(
-                "{} has no workspace or project to start a session in; set one first",
+                "{} has no workspace or project to start a session in: choose where the board's sessions start (Sync menu → Sessions start in, or `drogon-cli work import settings --project`), or set the ticket's project",
                 ticket.key
             ))
         })?;
@@ -2271,6 +2301,16 @@ mod tests {
         assert_eq!(icon_for("Backlog", "new"), "backlog");
         assert_eq!(icon_for("Shipped", "done"), "done");
         assert_eq!(icon_for("Doing", ""), "in_progress");
+    }
+
+    #[test]
+    fn unused_columns_start_collapsed() {
+        for name in ["Canceled", "Cancelled", "Duplicate", "Won't Do", "Archived"] {
+            assert!(starts_collapsed(name), "{name}");
+        }
+        for name in ["Done", "In Review", "Backlog", "Todo"] {
+            assert!(!starts_collapsed(name), "{name}");
+        }
     }
 
     #[test]

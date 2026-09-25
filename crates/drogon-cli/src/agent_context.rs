@@ -2038,14 +2038,18 @@ fn work_commands() -> Vec<AgentCommand> {
         entry(
             "work import settings",
             &["work", "import", "settings"],
-            "An imported board's settings: whether each sync imports new issues assigned to you",
-            "drogon-cli work import settings --board <BOARD> --auto-import-mine <true|false>",
-            &["auto-import-mine", "board"],
+            "An imported board's settings: where its sessions start, and whether each sync imports new open issues assigned to you",
+            "drogon-cli work import settings --board <BOARD> [--auto-import-mine <true|false>] [--project <PROJECT|none>]",
+            &["auto-import-mine", "board", "project"],
             &[],
-            &["drogon-cli work import settings --board Waman --auto-import-mine true"],
+            &[
+                "drogon-cli work import settings --board Waman --auto-import-mine true",
+                "drogon-cli work import settings --board Waman --project Drogon",
+            ],
             &[
                 BOARDS,
-                "Off unless chosen at import: a board holds only the issues you import.",
+                "Auto-import is off unless chosen at import: a board holds only the issues you import.",
+                "--project becomes the project of every ticket on the board that had none (or the board's previous one), so New session and column prompts start there.",
             ],
         ),
         entry(
@@ -2236,7 +2240,7 @@ fn work_commands() -> Vec<AgentCommand> {
             "work column update",
             &["work", "column", "update"],
             "Configure a column: name, icon, position, and the prompt it types into its tickets' sessions",
-            "drogon-cli work column update --column <COLUMN> [--name <NAME>] [--icon <ICON>] [--index <N>] [--on-enter <true|false>] [--schedule <EVERY|CRON> | --no-schedule] [--pr-watch <true|false>] [--message <TEXT> | --message-file <PATH>] [--recipients <all|primary>] [--harness <HARNESS> | --default-harness] [--statuses <IDS|NAMES|none>]",
+            "drogon-cli work column update --column <COLUMN> [--name <NAME>] [--icon <ICON>] [--index <N>] [--on-enter <true|false>] [--schedule <EVERY|CRON> | --no-schedule] [--pr-watch <true|false>] [--message <TEXT> | --message-file <PATH>] [--recipients <all|primary>] [--harness <HARNESS> | --default-harness] [--collapsed <true|false>] [--statuses <IDS|NAMES|none>]",
             &[
                 "column",
                 "default-harness",
@@ -2252,6 +2256,7 @@ fn work_commands() -> Vec<AgentCommand> {
                 "recipients",
                 "schedule",
                 "statuses",
+                "collapsed",
             ],
             &[],
             &[

@@ -700,6 +700,16 @@ fn a_jira_board_is_imported_synced_and_pushed_from_the_cli() {
         .unwrap()
         .clone();
     assert_eq!(blocked["statuses"][0]["name"], "Blocked", "{columns}");
+    let folded = fx.json(&[
+        "work",
+        "column",
+        "update",
+        "--column",
+        blocked["id"].as_str().unwrap(),
+        "--collapsed",
+        "true",
+    ]);
+    assert_eq!(folded["collapsed"], true);
 
     fx.text(&[
         "work", "ticket", "move", "--ticket", "APP-128", "--column", "QA",
@@ -955,7 +965,27 @@ fn sources_are_listed_toggled_connected_and_a_linear_team_imported_from_the_cli(
         "--auto-import-mine",
         "false",
     ]);
-    assert_eq!(settings.trim(), "Engineering: only the issues you import");
+    assert!(
+        settings
+            .trim()
+            .starts_with("Engineering: only the issues you import; sessions start in project "),
+        "{settings}"
+    );
+    let none = fx.text(&[
+        "work",
+        "import",
+        "settings",
+        "--board",
+        "Engineering",
+        "--project",
+        "none",
+    ]);
+    assert!(
+        none.trim().ends_with("sessions start in no project yet"),
+        "{none}"
+    );
+    let neither = fx.command(&["work", "import", "settings", "--board", "Engineering"]);
+    assert_eq!(neither.status.code(), Some(2), "a setting is required");
     let usage = fx.command(&[
         "work", "import", "run", "--board", "team-eng", "--all", "--mine",
     ]);

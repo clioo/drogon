@@ -200,14 +200,18 @@ pub enum WorkImportAction {
         #[arg(long, value_name = "SITE")]
         site: Option<String>,
     },
-    /// An imported board's settings: whether sync keeps importing new
-    /// issues assigned to you
+    /// An imported board's settings: where its sessions start, and whether
+    /// sync keeps importing new issues assigned to you
     Settings {
         /// Imported board id or name
         #[arg(long, value_name = "BOARD")]
         board: String,
-        #[arg(long, value_name = "true|false", action = clap::ArgAction::Set, required = true)]
-        auto_import_mine: bool,
+        #[arg(long, value_name = "true|false", required_unless_present = "project")]
+        auto_import_mine: Option<bool>,
+        /// The Drogon project whose workspace the board's sessions start in
+        /// (id or name); `none` clears it
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
     },
     /// Remove an imported board and its tickets from Drogon (the provider
     /// is untouched; linked sessions keep running)
@@ -292,6 +296,9 @@ pub enum WorkColumnAction {
         /// Start new sessions with the default agent again
         #[arg(long)]
         default_harness: bool,
+        /// Show the column as a narrow strip (still a drop target)
+        #[arg(long, value_name = "true|false")]
+        collapsed: Option<bool>,
         /// Imported boards: the provider statuses this column stands for,
         /// comma-separated ids or names (`--statuses "In Review,Blocked"`);
         /// a status belongs to one column; `none` makes it Drogon-only
@@ -959,21 +966,30 @@ fn import_call(action: &WorkImportAction) -> WorkCall {
         WorkImportAction::Settings {
             board,
             auto_import_mine,
-        } => (
-            "work.board_update",
-            json!({ "boardId": board, "autoImportMine": auto_import_mine }),
-            |v| {
+            project,
+        } => {
+            let mut params = json!({ "boardId": board });
+            if let Some(on) = auto_import_mine {
+                params["autoImportMine"] = json!(on);
+            }
+            if let Some(p) = project {
+                params["projectId"] = clearable(p);
+            }
+            ("work.board_update", params, |v| {
                 format!(
-                    "{}: {}",
+                    "{}: {}; sessions start in {}",
                     text(&v["name"]),
                     if v["autoImportMine"] == true {
-                        "new issues assigned to you are imported on every sync"
+                        "new open issues assigned to you are imported on every sync"
                     } else {
                         "only the issues you import"
-                    }
+                    },
+                    v["projectId"]
+                        .as_str()
+                        .map_or("no project yet".to_string(), |p| format!("project {p}"))
                 )
-            },
-        ),
+            })
+        }
         WorkImportAction::Remove { board } => {
             ("work.board_delete", json!({ "boardId": board }), |v| {
                 format!(
@@ -1025,9 +1041,13 @@ fn column_call(action: &WorkColumnAction) -> Result<WorkCall, CliError> {
             recipients,
             harness,
             default_harness,
+            collapsed,
             statuses,
         } => {
             let mut params = json!({ "columnId": column });
+            if let Some(c) = collapsed {
+                params["collapsed"] = json!(c);
+            }
             if let Some(list) = statuses {
                 let ids: Vec<&str> = if list.trim().eq_ignore_ascii_case("none") {
                     Vec::new()

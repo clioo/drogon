@@ -44,8 +44,9 @@ pub(crate) const SCHEMA_COMPONENT: &str = "work";
 /// v1: local board. v2: imported provider boards (Jira), column↔status
 /// mapping, sprints, sync state and the ticket activity log. v3: the
 /// sources the owner allows and their connections (Linear, GitHub). v4: a
-/// board can keep importing new issues assigned to the owner.
-pub(crate) const SCHEMA_VERSION: i64 = 4;
+/// board can keep importing new issues assigned to the owner. v5: columns
+/// can be collapsed.
+pub(crate) const SCHEMA_VERSION: i64 = 5;
 
 /// How often a watched pull request is re-read (`gh pr view`).
 pub(crate) const PR_POLL_MS: i64 = 5 * 60_000;
@@ -57,7 +58,7 @@ const MAX_MESSAGE: usize = 16_000;
 const MAX_URL: usize = 2048;
 const MAX_SENDS_PAGE: i64 = 200;
 /// How much of each description the board listing carries.
-const BOARD_DESCRIPTION_CHARS: usize = 280;
+const BOARD_DESCRIPTION_CHARS: usize = 140;
 
 /// The first `max` characters of `text` (at a character boundary), and
 /// whether anything was cut.
@@ -133,6 +134,14 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             tx,
             "work_boards",
             "auto_import_mine",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+    }
+    if existing.unwrap_or(0) < 5 {
+        add_column(
+            tx,
+            "work_columns",
+            "collapsed",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
     }
@@ -347,6 +356,8 @@ struct Column {
     board_id: Option<String>,
     /// Provider statuses this column stands for (empty = Drogon-only).
     statuses: Vec<BoardStatus>,
+    /// Shown as a narrow strip (Canceled, Duplicate…); still a drop target.
+    collapsed: bool,
 }
 
 /// A provider status as the board records it.
@@ -406,7 +417,7 @@ struct TicketExt {
     removed_at: Option<i64>,
 }
 
-const COLUMN_SELECT: &str = "SELECT id, name, icon, position, send_on_enter, cron, pr_watch, message, recipients, harness_id, next_run_at, board_id, statuses FROM work_columns";
+const COLUMN_SELECT: &str = "SELECT id, name, icon, position, send_on_enter, cron, pr_watch, message, recipients, harness_id, next_run_at, board_id, statuses, collapsed FROM work_columns";
 const TICKET_SELECT: &str = "SELECT id, key, project_id, workspace_id, column_id, position, title, description, pr_url, pr_number, source_url, next_step, pr_fingerprint, pr_checked_at, created_at, updated_at, board_id, ext_id, ext_key, ext_url, issue_type, priority, assignee, ext_status_id, ext_status_name, ext_status_category, pending_status_id, status_conflict, sprint_id, ext_sprint_id, push_error, removed_at FROM work_tickets";
 
 fn column_from_row(r: &rusqlite::Row) -> rusqlite::Result<Column> {
@@ -424,6 +435,7 @@ fn column_from_row(r: &rusqlite::Row) -> rusqlite::Result<Column> {
         next_run_at: r.get(10)?,
         board_id: r.get(11)?,
         statuses: serde_json::from_str(&r.get::<_, String>(12)?).unwrap_or_default(),
+        collapsed: r.get::<_, i64>(13)? != 0,
     })
 }
 
@@ -925,6 +937,18 @@ fn reject_unknown(params: &Value, allowed: &[&str]) -> Result<(), RpcError> {
 
 // ------------------------------------------------------------ messages --
 
+/// The column after `column` on its board (for `{column.next}`), or the
+/// column's own name when it is the last one.
+fn next_column_name(conn: &Connection, column: &Column) -> String {
+    let columns = list_columns(conn, column.board_id.as_deref()).unwrap_or_default();
+    columns
+        .iter()
+        .position(|c| c.id == column.id)
+        .and_then(|i| columns.get(i + 1))
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| column.name.clone())
+}
+
 /// `{ticket.id}` style placeholders. Unknown placeholders are left as typed.
 fn render_message(
     template: &str,
@@ -1041,6 +1065,7 @@ fn column_json(conn: &Connection, column: &Column) -> Result<Value, RpcError> {
         "nextRunAt": column.next_run_at,
         "boardId": column.board_id,
         "statuses": column.statuses,
+        "collapsed": column.collapsed,
         "ticketCount": ticket_count,
         "lastSentAt": last_sent_at,
         "lastSentCount": last_sent_count,
@@ -1127,7 +1152,11 @@ impl Engine {
             "updatedAt": ticket.updated_at,
             "sessions": sessions,
         });
-        if let (Some(target), Value::Object(extra)) = (value.as_object_mut(), ext) {
+        if let (Some(target), Value::Object(mut extra)) = (value.as_object_mut(), ext) {
+            // The sprint timeline is the panel's (one ticket at a time).
+            if !full {
+                extra.remove("sprints");
+            }
             target.extend(extra);
         }
         Ok(value)
@@ -1298,6 +1327,7 @@ impl Engine {
                 "recipients",
                 "harnessId",
                 "statusIds",
+                "collapsed",
             ],
         )?;
         let status_ids: Option<Vec<String>> = match params.get("statusIds") {
@@ -1346,6 +1376,9 @@ impl Engine {
         if let Some(harness) = clearable(params, "harnessId")? {
             column.harness_id = harness.as_deref().map(validate_harness).transpose()?;
         }
+        if let Some(collapsed) = bool_field(params, "collapsed")? {
+            column.collapsed = collapsed;
+        }
         if let Some(cron) = clearable(params, "cron")? {
             match cron {
                 Some(raw) => {
@@ -1364,7 +1397,8 @@ impl Engine {
         }
         conn.execute(
             "UPDATE work_columns SET name = ?2, icon = ?3, send_on_enter = ?4, cron = ?5, pr_watch = ?6,
-             message = ?7, recipients = ?8, harness_id = ?9, next_run_at = ?10, updated_at = ?11 WHERE id = ?1",
+             message = ?7, recipients = ?8, harness_id = ?9, next_run_at = ?10, updated_at = ?11,
+             collapsed = ?12 WHERE id = ?1",
             params![
                 column.id,
                 column.name,
@@ -1377,6 +1411,7 @@ impl Engine {
                 column.harness_id,
                 column.next_run_at,
                 crate::now_unix_ms() as i64,
+                column.collapsed as i64,
             ],
         )
         .map_err(error::from_sqlite)?;
@@ -1867,6 +1902,10 @@ impl Engine {
         let template = str_field(params, "message")?
             .map(str::to_owned)
             .unwrap_or_else(|| column.message.clone());
+        let next = {
+            let conn = self.db.lock().unwrap();
+            next_column_name(&conn, &column)
+        };
         let mut previews = Vec::new();
         for ticket in &tickets {
             let (project, ids) = {
@@ -1895,7 +1934,8 @@ impl Engine {
             previews.push(json!({
                 "ticketId": ticket.id,
                 "ticketKey": ticket.key,
-                "message": render_message(&template, ticket, Some(&column), project.as_deref()),
+                "message": render_message(&template, ticket, Some(&column), project.as_deref())
+                    .replace("{column.next}", &next),
                 "recipients": if recipients.is_empty() {
                     json!([{ "sessionId": null, "action": "start", "harnessId": self.default_harness(&column) }])
                 } else {
@@ -2026,7 +2066,7 @@ impl Engine {
         template: Option<&str>,
     ) -> Result<Value, RpcError> {
         let _serial = DELIVERY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let (ticket, project, ids) = {
+        let (ticket, project, ids, next) = {
             let conn = self.db.lock().unwrap();
             let ticket = get_ticket(&conn, ticket_id)?;
             let project = ticket
@@ -2034,14 +2074,15 @@ impl Engine {
                 .as_deref()
                 .and_then(|p| project_name(&conn, p).ok());
             let ids = linked_session_ids(&conn, &ticket.id)?;
-            (ticket, project, ids)
+            (ticket, project, ids, next_column_name(&conn, column))
         };
         let message = render_message(
             template.unwrap_or(&column.message),
             &ticket,
             Some(column),
             project.as_deref(),
-        );
+        )
+        .replace("{column.next}", &next);
         let mut results = Vec::new();
         if message.trim().is_empty() {
             results
@@ -2145,7 +2186,7 @@ impl Engine {
                 return json!({
                     "sessionId": null,
                     "action": "skipped",
-                    "error": "the ticket has no workspace or project to start a session in",
+                    "error": "the ticket has no workspace or project to start a session in; set its project (or, on an imported board, where the board's sessions start)",
                 });
             }
             Err(err) => {

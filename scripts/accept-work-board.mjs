@@ -502,7 +502,10 @@ try {
   await page.getByRole("button", { name: "Review column actions" }).click();
   await page.getByRole("menuitem", { name: "Configure prompt…" }).click();
   const jiraReview = page.getByRole("complementary", { name: "Review prompt" });
+  await jiraReview.getByTestId("work-column-mapped").getByText("In Review").waitFor();
+  await jiraReview.getByRole("button", { name: "Change" }).click();
   await jiraReview.getByTestId("work-column-statuses").getByRole("checkbox", { name: "Map In Review to Review" }).waitFor();
+  await jiraReview.getByRole("button", { name: "Done", exact: true }).click();
   await jiraReview.getByRole("checkbox", { name: "Ticket enters Review" }).click();
   await jiraReview.getByRole("textbox", { name: "Message to sessions" }).fill("Jira moved {ticket.key} to {ticket.status}");
   await jiraReview.getByRole("heading", { name: "Recipients" }).click();
@@ -647,6 +650,26 @@ try {
   await linDialog.waitFor({ state: "detached" });
   await page.getByRole("button", { name: "Cycle", exact: true }).getByText("Cycle 12 · Resume polish · Active").waitFor();
   await page.getByRole("button", { name: "Past cycles" }).waitFor();
+  // Canceled arrives collapsed; the board starts sessions in Drogon.
+  await page.getByRole("region", { name: "Canceled column" }).getByRole("button", { name: "Expand Canceled column" }).waitFor();
+  const linearBoard = (await cli(["work", "boards"])).boards.find((b) => b.provider === "linear");
+  if (!linearBoard.projectId) {
+    await page.getByTestId("work-board-no-project").getByRole("combobox", { name: "Sessions start in" }).selectOption({ label: "Drogon" });
+    await waitFor("board project", async () => Boolean((await cli(["work", "boards"])).boards.find((b) => b.provider === "linear").projectId));
+  }
+  await page.getByRole("button", { name: "In Review column actions" }).click();
+  await page.getByRole("menuitem", { name: "Configure prompt…" }).click();
+  const linReview = page.getByRole("complementary", { name: "In Review prompt" });
+  await linReview.getByRole("combobox", { name: "Use a template" }).selectOption({ label: "Address review" });
+  await waitFor("template saved", async () => {
+    const cols = await cli(["work", "column", "list", "--board", linearBoard.id]);
+    return cols.columns.find((c) => c.name === "In Review")?.message.includes("is in review");
+  });
+  await linReview.getByRole("button", { name: "Preview" }).click();
+  await linReview.getByTestId("work-column-preview").getByText(/ENG-1 is in review/).waitFor();
+  await linReview.getByTestId("work-column-preview").getByText(/--column "Done"/).waitFor();
+  await shot("linear-template");
+  await linReview.getByRole("button", { name: "Close prompt panel" }).click();
   await sourcesControl("linear/issue/ENG-2", { state: "In Progress" });
   await page.getByRole("button", { name: "Sync Engineering" }).click();
   await page.getByRole("region", { name: "In Progress column" }).getByRole("article", { name: /ENG-2/ }).waitFor({ timeout: 20000 });

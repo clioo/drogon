@@ -33,7 +33,16 @@ const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("coordination_access", 1, &[]),
     ("orchestration_mail", 1, &[]),
     ("orchestration_attempts", 1, &[]),
-    ("work", 4, &[("work-v1", 1), ("work-v2", 2), ("work-v3", 3)]),
+    (
+        "work",
+        5,
+        &[
+            ("work-v1", 1),
+            ("work-v2", 2),
+            ("work-v3", 3),
+            ("work-v4", 4),
+        ],
+    ),
 ];
 
 /// Same cap as `db::PRE_MIGRATION_BACKUP_RETENTION`.
@@ -57,6 +66,7 @@ fn fixture_sql(fixture: &str) -> &'static str {
         "work-v1" => include_str!("fixtures/upgrades/work-v1.sql"),
         "work-v2" => include_str!("fixtures/upgrades/work-v2.sql"),
         "work-v3" => include_str!("fixtures/upgrades/work-v3.sql"),
+        "work-v4" => include_str!("fixtures/upgrades/work-v4.sql"),
         "projects-v1" => include_str!("fixtures/upgrades/projects-v1.sql"),
         "main-schema-v1" => include_str!("fixtures/upgrades/main-schema-v1.sql"),
         "workspaces-only-pre-projects" => {
@@ -753,7 +763,7 @@ fn fresh_install_backfill_is_a_no_op_with_no_pre_existing_workspaces() {
 fn work_v1_board_survives_the_imported_boards_step() {
     let (dir, engine) = open_seeded("work-v1-rows", "work-v1");
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "work"), 4);
+    assert_eq!(version_of(&conn, "work"), 5);
     // The v1 rows are intact and land on My work (board_id NULL).
     let (key, board, column): (String, Option<String>, String) = conn
         .query_row(
@@ -818,7 +828,7 @@ fn work_v1_board_survives_the_imported_boards_step() {
 fn work_v2_imported_board_survives_the_sources_step() {
     let (dir, engine) = open_seeded("work-v2-rows", "work-v2");
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "work"), 4);
+    assert_eq!(version_of(&conn, "work"), 5);
     let (ext_key, board): (String, String) = conn
         .query_row(
             "SELECT ext_key, board_id FROM work_tickets WHERE id = 'tkt-jira'",
@@ -863,7 +873,7 @@ fn work_v2_imported_board_survives_the_sources_step() {
 fn work_v3_boards_gain_auto_import_off_and_keep_their_sources() {
     let (dir, engine) = open_seeded("work-v3-rows", "work-v3");
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "work"), 4);
+    assert_eq!(version_of(&conn, "work"), 5);
     let auto: i64 = conn
         .query_row(
             "SELECT auto_import_mine FROM work_boards WHERE id = 'board-seed'",
@@ -894,4 +904,27 @@ fn work_v3_boards_gain_auto_import_off_and_keep_their_sources() {
         github["enabled"], false,
         "a source the owner turned off stays off"
     );
+}
+
+#[test]
+fn work_v4_columns_gain_collapsed_off_and_boards_keep_auto_import() {
+    let (dir, _engine) = open_seeded("work-v4-rows", "work-v4");
+    let conn = read_db(&dir);
+    assert_eq!(version_of(&conn, "work"), 5);
+    let collapsed: i64 = conn
+        .query_row(
+            "SELECT collapsed FROM work_columns WHERE id = 'col-jira-review'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(collapsed, 0);
+    let auto: i64 = conn
+        .query_row(
+            "SELECT auto_import_mine FROM work_boards WHERE id = 'board-seed'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(auto, 1, "auto-import survives");
 }

@@ -1016,6 +1016,55 @@ fn sessions_start_from_a_ticket_and_take_a_name() {
             .iter()
             .any(|a| a == "Started a claude session")
     );
+    // A board-wide project: every ticket without one takes it, and a
+    // session starts there.
+    let (_dir2, other) = {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Waman");
+        std::fs::create_dir_all(&folder).unwrap();
+        let id = b
+            .ctx
+            .ok("project.add", json!({"path": folder.to_str().unwrap()}))["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        (dir, id)
+    };
+    let moved = b.ctx.ok(
+        "work.board_update",
+        json!({"boardId": b.board_id, "projectId": other}),
+    );
+    assert_eq!(moved["projectId"], other.as_str());
+    let t = b.ctx.ok("work.ticket_show", json!({"ticketId": "APP-142"}));
+    assert_eq!(
+        t["projectId"],
+        other.as_str(),
+        "the board's previous project follows the board"
+    );
+    let cleared = b.ctx.ok(
+        "work.board_update",
+        json!({"boardId": b.board_id, "projectId": null}),
+    );
+    assert_eq!(cleared["projectId"], Value::Null);
+    let t = b.ctx.ok("work.ticket_show", json!({"ticketId": "APP-142"}));
+    assert_eq!(t["projectId"], Value::Null);
+    let refused = b
+        .ctx
+        .err("work.ticket_session_start", json!({"ticketId": "APP-142"}));
+    assert!(
+        refused.message.contains("Sessions start in"),
+        "{}",
+        refused.message
+    );
+    b.ctx.ok(
+        "work.board_update",
+        json!({"boardId": b.board_id, "projectId": "Waman"}),
+    );
+    let started = b.ctx.ok(
+        "work.ticket_session_start",
+        json!({"ticketId": "APP-142", "harnessId": "claude"}),
+    );
+    assert!(started["workspaceId"].is_string());
     // A ticket with neither workspace nor project cannot start one.
     let local = b.ctx.ok("work.ticket_create", json!({"title": "Nowhere"}));
     assert!(
@@ -1184,6 +1233,22 @@ fn mine_imports_your_issues_and_auto_import_follows_new_assignments() {
     );
     assert!(
         ctx.err("work.ticket_show", json!({"ticketId": "APP-146"}))
+            .message
+            .contains("not found")
+    );
+    // Finished work is history: a Done issue assigned to you stays out.
+    ctx.ok(
+        "work.board_update",
+        json!({"boardId": board, "autoImportMine": true}),
+    );
+    server.control(
+        "issue/APP-110",
+        json!({"assignee": {"accountId": "fixture-user-1", "displayName": "Jon Doe"}}),
+    );
+    let synced = ctx.ok("work.board_sync", json!({"boardId": board}));
+    assert_eq!(synced["imported"], 1, "APP-146 (open) only: {synced}");
+    assert!(
+        ctx.err("work.ticket_show", json!({"ticketId": "APP-110"}))
             .message
             .contains("not found")
     );

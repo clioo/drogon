@@ -407,6 +407,12 @@ describe("Work sources", () => {
     expect(screen.getByRole("button", { name: "Cycle" }).textContent).toContain("Cycle 12 · Active");
     expect(screen.getByRole("button", { name: "Past cycles" })).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Done column" })).getByText("Tickets moved here will stay in this cycle.")).toBeTruthy();
+    openMenu(screen.getByRole("button", { name: "In Review column actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Configure prompt…" }));
+    const prompt = await screen.findByRole("complementary", { name: "In Review prompt" });
+    expect(within(prompt).getByText(/Prompts reach only tickets in the active cycle\./)).toBeTruthy();
+    expect(within(prompt).getByRole("heading", { name: "Linear statuses" })).toBeTruthy();
+    fireEvent.click(within(prompt).getByRole("button", { name: "Close prompt panel" }));
     const card = screen.getByRole("article", { name: /ENG-1/ });
     expect(within(card).getByText("Not synced to Linear")).toBeTruthy();
     fireEvent.click(within(card).getByRole("button", { name: "Push to Linear" }));

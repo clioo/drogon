@@ -335,8 +335,10 @@ drogon-cli work source disconnect --provider linear
 Find a board, preview it, import the chosen issues. A board usually spans
 several projects and people: import what is yours (`--mine`) plus what you
 pick, and filter the preview by person (`--assignee me|none|<id>`), project,
-status or words (`--open` leaves out finished issues). `--auto-import-mine true` keeps bringing in new issues
-assigned to you on every sync (`work import settings` changes it later):
+status or words (`--open` leaves out finished issues). `--auto-import-mine true`
+keeps bringing in new open issues assigned to you on every sync. `work import
+settings` changes that later, and its `--project` sets where the board's
+sessions start (New session and column prompts need a Drogon project):
 
 ```text
 drogon-cli work import boards --provider linear --json
@@ -345,6 +347,7 @@ drogon-cli work import preview --provider github --board project:PVT_kwHO --scop
 drogon-cli work import run --provider linear --board <TEAM_ID> --mine --auto-import-mine true
 drogon-cli work import run --board 7 --issue APP-128 --issue APP-142 --project Drogon
 drogon-cli work import settings --board 7 --auto-import-mine false
+drogon-cli work import settings --board 7 --project Drogon
 drogon-cli work boards
 drogon-cli work board --board 7 --sprint backlog --json
 ```

@@ -50,6 +50,8 @@ export type WorkColumn = {
   boardId?: string | null;
   /** Provider statuses this column stands for (empty: Drogon-only). */
   statuses?: WorkBoardStatus[];
+  /** Shown as a narrow strip; still a drop target. */
+  collapsed?: boolean;
 };
 
 export type WorkBoardStatus = { id: string; name: string; category: string };
@@ -330,6 +332,7 @@ export type WorkColumnUpdate = {
   recipients?: WorkRecipients;
   harnessId?: string | null;
   statusIds?: string[];
+  collapsed?: boolean;
 };
 
 export type WorkTicketCreate = {
@@ -392,7 +395,7 @@ export interface WorkBridge {
   boardSync(input: { boardId: string }): Promise<Result<WorkSyncResult>>;
   boardPush(input: { boardId: string }): Promise<Result<{ results: WorkPushResult[]; pushed: number; failed: number }>>;
   boardDelete(input: { boardId: string }): Promise<Result<{ deleted: string; name: string; tickets: number }>>;
-  boardUpdate(input: { boardId: string; autoImportMine?: boolean }): Promise<Result<WorkBoardSummary>>;
+  boardUpdate(input: { boardId: string; autoImportMine?: boolean; projectId?: string | null }): Promise<Result<WorkBoardSummary>>;
   ticketPush(input: { ticketId: string }): Promise<Result<WorkPushResult>>;
   ticketResolve(input: { ticketId: string; keep: "theirs" | "ours" }): Promise<Result<WorkTicket>>;
   ticketSprint(input: { ticketId: string; to: string }): Promise<Result<WorkTicket>>;

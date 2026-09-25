@@ -39,6 +39,7 @@ import {
   type WorkTicketUpdate,
 } from "../../../../shared/work-contract";
 import type { WorkBoardState } from "./use-work-board";
+import { JiraMarkdown } from "../tasks/jira/jira-markdown";
 import { deliverySummary, formatClock } from "./work-format";
 import { WorkColumnIcon, WorkSessionGlyph, WorkSessionState, workSessionLabel } from "./work-icons";
 import {
@@ -119,7 +120,7 @@ export function WorkTicketPanel({
   const [title, setTitle] = useState(ticket.title);
   // The board carries a description excerpt; the whole text comes with
   // ticketShow. Until it does, a truncated description is shown, not edited.
-  const [loaded, setLoaded] = useState<{ id: string; description: string } | null>(null);
+  const [loaded, setLoaded] = useState<{ id: string; description: string; sprints: WorkTicket["sprints"] } | null>(null);
   const fullDescription =
     loaded?.id === ticket.id ? loaded.description : ticket.descriptionTruncated ? null : ticket.description;
   const [description, setDescription] = useState(fullDescription ?? ticket.description);
@@ -145,7 +146,7 @@ export function WorkTicketPanel({
     let cancelled = false;
     void bridge.ticketShow({ ticketId: ticket.id }).then((result) => {
       if (cancelled || !result.ok) return;
-      setLoaded({ id: ticket.id, description: result.result.description });
+      setLoaded({ id: ticket.id, description: result.result.description, sprints: result.result.sprints });
       setSends(result.result.sends ?? []);
       setActivity(result.result.activity ?? []);
     });
@@ -297,7 +298,8 @@ export function WorkTicketPanel({
     </DropdownMenu>
   );
 
-  const timeline = ticket.sprints ?? [];
+  // The board listing leaves the sprint timeline to the full ticket.
+  const timeline = (loaded?.id === ticket.id ? loaded.sprints : undefined) ?? ticket.sprints ?? [];
   const history = [
     ...activity.map((a) => ({ at: a.at, key: `a${a.id}`, text: a.text, detail: null as string | null })),
     ...sends.map((s) => ({
@@ -359,10 +361,13 @@ export function WorkTicketPanel({
         {imported ? (
           ticket.description ? (
             <div className="text-sm text-muted-foreground">
-              <p className={`whitespace-pre-wrap ${expanded ? "" : "line-clamp-6"}`} data-testid="work-panel-description">
-                {fullDescription ?? ticket.description}
-              </p>
-              {(fullDescription ?? ticket.description).length > 280 ? (
+              {/* The source's markdown (Linear, GitHub; Jira's ADF comes as
+                  markdown too), rendered as elements, never raw HTML. */}
+              <div data-testid="work-panel-description" className={expanded ? "" : "max-h-32 overflow-hidden"}>
+                <JiraMarkdown content={fullDescription ?? ticket.description} className="text-sm" />
+              </div>
+              {(fullDescription ?? ticket.description).length > 280 ||
+              (fullDescription ?? ticket.description).split("\n").length > 6 ? (
                 <button type="button" className="mt-1 text-xs underline" onClick={() => setExpanded((v) => !v)}>
                   {expanded ? "Show less" : "Show all"}
                 </button>
@@ -486,22 +491,34 @@ export function WorkTicketPanel({
                   <dd className="flex items-center gap-1.5">
                     <ProviderMark provider={ticket.provider} /> {board.board?.projectName ?? board.board?.name}
                   </dd>
-                  <dt className="text-muted-foreground">Issue type</dt>
-                  <dd>
-                    <IssueTypeBadge type={ticket.issueType} />
-                  </dd>
-                  <dt className="text-muted-foreground">Priority</dt>
-                  <dd>
-                    <PriorityBadge priority={ticket.priority} />
-                  </dd>
+                  {ticket.issueType ? (
+                    <>
+                      <dt className="text-muted-foreground">Issue type</dt>
+                      <dd>
+                        <IssueTypeBadge type={ticket.issueType} />
+                      </dd>
+                    </>
+                  ) : null}
+                  {ticket.priority ? (
+                    <>
+                      <dt className="text-muted-foreground">Priority</dt>
+                      <dd>
+                        <PriorityBadge priority={ticket.priority} />
+                      </dd>
+                    </>
+                  ) : null}
                   <dt className="text-muted-foreground">Assignee</dt>
                   <dd className="flex items-center gap-2">
                     <Avatar name={ticket.assignee} className="size-5 text-[9px]" /> {ticket.assignee ?? "Unassigned"}
                   </dd>
                   <dt className="text-muted-foreground">Status</dt>
                   <dd>{ticket.externalStatus?.name ?? "—"}</dd>
-                  <dt className="text-muted-foreground">{Term}</dt>
-                  <dd>{ticket.sprintName ?? "Backlog"}</dd>
+                  {board.board?.kind === "scrum" ? (
+                    <>
+                      <dt className="text-muted-foreground">{Term}</dt>
+                      <dd>{ticket.sprintName ?? "Backlog"}</dd>
+                    </>
+                  ) : null}
                   <dt className="text-muted-foreground">Issue</dt>
                   <dd>
                     {ticket.externalUrl ? (

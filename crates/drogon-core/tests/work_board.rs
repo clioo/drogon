@@ -680,6 +680,28 @@ fn preview_names_each_recipient_and_what_will_happen() {
     );
     let entry = &preview["previews"][0];
     assert_eq!(entry["message"], "Review DRG-1");
+    // {column.next} names the column after this one ({ticket.status} is
+    // the column itself on My work); the last column names itself.
+    let next = ok(
+        &fx.engine,
+        "work.column_preview",
+        json!({"columnId": "Review", "message": "Move {ticket.key} from {ticket.status} to {column.next}"}),
+    );
+    assert_eq!(
+        next["previews"][0]["message"],
+        "Move DRG-1 from Review to QA"
+    );
+    let last = ok(
+        &fx.engine,
+        "work.ticket_create",
+        json!({"title": "Shipped", "columnId": "Done"}),
+    );
+    let done = ok(
+        &fx.engine,
+        "work.column_preview",
+        json!({"columnId": "Done", "ticketId": last["id"], "message": "{column.next}"}),
+    );
+    assert_eq!(done["previews"][0]["message"], "Done");
     let actions: Vec<&str> = entry["recipients"]
         .as_array()
         .unwrap()
