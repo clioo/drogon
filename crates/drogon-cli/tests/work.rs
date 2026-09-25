@@ -592,7 +592,9 @@ fn a_jira_board_is_imported_synced_and_pushed_from_the_cli() {
     ]);
     assert!(preview.contains("Review ← In Review"), "{preview}");
     assert!(
-        preview.contains("APP-128  Handle session resume after PR review  [In Review · Sprint 25]"),
+        preview.contains(
+            "APP-128  Handle session resume after PR review  [In Review · Sprint 25 · Jon Doe]"
+        ),
         "{preview}"
     );
     let usage = fx.command(&["work", "import", "run", "--board", "7"]);
@@ -897,6 +899,27 @@ fn sources_are_listed_toggled_connected_and_a_linear_team_imported_from_the_cli(
     );
     assert!(!out.contains("lin_api_fixture"));
 
+    let mine = fx.text(&[
+        "work",
+        "import",
+        "preview",
+        "--provider",
+        "linear",
+        "--board",
+        "team-eng",
+        "--assignee",
+        "me",
+    ]);
+    assert!(mine.contains("assigned to you: 1, unassigned: 3"), "{mine}");
+    assert!(
+        mine.contains("projects: Resume 2, Board 1 (none: 2)"),
+        "{mine}"
+    );
+    assert!(
+        mine.contains("ENG-1  Resume Linear sessions after review  [In Review · Cycle 12 · Resume polish · Jon Doe]"),
+        "{mine}"
+    );
+    assert!(!mine.contains("ENG-2"), "{mine}");
     let teams = fx.text(&["work", "import", "boards", "--provider", "linear"]);
     assert!(
         teams.contains("team-eng  Engineering (scrum)  project ENG"),
@@ -911,10 +934,11 @@ fn sources_are_listed_toggled_connected_and_a_linear_team_imported_from_the_cli(
         "linear",
         "--board",
         "team-eng",
-        "--issue",
-        "ENG-1",
+        "--mine",
         "--issue",
         "ENG-2",
+        "--auto-import-mine",
+        "true",
         "--project",
         "Drogon",
     ]);
@@ -922,6 +946,20 @@ fn sources_are_listed_toggled_connected_and_a_linear_team_imported_from_the_cli(
         imported.contains("Imported 2 issue(s) into Engineering"),
         "{imported}"
     );
+    let settings = fx.text(&[
+        "work",
+        "import",
+        "settings",
+        "--board",
+        "Engineering",
+        "--auto-import-mine",
+        "false",
+    ]);
+    assert_eq!(settings.trim(), "Engineering: only the issues you import");
+    let usage = fx.command(&[
+        "work", "import", "run", "--board", "team-eng", "--all", "--mine",
+    ]);
+    assert_eq!(usage.status.code(), Some(2), "--all and --mine conflict");
     let board = fx.text(&["work", "board", "--board", "Engineering"]);
     assert!(
         board.starts_with("Engineering · Linear · Cycle 12 · Resume polish (active)"),

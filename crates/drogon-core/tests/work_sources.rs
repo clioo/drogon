@@ -980,3 +980,74 @@ fn github_without_project_access_still_lists_repositories_and_says_why() {
     assert_eq!(fine["warnings"], json!([]));
     assert_eq!(fine["boards"].as_array().unwrap().len(), 4);
 }
+
+/// A Linear team spans projects and people: the picker filters by them and
+/// counts them, and "me" is the key's own user.
+#[test]
+fn the_linear_picker_filters_by_person_project_status_and_words() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "linear", "apiKey": "lin_api_fixture", "apiUrl": fx.url("linear")}),
+    );
+    let preview = |filters: Value| {
+        let mut params = json!({"provider": "linear", "externalBoardId": "team-eng"});
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(filters.as_object().unwrap().clone());
+        let v = ctx.ok("work.import_preview", params);
+        let keys: Vec<String> = v["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["key"].as_str().unwrap().to_string())
+            .collect();
+        (v, keys)
+    };
+    let (all, keys) = preview(json!({}));
+    assert_eq!(keys.len(), 5);
+    assert_eq!(all["me"], "lin-user-1");
+    assert_eq!(all["facets"]["mine"], 1);
+    let projects: Vec<(String, i64)> = all["facets"]["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap().to_string(),
+                p["count"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        projects,
+        [("Resume".to_string(), 2), ("Board".to_string(), 1)]
+    );
+    assert_eq!(all["facets"]["noProject"], 2);
+    assert_eq!(preview(json!({"assignee": "me"})).1, ["ENG-1"]);
+    assert_eq!(preview(json!({"project": "Resume"})).1, ["ENG-1", "ENG-3"]);
+    assert_eq!(preview(json!({"project": "none"})).1, ["ENG-2", "ENG-4"]);
+    assert_eq!(preview(json!({"status": "st-todo"})).1, ["ENG-2"]);
+    assert_eq!(preview(json!({"query": "cycle picker"})).1, ["ENG-2"]);
+    assert_eq!(all["facets"]["finished"], 1);
+    assert_eq!(
+        preview(json!({"open": true})).1,
+        ["ENG-1", "ENG-2", "ENG-3", "ENG-5"],
+        "ENG-4 is done"
+    );
+    assert_eq!(
+        preview(json!({"assignee": "any", "project": "Resume", "query": "eng-3"})).1,
+        ["ENG-3"]
+    );
+    let t = preview(json!({"assignee": "me"})).0;
+    assert_eq!(t["issues"][0]["assigneeId"], "lin-user-1");
+    assert_eq!(t["issues"][0]["project"], "Resume");
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"provider": "linear", "externalBoardId": "team-eng", "mine": true}),
+    );
+    assert_eq!(imported["imported"], 1);
+}

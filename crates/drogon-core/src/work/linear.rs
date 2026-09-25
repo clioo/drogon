@@ -24,7 +24,7 @@ pub(crate) struct LinearProvider {
 }
 
 const ISSUE_FIELDS: &str = "id identifier title description url priorityLabel updatedAt
-  assignee { name displayName }
+  assignee { id name displayName }
   state { id name type }
   cycle { id number name startsAt endsAt completedAt isActive }
   labels { nodes { name } }
@@ -147,13 +147,12 @@ impl LinearProvider {
             issue_type: labels.first().cloned(),
             priority,
             assignee: raw["assignee"]["name"].as_str().map(str::to_owned),
+            assignee_id: raw["assignee"]["id"].as_str().map(str::to_owned),
             status: map_state(state),
             sprint: raw.get("cycle").and_then(map_cycle),
             closed_sprints: Vec::new(),
-            project: raw["project"]["name"]
-                .as_str()
-                .or(raw["team"]["name"].as_str())
-                .map(str::to_owned),
+            // A Linear project (a team's issues span several).
+            project: raw["project"]["name"].as_str().map(str::to_owned),
             updated: text(&raw["updatedAt"]),
         }
     }
@@ -287,6 +286,11 @@ impl WorkProvider for LinearProvider {
                 statuses: vec![map_state(state)],
             })
             .collect())
+    }
+
+    fn me(&self) -> ProviderResult<Option<String>> {
+        let data = self.gql("query DrogonLinearMe { viewer { id } }", json!({}))?;
+        Ok(data["viewer"]["id"].as_str().map(str::to_owned))
     }
 
     fn list_statuses(&self, board_id: &str) -> ProviderResult<Vec<ExtStatus>> {

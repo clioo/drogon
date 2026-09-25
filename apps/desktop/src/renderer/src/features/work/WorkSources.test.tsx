@@ -178,22 +178,24 @@ function fakeBridge(options: { withLinearBoard?: boolean } = {}) {
             boards: [{ id: "team-eng", name: "Engineering", kind: "scrum", projectKey: "ENG", projectName: "Engineering", importedBoardId: null }],
           }),
     ),
-    importPreview: vi.fn(() =>
+    importPreview: vi.fn((input: { assignee?: string }) =>
       ok({
         provider: "linear",
+        me: "lin-me",
+        facets: { mine: 1, unassigned: 1, noProject: 2, people: [{ id: "lin-me", name: "Jon Doe", count: 1 }], projects: [], statuses: [] },
         board: { id: "team-eng", name: "Engineering", kind: "scrum" },
         columns: [{ name: "Todo", statuses: [] }, { name: "In Review", statuses: [] }],
         sprints: cycles,
         issues: [
           {
-            id: "li-1", key: "ENG-1", url: "", title: "Resume Linear sessions", issueType: null, priority: "High", assignee: null,
+            id: "li-1", key: "ENG-1", url: "", title: "Resume Linear sessions", issueType: null, priority: "High", assignee: "Jon Doe", assigneeId: "lin-me",
             status: { id: "st-review", name: "In Review", category: "indeterminate" }, sprint: cycles[1]!, closedSprints: [], importedTicketId: null,
           },
           {
             id: "li-4", key: "ENG-4", url: "", title: "Old leftover", issueType: null, priority: null, assignee: null,
             status: { id: "st-done", name: "Done", category: "done" }, sprint: null, closedSprints: [cycles[0]!], importedTicketId: null,
           },
-        ],
+        ].filter((i) => input.assignee !== "me" || i.assigneeId === "lin-me"),
       }),
     ),
     boardImport: vi.fn(() => ok({ board: LINEAR_BOARD, imported: 1, refreshed: 0 })),
@@ -375,13 +377,23 @@ describe("Work sources", () => {
     });
     fireEvent.click(await within(dialog).findByRole("button", { name: "Choose Engineering" }));
     await within(dialog).findByText("Columns: Todo · In Review");
-    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "team-eng", provider: "linear" });
+    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "team-eng", provider: "linear", assignee: "me", open: true });
     expect(within(dialog).getByRole("region", { name: "Cycle 12 · Active" })).toBeTruthy();
-    expect(within(dialog).getByRole("region", { name: "Finished in past cycles" })).toBeTruthy();
+    // Yours by default; Anyone shows the rest (the finished one too).
+    expect(within(dialog).queryByRole("region", { name: "Finished in past cycles" })).toBeNull();
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Assigned to" }), { target: { value: "any" } });
+    expect(await within(dialog).findByRole("region", { name: "Finished in past cycles" })).toBeTruthy();
+    expect(within(dialog).getByRole("checkbox", { name: "Import ENG-4" }).getAttribute("aria-checked")).toBe("false");
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Import 1 issue" }));
     });
-    expect(bridge.boardImport).toHaveBeenCalledWith({ provider: "linear", externalBoardId: "team-eng", issueKeys: ["ENG-1"], projectId: undefined });
+    expect(bridge.boardImport).toHaveBeenCalledWith({
+      provider: "linear",
+      externalBoardId: "team-eng",
+      issueKeys: ["ENG-1"],
+      autoImportMine: true,
+      projectId: undefined,
+    });
     await waitFor(() => expect(bridge.board).toHaveBeenCalledWith({ boardId: "bl" }));
   });
 
@@ -492,5 +504,97 @@ describe("GitHub without project access", () => {
     const dialog = await screen.findByTestId("work-import-dialog");
     expect((await within(dialog).findByTestId("work-import-warnings")).textContent).toContain("gh auth refresh -s read:project,project");
     expect(within(dialog).getByRole("button", { name: "Choose clioo/drogon issues" })).toBeTruthy();
+  });
+});
+
+describe("the import picker's filters", () => {
+  test("project, status and words go to the daemon; auto-import can be turned off", async () => {
+    const bridge = fakeBridge();
+    bridge.providerBoards.mockImplementation((() =>
+      ok({
+        provider: "linear",
+        boards: [{ id: "team-eng", name: "Engineering", kind: "kanban", projectKey: "ENG", projectName: "Engineering", importedBoardId: null }],
+      })) as never);
+    bridge.importPreview.mockImplementation(((input: { assignee?: string; project?: string; status?: string; query?: string }) =>
+      ok({
+        provider: "linear",
+        board: { id: "team-eng", name: "Engineering", kind: "kanban" },
+        columns: [{ name: "Todo", statuses: [] }],
+        sprints: [],
+        me: "lin-me",
+        facets: {
+          mine: 1,
+          unassigned: 0,
+          noProject: 1,
+          people: [
+            { id: "lin-me", name: "Jon Doe", count: 1 },
+            { id: "lin-ana", name: "Ana Lopez", count: 1 },
+          ],
+          projects: [{ id: "Resume", name: "Resume", count: 1 }],
+          statuses: [{ id: "st-todo", name: "Todo", count: 2 }],
+        },
+        issues: input.query === "nothing"
+          ? []
+          : [
+              {
+                id: "li-1", key: "ENG-1", url: "", title: "Resume", issueType: null, priority: null, assignee: "Jon Doe", assigneeId: "lin-me",
+                project: "Resume", status: { id: "st-todo", name: "Todo", category: "new" }, sprint: null, closedSprints: [], importedTicketId: null,
+              },
+            ],
+      })) as never);
+    await mount(bridge);
+    fireEvent.click(within(await screen.findByTestId("work-sync-card")).getByRole("button", { name: /Import a Linear team/ }));
+    const dialog = await screen.findByTestId("work-import-dialog");
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Choose Engineering" }));
+    const assignee = (await within(dialog).findByRole("combobox", { name: "Assigned to" })) as HTMLSelectElement;
+    const options = [...assignee.options].map((o) => o.textContent);
+    expect(options).toEqual(["Assigned to me (1)", "Anyone", "Unassigned (0)", "Ana Lopez (1)"]);
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Project" }), { target: { value: "none" } });
+    await waitFor(() =>
+      expect(bridge.importPreview).toHaveBeenLastCalledWith({ externalBoardId: "team-eng", provider: "linear", assignee: "me", open: true, project: "none" }),
+    );
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Status" }), { target: { value: "st-todo" } });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search issues" }), { target: { value: "nothing" } });
+    await waitFor(() =>
+      expect(bridge.importPreview).toHaveBeenLastCalledWith({
+        externalBoardId: "team-eng",
+        provider: "linear",
+        assignee: "me",
+        open: true,
+        project: "none",
+        status: "st-todo",
+        query: "nothing",
+      }),
+    );
+    expect(await within(dialog).findByText("No issues match these filters.")).toBeTruthy();
+    // Finished issues are hidden by default; unticking asks for them too.
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Hide finished issues" }));
+    await waitFor(() => expect(bridge.importPreview.mock.lastCall?.[0]).not.toHaveProperty("open"));
+    // ENG-1 stays chosen while filtered out.
+    expect(within(dialog).getByRole("button", { name: "Import 1 issue" })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Keep importing new issues assigned to me" }));
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Import 1 issue" }));
+    });
+    expect(bridge.boardImport).toHaveBeenCalledWith({
+      provider: "linear",
+      externalBoardId: "team-eng",
+      issueKeys: ["ENG-1"],
+      autoImportMine: false,
+      projectId: undefined,
+    });
+  });
+
+  test("the Sync menu turns importing new assigned issues on and off", async () => {
+    const bridge = { ...fakeBridge({ withLinearBoard: true }), boardUpdate: vi.fn(() => ok({ ...LINEAR_BOARD, autoImportMine: true })) };
+    await mount(bridge);
+    openMenu(screen.getByRole("button", { name: "Board" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Engineering · Linear" }));
+    await screen.findByText("Resume Linear sessions");
+    openMenu(screen.getByRole("button", { name: "Sync options" }));
+    const item = await screen.findByRole("menuitemcheckbox", { name: "Import new issues assigned to me" });
+    expect(item.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(item);
+    await waitFor(() => expect(bridge.boardUpdate).toHaveBeenCalledWith({ boardId: "bl", autoImportMine: true }));
   });
 });

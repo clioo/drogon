@@ -10,7 +10,7 @@
 // Tests change "Linear"/"GitHub" from the outside (a teammate's edit)
 // through the unauthenticated control endpoints:
 //
-//   POST /__fixture/linear/issue/<identifier>  {state, cycle, title, description, deleted}
+//   POST /__fixture/linear/issue/<identifier>  {state, cycle, title, description, assignee, deleted}
 //   POST /__fixture/linear/bulk                {team, count, descriptionBytes}
 //        (a real team's size: many issues with long descriptions)
 //   POST /__fixture/github/item                {project, key, status, iteration, deleted}
@@ -89,17 +89,25 @@ function linearIssueJson(issue) {
     url: `https://linear.app/${linear.organization.urlKey}/issue/${issue.identifier}`,
     priorityLabel: issue.priority,
     updatedAt: issue.updatedAt ?? '2026-09-20T09:00:00.000Z',
-    assignee: issue.assignee ? { name: issue.assignee, displayName: issue.assignee.split(' ')[0].toLowerCase() } : null,
+    assignee: issue.assignee
+      ? {
+          id: issue.assignee === linear.viewer.name ? linear.viewer.id : `lin-${issue.assignee.toLowerCase().replace(/\s+/g, '-')}`,
+          name: issue.assignee,
+          displayName: issue.assignee.split(' ')[0].toLowerCase(),
+        }
+      : null,
     state: { id: state.id, name: state.name, type: state.type },
     cycle: issue.cycle ? linearCycle(team, issue.cycle) : null,
     labels: { nodes: issue.labels.map((name) => ({ name })) },
-    project: null,
+    project: issue.project ? { name: issue.project } : null,
     team: { id: team.id, key: team.key, name: team.name },
   }
 }
 
 function linearGraphql(op, v) {
   switch (op) {
+    case 'DrogonLinearMe':
+      return { data: { viewer: { id: linear.viewer.id } } }
     case 'DrogonLinearViewer':
       return { data: { viewer: linear.viewer, organization: linear.organization } }
     case 'DrogonLinearTeams':
@@ -385,6 +393,7 @@ async function control(req, res, path) {
     if ('cycle' in body) issue.cycle = body.cycle === null ? null : team.cycles.find((c) => c.number === body.cycle)?.id ?? null
     if (typeof body.title === 'string') issue.title = body.title
     if (typeof body.description === 'string') issue.description = body.description
+    if ('assignee' in body) issue.assignee = body.assignee
     if (typeof body.deleted === 'boolean') issue.deleted = body.deleted
     return send(res, 200, { ok: true })
   }

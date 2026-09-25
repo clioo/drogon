@@ -28,6 +28,7 @@ export const work: WorkBridge = {
   boardSync: (input) => call("boardSync", input),
   boardPush: (input) => call("boardPush", input),
   boardDelete: (input) => call("boardDelete", input),
+  boardUpdate: (input) => call("boardUpdate", input),
   ticketPush: (input) => call("ticketPush", input),
   ticketResolve: (input) => call("ticketResolve", input),
   ticketSprint: (input) => call("ticketSprint", input),

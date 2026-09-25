@@ -51,6 +51,8 @@ pub(super) struct Board {
     pub statuses: Vec<BoardStatus>,
     pub last_synced_at: Option<i64>,
     pub last_sync_error: Option<String>,
+    /// Sync brings in new issues assigned to the connected account.
+    pub auto_import_mine: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -62,7 +64,7 @@ pub(super) struct Sprint {
     pub end: Option<String>,
 }
 
-const BOARD_SELECT: &str = "SELECT id, provider, site_id, site_url, external_id, name, kind, project_key, project_name, project_id, statuses, last_synced_at, last_sync_error FROM work_boards";
+const BOARD_SELECT: &str = "SELECT id, provider, site_id, site_url, external_id, name, kind, project_key, project_name, project_id, statuses, last_synced_at, last_sync_error, auto_import_mine FROM work_boards";
 
 fn board_from_row(r: &rusqlite::Row) -> rusqlite::Result<Board> {
     Ok(Board {
@@ -79,6 +81,7 @@ fn board_from_row(r: &rusqlite::Row) -> rusqlite::Result<Board> {
         statuses: serde_json::from_str(&r.get::<_, String>(10)?).unwrap_or_default(),
         last_synced_at: r.get(11)?,
         last_sync_error: r.get(12)?,
+        auto_import_mine: r.get::<_, i64>(13)? != 0,
     })
 }
 
@@ -488,6 +491,7 @@ pub(super) fn board_json(conn: &Connection, board: &Board) -> Result<Value, RpcE
         "statuses": board.statuses,
         "lastSyncedAt": board.last_synced_at,
         "lastSyncError": board.last_sync_error,
+        "autoImportMine": board.auto_import_mine,
         "pendingCount": pending,
         "ticketCount": tickets,
     }))
@@ -776,6 +780,117 @@ pub(super) fn board_view(
             "sprints": sprints_json,
             "outcome": { "completed": completed, "carried": carried, "backlog": backlog },
         }),
+    })
+}
+
+// ------------------------------------------------------ import picker --
+
+/// The import picker's filters (`assignee`: `me`, `none`, `any` or a
+/// person's id; `project`: a name or `none`; `status`: a status id;
+/// `query`: words in the key or title; `open`: leave out finished issues).
+#[derive(Default)]
+pub(super) struct PreviewFilter {
+    open: bool,
+    assignee: Option<String>,
+    project: Option<String>,
+    status: Option<String>,
+    query: Option<String>,
+}
+
+impl PreviewFilter {
+    fn from_params(params: &Value) -> Result<Self, RpcError> {
+        let text = |f: &str| -> Result<Option<String>, RpcError> {
+            Ok(str_field(params, f)?
+                .map(str::trim)
+                .filter(|v| !v.is_empty() && *v != "any")
+                .map(str::to_owned))
+        };
+        Ok(Self {
+            open: bool_field(params, "open")?.unwrap_or(false),
+            assignee: text("assignee")?,
+            project: text("project")?,
+            status: text("status")?,
+            query: text("query")?.map(|q| q.to_lowercase()),
+        })
+    }
+
+    fn matches(&self, issue: &ExtIssue, me: Option<&str>) -> bool {
+        let assignee = match self.assignee.as_deref() {
+            None => true,
+            Some("me") => me.is_some() && issue.assignee_id.as_deref() == me,
+            Some("none") => issue.assignee_id.is_none(),
+            Some(id) => issue.assignee_id.as_deref() == Some(id),
+        };
+        let project = match self.project.as_deref() {
+            None => true,
+            Some("none") => issue.project.is_none(),
+            Some(name) => issue.project.as_deref() == Some(name),
+        };
+        let status = self.status.as_deref().is_none_or(|s| issue.status.id == s);
+        let query = self.query.as_deref().is_none_or(|q| {
+            q.split_whitespace().all(|w| {
+                issue.key.to_lowercase().contains(w) || issue.title.to_lowercase().contains(w)
+            })
+        });
+        let open = !self.open || issue.status.category != "done";
+        open && assignee && project && status && query
+    }
+}
+
+/// Who, which projects and which statuses a board's issues have, with
+/// counts, for the picker's filter menus (over every issue, not just the
+/// filtered ones).
+fn preview_facets(issues: &[ExtIssue], me: Option<&str>) -> Value {
+    fn count(entries: &mut Vec<(String, String, usize)>, id: String, name: String) {
+        match entries.iter_mut().find(|e| e.0 == id) {
+            Some(e) => e.2 += 1,
+            None => entries.push((id, name, 1)),
+        }
+    }
+    let (mut people, mut projects, mut statuses) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut mine, mut unassigned, mut no_project, mut finished) = (0, 0, 0, 0);
+    for issue in issues {
+        if issue.status.category == "done" {
+            finished += 1;
+        }
+        match &issue.assignee_id {
+            Some(id) => {
+                if me == Some(id.as_str()) {
+                    mine += 1;
+                }
+                count(
+                    &mut people,
+                    id.clone(),
+                    issue.assignee.clone().unwrap_or_else(|| id.clone()),
+                );
+            }
+            None => unassigned += 1,
+        }
+        match &issue.project {
+            Some(p) => count(&mut projects, p.clone(), p.clone()),
+            None => no_project += 1,
+        }
+        count(
+            &mut statuses,
+            issue.status.id.clone(),
+            issue.status.name.clone(),
+        );
+    }
+    people.sort_by(|a, b| b.2.cmp(&a.2).then(a.1.cmp(&b.1)));
+    projects.sort_by(|a, b| b.2.cmp(&a.2).then(a.1.cmp(&b.1)));
+    let rows = |v: Vec<(String, String, usize)>| -> Vec<Value> {
+        v.into_iter()
+            .map(|(id, name, n)| json!({ "id": id, "name": name, "count": n }))
+            .collect()
+    };
+    json!({
+        "mine": mine,
+        "finished": finished,
+        "unassigned": unassigned,
+        "noProject": no_project,
+        "people": rows(people),
+        "projects": rows(projects),
+        "statuses": rows(statuses),
     })
 }
 
@@ -1158,8 +1273,22 @@ impl Engine {
     /// `work.import_preview`: a provider board's columns, sprints and
     /// issues, marking issues already on the board, for the import picker.
     pub(crate) fn work_import_preview(&self, params: &Value) -> Result<Value, RpcError> {
-        reject_unknown(params, &["provider", "siteId", "externalBoardId", "scope"])?;
+        reject_unknown(
+            params,
+            &[
+                "provider",
+                "siteId",
+                "externalBoardId",
+                "scope",
+                "assignee",
+                "project",
+                "status",
+                "query",
+                "open",
+            ],
+        )?;
         let external = required(params, "externalBoardId")?;
+        let filter = PreviewFilter::from_params(params)?;
         let scope = match str_field(params, "scope")?.map(str::trim) {
             None | Some("") | Some("board") => IssueScope::Board,
             Some("backlog") => IssueScope::Backlog,
@@ -1198,10 +1327,16 @@ impl Engine {
         // descriptions (a real team's run to megabytes): rows are compact,
         // and a board past the reply budget is cut with `truncated` (narrow
         // it with a scope).
+        let me = provider.me().ok().flatten();
+        let facets = preview_facets(&issues, me.as_deref());
+        let issues: Vec<&ExtIssue> = issues
+            .iter()
+            .filter(|i| filter.matches(i, me.as_deref()))
+            .collect();
         let total = issues.len();
         let mut rows: Vec<Value> = Vec::new();
         let mut used = 0usize;
-        for i in &issues {
+        for i in issues {
             let mut row = serde_json::to_value(i).unwrap();
             if let Some(object) = row.as_object_mut() {
                 object.remove("description");
@@ -1221,6 +1356,8 @@ impl Engine {
             "sprints": sprints,
             "truncated": rows.len() < total,
             "total": total,
+            "me": me,
+            "facets": facets,
             "issues": rows,
         }))
     }
@@ -1237,9 +1374,13 @@ impl Engine {
                 "externalBoardId",
                 "issueKeys",
                 "all",
+                "mine",
+                "autoImportMine",
                 "projectId",
             ],
         )?;
+        let mine = bool_field(params, "mine")?.unwrap_or(false);
+        let auto_import_mine = bool_field(params, "autoImportMine")?;
         let external = required(params, "externalBoardId")?;
         let keys: Option<Vec<String>> = match params.get("issueKeys") {
             None | Some(Value::Null) => None,
@@ -1256,9 +1397,9 @@ impl Engine {
             Some(_) => return Err(error::invalid_argument("issueKeys must be an array")),
         };
         let all = bool_field(params, "all")?.unwrap_or(false);
-        if keys.is_none() && !all {
+        if keys.is_none() && !all && !mine {
             return Err(error::invalid_argument(
-                "choose the issues to import (issueKeys), or pass all: true",
+                "choose the issues to import (issueKeys), mine: true (the ones assigned to you) or all: true",
             ));
         }
         let provider = self.provider_param(params)?;
@@ -1269,6 +1410,17 @@ impl Engine {
         let issues = provider
             .list_issues(&external, &IssueScope::Board)
             .map_err(provider_error)?;
+        let me = if mine || auto_import_mine == Some(true) {
+            provider.me().map_err(provider_error)?
+        } else {
+            None
+        };
+        if mine && me.is_none() {
+            return Err(error::invalid_argument(format!(
+                "{} did not say who you are; choose the issues instead",
+                provider_label(provider.kind())
+            )));
+        }
         let chosen: Vec<&ExtIssue> = match &keys {
             Some(keys) => {
                 let missing: Vec<&String> = keys
@@ -1291,8 +1443,21 @@ impl Engine {
                     .filter(|i| keys.iter().any(|k| i.key.eq_ignore_ascii_case(k)))
                     .collect()
             }
-            None => issues.iter().collect(),
+            None if all => issues.iter().collect(),
+            None => Vec::new(),
         };
+        // `mine` adds every issue assigned to the connected account.
+        let mut chosen = chosen;
+        if mine {
+            for issue in issues
+                .iter()
+                .filter(|i| i.assignee_id.is_some() && i.assignee_id == me)
+            {
+                if !chosen.iter().any(|c| c.key == issue.key) {
+                    chosen.push(issue);
+                }
+            }
+        }
         let (site_id, site_url) = provider.site();
         let mut conn = self.db.lock().unwrap();
         let project_id = str_field(params, "projectId")?
@@ -1312,8 +1477,10 @@ impl Engine {
             Some(id) => {
                 tx.execute(
                     "UPDATE work_boards SET name = ?2, kind = ?3, project_key = ?4, project_name = ?5,
-                       project_id = COALESCE(?6, project_id), updated_at = ?7 WHERE id = ?1",
-                    params![id, ext_board.name, ext_board.kind, ext_board.project_key, ext_board.project_name, project_id, now],
+                       project_id = COALESCE(?6, project_id), updated_at = ?7,
+                       auto_import_mine = COALESCE(?8, auto_import_mine) WHERE id = ?1",
+                    params![id, ext_board.name, ext_board.kind, ext_board.project_key, ext_board.project_name, project_id, now,
+                        auto_import_mine.map(|b| b as i64)],
                 )
                 .map_err(error::from_sqlite)?;
                 id
@@ -1338,12 +1505,12 @@ impl Engine {
                 }
                 tx.execute(
                     "INSERT INTO work_boards (id, provider, site_id, site_url, external_id, name, kind, project_key,
-                       project_name, project_id, statuses, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+                       project_name, project_id, statuses, created_at, updated_at, auto_import_mine)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13)",
                     params![
                         id, provider.kind(), site_id, site_url, ext_board.id, ext_board.name, ext_board.kind,
                         ext_board.project_key, ext_board.project_name, project_id,
-                        serde_json::to_string(&statuses).unwrap(), now
+                        serde_json::to_string(&statuses).unwrap(), now, auto_import_mine.unwrap_or(false) as i64
                     ],
                 )
                 .map_err(error::from_sqlite)?;
@@ -1478,9 +1645,14 @@ impl Engine {
                     );
                 }
             }
-            Ok::<_, RpcError>((sprints, catalogue, issues, known, off_board))
+            let me = if board.auto_import_mine {
+                provider.me().map_err(provider_error)?
+            } else {
+                None
+            };
+            Ok::<_, RpcError>((sprints, catalogue, issues, known, off_board, me))
         })();
-        let (sprints, catalogue, issues, known, off_board) = match fetched {
+        let (sprints, catalogue, issues, known, off_board, me) = match fetched {
             Ok(data) => data,
             Err(err) => {
                 let conn = self.db.lock().unwrap();
@@ -1492,7 +1664,7 @@ impl Engine {
             }
         };
         let mut enter = Vec::new();
-        let (mut moved, mut conflicts, mut removed, mut updated) = (0, 0, 0, 0);
+        let (mut moved, mut conflicts, mut removed, mut updated, mut added) = (0, 0, 0, 0, 0);
         {
             let mut conn = self.db.lock().unwrap();
             let tx = conn.transaction().map_err(error::from_sqlite)?;
@@ -1544,6 +1716,28 @@ impl Engine {
                     None => {}
                 }
             }
+            // New issues assigned to the owner come in by themselves.
+            if let Some(me) = &me {
+                for issue in issues
+                    .iter()
+                    .filter(|i| i.assignee_id.as_deref() == Some(me.as_str()))
+                {
+                    if known.iter().any(|(_, key, _)| *key == issue.key) {
+                        continue;
+                    }
+                    let id = insert_issue(&tx, &mut board, &columns, issue)?;
+                    log_activity(
+                        &tx,
+                        &id,
+                        "auto_imported",
+                        &format!(
+                            "Assigned to you in {}: imported on sync",
+                            provider_label(&board.provider)
+                        ),
+                    );
+                    added += 1;
+                }
+            }
             tx.execute(
                 "UPDATE work_boards SET last_synced_at = ?2, last_sync_error = NULL WHERE id = ?1",
                 params![board.id, now],
@@ -1567,8 +1761,24 @@ impl Engine {
             "moved": moved,
             "conflicts": conflicts,
             "removed": removed,
+            "imported": added,
             "deliveries": deliveries,
         }))
+    }
+
+    /// `work.board_update`: an imported board's own settings.
+    pub(crate) fn do_work_board_update(&self, params: &Value) -> Result<Value, RpcError> {
+        reject_unknown(params, &["boardId", "autoImportMine"])?;
+        let conn = self.db.lock().unwrap();
+        let board = get_board(&conn, &required(params, "boardId")?)?;
+        if let Some(on) = bool_field(params, "autoImportMine")? {
+            conn.execute(
+                "UPDATE work_boards SET auto_import_mine = ?2, updated_at = ?3 WHERE id = ?1",
+                params![board.id, on as i64, crate::now_unix_ms() as i64],
+            )
+            .map_err(error::from_sqlite)?;
+        }
+        board_json(&conn, &get_board(&conn, &board.id)?)
     }
 
     /// `work.board_delete`: removes an imported board and its tickets from

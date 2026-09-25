@@ -86,6 +86,8 @@ export type WorkBoardSummary = {
   lastSyncError?: string | null;
   pendingCount: number;
   ticketCount: number;
+  /** Sync imports new issues assigned to the connected account. */
+  autoImportMine?: boolean;
 };
 
 export type WorkSprintOutcome = {
@@ -241,6 +243,8 @@ export type WorkProviderIssue = {
   issueType: string | null;
   priority: string | null;
   assignee: string | null;
+  assigneeId?: string | null;
+  project?: string | null;
   status: { id: string; name: string; category: string };
   sprint: WorkSprint | null;
   closedSprints: WorkSprint[];
@@ -256,7 +260,28 @@ export type WorkImportPreview = {
   /** The board had more issues than one reply carries. */
   truncated?: boolean;
   total?: number;
+  /** The connected account's id, as issues carry it in `assigneeId`. */
+  me?: string | null;
+  facets?: WorkImportFacets;
 };
+
+export type WorkFacet = { id: string; name: string; count: number };
+
+/** Counts over every issue of the board (not only the filtered ones). */
+export type WorkImportFacets = {
+  mine: number;
+  /** Finished issues (done, closed, canceled). */
+  finished?: number;
+  unassigned: number;
+  noProject: number;
+  people: WorkFacet[];
+  projects: WorkFacet[];
+  statuses: WorkFacet[];
+};
+
+/** The import picker's filters: `assignee` is `me`, `none`, `any` or a
+ *  person's id; `project` a name or `none`. */
+export type WorkImportFilter = { assignee?: string; project?: string; status?: string; query?: string; open?: boolean };
 
 export type WorkSyncResult = {
   board: WorkBoardSummary;
@@ -264,6 +289,8 @@ export type WorkSyncResult = {
   moved: number;
   conflicts: number;
   removed: number;
+  /** New issues assigned to you, brought in by the sync. */
+  imported?: number;
   deliveries: WorkDelivery[];
 };
 
@@ -349,11 +376,15 @@ export interface WorkBridge {
     provider?: string;
     siteId?: string;
   }): Promise<Result<{ provider: string; boards: WorkProviderBoard[]; warnings?: string[] }>>;
-  importPreview(input: { externalBoardId: string; provider?: string; siteId?: string; scope?: string }): Promise<Result<WorkImportPreview>>;
+  importPreview(
+    input: { externalBoardId: string; provider?: string; siteId?: string; scope?: string } & WorkImportFilter,
+  ): Promise<Result<WorkImportPreview>>;
   boardImport(input: {
     externalBoardId: string;
     issueKeys?: string[];
     all?: boolean;
+    mine?: boolean;
+    autoImportMine?: boolean;
     projectId?: string;
     provider?: string;
     siteId?: string;
@@ -361,6 +392,7 @@ export interface WorkBridge {
   boardSync(input: { boardId: string }): Promise<Result<WorkSyncResult>>;
   boardPush(input: { boardId: string }): Promise<Result<{ results: WorkPushResult[]; pushed: number; failed: number }>>;
   boardDelete(input: { boardId: string }): Promise<Result<{ deleted: string; name: string; tickets: number }>>;
+  boardUpdate(input: { boardId: string; autoImportMine?: boolean }): Promise<Result<WorkBoardSummary>>;
   ticketPush(input: { ticketId: string }): Promise<Result<WorkPushResult>>;
   ticketResolve(input: { ticketId: string; keep: "theirs" | "ours" }): Promise<Result<WorkTicket>>;
   ticketSprint(input: { ticketId: string; to: string }): Promise<Result<WorkTicket>>;
@@ -552,6 +584,7 @@ export const WORK_OPS = {
   boardSync: { method: "work.board_sync", schema: workSyncSchema },
   boardPush: { method: "work.board_push", schema: workBoardPushSchema },
   boardDelete: { method: "work.board_delete", schema: workBoardDeleteSchema },
+  boardUpdate: { method: "work.board_update", schema: boardSummarySchema },
   ticketPush: { method: "work.ticket_push", schema: pushSchema },
   ticketResolve: { method: "work.ticket_resolve", schema: workTicketSchema },
   ticketSprint: { method: "work.ticket_sprint", schema: workTicketSchema },

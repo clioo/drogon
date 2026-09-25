@@ -46,6 +46,7 @@ import {
 } from "../../components/ui/dialog";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuRadioGroup,
@@ -271,6 +272,7 @@ export function WorkPage({
       else {
         const r = result.value;
         const parts = [
+          r.imported ? `${r.imported} new assigned to you` : null,
           r.moved ? `${r.moved} moved by ${providerLabel(summary.provider)}` : null,
           r.conflicts ? `${r.conflicts} conflict${r.conflicts === 1 ? "" : "s"}` : null,
           r.removed ? `${r.removed} gone from ${providerLabel(summary.provider)}` : null,
@@ -385,6 +387,18 @@ export function WorkPage({
                       <DropdownMenuItem disabled={summary.pendingCount === 0} onSelect={() => void pushAll()}>
                         Push all pending moves ({summary.pendingCount}) to {providerLabel(summary.provider)}
                       </DropdownMenuItem>
+                      <DropdownMenuCheckboxItem
+                        checked={summary.autoImportMine === true}
+                        onSelect={async () => {
+                          if (!bridge) return;
+                          const on = summary.autoImportMine !== true;
+                          const result = await state.run(() => bridge.boardUpdate({ boardId: summary.id, autoImportMine: on }));
+                          if (!result.ok) notice(result.error, "error");
+                          else notice(on ? "New issues assigned to you come in on every sync" : "Only the issues you import");
+                        }}
+                      >
+                        Import new issues assigned to me
+                      </DropdownMenuCheckboxItem>
                       <DropdownMenuItem
                         onSelect={importMore}
                       >

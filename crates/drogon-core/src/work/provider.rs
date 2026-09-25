@@ -76,6 +76,9 @@ pub(crate) struct ExtIssue {
     pub issue_type: Option<String>,
     pub priority: Option<String>,
     pub assignee: Option<String>,
+    /// The assignee's id in the source (Jira account id, Linear user id,
+    /// GitHub login): what "assigned to me" compares with [`WorkProvider::me`].
+    pub assignee_id: Option<String>,
     pub status: ExtStatus,
     /// The issue's current (active or future) sprint.
     pub sprint: Option<ExtSprint>,
@@ -132,6 +135,8 @@ pub(crate) trait WorkProvider {
     fn board_columns(&self, board_id: &str) -> ProviderResult<Vec<ExtColumn>>;
     /// Every status the site knows (what a column can be mapped to).
     fn list_statuses(&self, board_id: &str) -> ProviderResult<Vec<ExtStatus>>;
+    /// The connected account's id, as issues carry it in `assignee_id`.
+    fn me(&self) -> ProviderResult<Option<String>>;
     /// Every sprint of a scrum board (empty for a kanban board).
     fn list_sprints(&self, board_id: &str) -> ProviderResult<Vec<ExtSprint>>;
     fn list_issues(&self, board_id: &str, scope: &IssueScope) -> ProviderResult<Vec<ExtIssue>>;
@@ -273,6 +278,13 @@ impl<'a> JiraProvider<'a> {
                 .and_then(|v| v.get("displayName"))
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            // Cloud names people by accountId; Server/DC by name or key.
+            assignee_id: fields.get("assignee").and_then(|v| {
+                ["accountId", "name", "key"]
+                    .iter()
+                    .find_map(|f| v.get(*f).and_then(Value::as_str).filter(|s| !s.is_empty()))
+                    .map(str::to_owned)
+            }),
             status: map_status(fields.get("status")),
             sprint: fields.get("sprint").and_then(map_sprint),
             closed_sprints: fields
@@ -411,6 +423,10 @@ impl WorkProvider for JiraProvider<'_> {
                     .unwrap_or_default(),
             })
             .collect())
+    }
+
+    fn me(&self) -> ProviderResult<Option<String>> {
+        Ok(Some(self.client.site.account_id.clone()).filter(|id| !id.is_empty()))
     }
 
     fn list_statuses(&self, _board_id: &str) -> ProviderResult<Vec<ExtStatus>> {

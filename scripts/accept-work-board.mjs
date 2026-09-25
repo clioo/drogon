@@ -15,9 +15,10 @@
 //  6. A session that is no longer running is resumed by the same click, the
 //     replacement opens, and the ticket now links the replacement.
 //  7. "Send now" reaches the session; List and Sources show the ticket.
-//  8. A Jira board (the stateful fake Jira, 127.0.0.1 only) is imported
-//     from the empty-state flow: board, then chosen issues; its columns,
-//     sprint and cards (Jira key, type, priority, assignee, carried-from).
+//  8. A Jira board (the stateful fake Jira, 127.0.0.1 only) is imported:
+//     board, then issues; the picker opens on the issues assigned to you
+//     (chosen), "Anyone" adds the rest; its columns, sprint and cards (Jira
+//     key, type, priority, assignee, carried-from).
 //  9. Jira moves an issue: Sync moves the card and the column's on-enter
 //     prompt starts a session for it.
 // 10. A card dropped in Drogon waits "Not synced to Jira" until Push, and
@@ -33,7 +34,8 @@
 //     GitHub); a GitHub Project imports with its Status columns and
 //     iterations; a drop + Push sets the item's Status on GitHub.
 // 15. A Linear team imports (key connected over the CLI's rpc) and reads in
-//     cycles; Linear moving an issue moves its card on Sync.
+//     cycles; Linear moving an issue moves its card on Sync, and an issue
+//     Linear assigns to you comes in by itself on the next Sync.
 //
 // Usage: node scripts/accept-work-board.mjs [--bundle <Drogon.app>]
 import assert from "node:assert/strict";
@@ -473,6 +475,13 @@ try {
   const importDialog = page.getByTestId("work-import-dialog");
   await importDialog.getByRole("button", { name: "Choose Platform Delivery" }).click();
   await importDialog.getByTestId("work-import-columns").getByText("Columns: To Do · In Progress · Review · QA · Done").waitFor();
+  assert.equal(await importDialog.getByRole("combobox", { name: "Assigned to" }).inputValue(), "me");
+  await importDialog.getByRole("checkbox", { name: "Import APP-142" }).waitFor();
+  assert.equal(await importDialog.getByRole("checkbox", { name: "Import APP-130" }).count(), 0, "only yours at first");
+  await importDialog.getByRole("button", { name: "Import 2 issues" }).waitFor();
+  await importDialog.getByRole("combobox", { name: "Assigned to" }).selectOption("any");
+  await importDialog.getByRole("checkbox", { name: "Import APP-130" }).waitFor();
+  await importDialog.getByRole("checkbox", { name: "All of Sprint 25 · Active" }).click();
   await importDialog.getByRole("checkbox", { name: "Import APP-122" }).click();
   await importDialog.getByRole("combobox", { name: "Drogon project for sessions" }).selectOption({ label: "Drogon" });
   await shot("jira-import-issues");
@@ -604,6 +613,9 @@ try {
   await ghDialog.getByRole("button", { name: "Choose Drogon Roadmap" }).click();
   await ghDialog.getByTestId("work-import-columns").getByText("Columns: No Status · Todo · In Progress · Done").waitFor();
   await ghDialog.getByRole("region", { name: "Iteration 2 · Active" }).waitFor();
+  await ghDialog.getByRole("combobox", { name: "Assigned to" }).selectOption("any");
+  await ghDialog.getByRole("checkbox", { name: "Import clioo/drogon#11" }).waitFor();
+  await ghDialog.getByRole("checkbox", { name: "All of Iteration 2 · Active" }).click();
   await ghDialog.getByRole("button", { name: /^Import \d+ issues?$/ }).click();
   await ghDialog.waitFor({ state: "detached" });
   await page.getByRole("button", { name: "Iteration", exact: true }).getByText("Iteration 2 · Active").waitFor();
@@ -627,6 +639,10 @@ try {
   const linDialog = page.getByTestId("work-import-dialog");
   await linDialog.getByRole("button", { name: "Choose Engineering" }).click();
   await linDialog.getByRole("region", { name: "Cycle 12 · Resume polish · Active" }).waitFor();
+  await linDialog.getByRole("combobox", { name: "Assigned to" }).selectOption("any");
+  await linDialog.getByRole("checkbox", { name: "Import ENG-2" }).waitFor();
+  await linDialog.getByRole("checkbox", { name: "All of Cycle 12 · Resume polish · Active" }).click();
+  await shot("linear-import-filters");
   await linDialog.getByRole("button", { name: /^Import \d+ issues?$/ }).click();
   await linDialog.waitFor({ state: "detached" });
   await page.getByRole("button", { name: "Cycle", exact: true }).getByText("Cycle 12 · Resume polish · Active").waitFor();
@@ -634,6 +650,11 @@ try {
   await sourcesControl("linear/issue/ENG-2", { state: "In Progress" });
   await page.getByRole("button", { name: "Sync Engineering" }).click();
   await page.getByRole("region", { name: "In Progress column" }).getByRole("article", { name: /ENG-2/ }).waitFor({ timeout: 20000 });
+  // Assigned to you in Linear later: the next Sync brings it in.
+  await sourcesControl("linear/issue/ENG-5", { assignee: "Jon Doe", cycle: 12 });
+  await page.getByRole("button", { name: "Sync Engineering" }).click();
+  await page.getByRole("region", { name: "Backlog column" }).getByRole("article", { name: /ENG-5/ }).waitFor({ timeout: 20000 });
+  assert.ok((await ticket("ENG-5")).activity.some((a) => a.text === "Assigned to you in Linear: imported on sync"));
   await shot("linear-board");
   check("a-linear-team-imports-in-cycles-and-follows-linear-on-sync");
 

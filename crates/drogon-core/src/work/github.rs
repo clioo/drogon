@@ -29,6 +29,9 @@ pub(crate) struct GithubProvider {
     token: String,
     api_url: String,
     warnings: std::cell::RefCell<Vec<String>>,
+    /// The token's login, read once (issues with several assignees count
+    /// as "assigned to me" when the login is among them).
+    viewer: std::cell::RefCell<Option<String>>,
 }
 
 /// Why Projects could not be listed, and what to do about it.
@@ -146,6 +149,30 @@ impl GithubProvider {
                 .trim_end_matches('/')
                 .to_string(),
             warnings: std::cell::RefCell::new(Vec::new()),
+            viewer: std::cell::RefCell::new(None),
+        }
+    }
+
+    /// The assignee a card shows and matches: the connected account when it
+    /// is among the assignees, else the first. `(display name, login)`.
+    fn pick_assignee(&self, nodes: &Value) -> (Option<String>, Option<String>) {
+        let people = nodes.as_array().cloned().unwrap_or_default();
+        let viewer = self.viewer.borrow().clone();
+        let chosen = people
+            .iter()
+            .find(|p| viewer.is_some() && p["login"].as_str() == viewer.as_deref())
+            .or(people.first());
+        match chosen {
+            Some(p) => {
+                let login = text(&p["login"]);
+                let name = p["name"]
+                    .as_str()
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or(login.clone());
+                (Some(name), Some(login))
+            }
+            None => (None, None),
         }
     }
 
@@ -351,16 +378,7 @@ impl GithubProvider {
             Some(s) if s.state == "closed" => (None, vec![s]),
             other => (other, Vec::new()),
         };
-        let assignee = content["assignees"]["nodes"]
-            .as_array()
-            .and_then(|a| a.first())
-            .map(|a| {
-                a["name"]
-                    .as_str()
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or(a["login"].as_str().unwrap_or_default())
-                    .to_string()
-            });
+        let (assignee, assignee_id) = self.pick_assignee(&content["assignees"]["nodes"]);
         Some(ExtIssue {
             id: text(&raw["id"]),
             key: format!("{repo}#{number}"),
@@ -377,6 +395,7 @@ impl GithubProvider {
             ),
             priority,
             assignee,
+            assignee_id,
             status,
             sprint,
             closed_sprints,
@@ -422,7 +441,8 @@ impl GithubProvider {
         Ok(out)
     }
 
-    fn map_rest_issue(repo: &str, raw: &Value) -> ExtIssue {
+    fn map_rest_issue(&self, repo: &str, raw: &Value) -> ExtIssue {
+        let (assignee, assignee_id) = self.pick_assignee(&raw["assignees"]);
         let open = raw["state"] == "open";
         let number = raw["number"].as_i64().unwrap_or_default();
         ExtIssue {
@@ -438,10 +458,8 @@ impl GithubProvider {
                 .map(str::to_owned)
                 .or(Some("Issue".into())),
             priority: None,
-            assignee: raw["assignees"]
-                .as_array()
-                .and_then(|a| a.first())
-                .map(|a| text(&a["login"])),
+            assignee,
+            assignee_id,
             status: repo_status(open),
             sprint: None,
             closed_sprints: Vec::new(),
@@ -534,6 +552,15 @@ impl WorkProvider for GithubProvider {
             self.api_url.trim_end_matches("/api/v3").to_string()
         };
         ("default".into(), web)
+    }
+
+    fn me(&self) -> ProviderResult<Option<String>> {
+        if let Some(login) = self.viewer.borrow().clone() {
+            return Ok(Some(login));
+        }
+        let login = self.viewer()?;
+        *self.viewer.borrow_mut() = Some(login.clone());
+        Ok(Some(login))
     }
 
     fn board_warnings(&self) -> Vec<String> {
@@ -693,6 +720,9 @@ impl WorkProvider for GithubProvider {
     }
 
     fn list_issues(&self, board_id: &str, scope: &IssueScope) -> ProviderResult<Vec<ExtIssue>> {
+        // Knowing the login first lets an issue with several assignees read
+        // as "assigned to me".
+        let _ = self.me();
         let all = match board_ref(board_id)? {
             BoardRef::Project(id) => {
                 let fields = self.project(id)?;
@@ -711,7 +741,7 @@ impl WorkProvider for GithubProvider {
                         items
                             .iter()
                             .filter(|i| i.get("pull_request").is_none())
-                            .map(|i| Self::map_rest_issue(repo, i)),
+                            .map(|i| self.map_rest_issue(repo, i)),
                     );
                     if items.len() < 100 {
                         break;
@@ -757,7 +787,7 @@ impl WorkProvider for GithubProvider {
             BoardRef::Repo(repo) => {
                 let (_, number) = split_key(issue.key)?;
                 match self.rest("GET", &format!("/repos/{repo}/issues/{number}"), None) {
-                    Ok(raw) => Ok(Some(Self::map_rest_issue(repo, &raw))),
+                    Ok(raw) => Ok(Some(self.map_rest_issue(repo, &raw))),
                     Err(e) if e.code == "not_found" || e.message.contains("410") => Ok(None),
                     Err(e) => Err(e),
                 }

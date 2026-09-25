@@ -48,7 +48,7 @@
 // status (unknown transition → 400), and sprint/backlog moves change its
 // sprint. Tests change "Jira" from the outside through the unauthenticated
 // control endpoint `POST /__fixture/issue/<key>` ({status, sprintId,
-// summary, deleted}) and `POST /__fixture/sprint/<id>` ({state}).
+// summary, assignee, deleted}) and `POST /__fixture/sprint/<id>` ({state}).
 //
 // Usage: node fake-jira-server.mjs --data <json> --port <n>   (port 0 =
 // ephemeral; the chosen port is printed as `LISTEN <port>` on stdout.)
@@ -288,6 +288,7 @@ async function control(req, res, path) {
     if ('sprintId' in body) issue.sprintId = body.sprintId
     if (Array.isArray(body.closedSprintIds)) issue.closedSprintIds = body.closedSprintIds
     if (typeof body.summary === 'string') issue.fields.summary = body.summary
+    if ('assignee' in body) issue.fields.assignee = body.assignee
     if (typeof body.deleted === 'boolean') issue.deleted = body.deleted
     issue.fields.updated = new Date().toISOString()
     return json(res, 200, agileIssue(issue))

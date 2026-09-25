@@ -1,13 +1,18 @@
 // Import a source's board (a Jira board, a Linear team, a GitHub project or
 // repository): pick the board that frames the import, then choose which of
-// its issues come in. The first import creates the board's columns from the
-// source's (mapped to its statuses); later ones add issues, and issues
-// already on the board are shown as such. A source that is allowed but not
+// its issues come in. A board usually spans several projects and people, so
+// the picker opens on the issues assigned to you (all chosen), and filters
+// by person, project, status and words let you add any other; what you
+// chose stays chosen across filters. "Keep importing new issues assigned to
+// me" makes every sync bring in the ones assigned to you later. The first
+// import creates the board's columns from the source's (mapped to its
+// statuses); later ones add issues. A source that is allowed but not
 // connected yet shows its connect form first.
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Loader2, Search } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
+import { Input } from "../../components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +24,7 @@ import {
 import type {
   WorkBoardSummary,
   WorkBridge,
+  WorkImportFilter,
   WorkImportPreview,
   WorkProviderBoard,
   WorkProviderIssue,
@@ -55,6 +61,8 @@ export function groupIssues(preview: WorkImportPreview, sprintTerm = "sprint"): 
   return groups;
 }
 
+const SELECT = "h-8 min-w-0 rounded-md border border-input bg-transparent px-2 text-xs";
+
 export function WorkImportDialog({
   open,
   bridge,
@@ -88,16 +96,25 @@ export function WorkImportDialog({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [external, setExternal] = useState<string | null>(null);
   const [preview, setPreview] = useState<WorkImportPreview | null>(null);
+  const [loading, setLoading] = useState(false);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<WorkImportFilter>({ assignee: "me", open: true });
+  const [query, setQuery] = useState("");
+  const [autoMine, setAutoMine] = useState(true);
   const [projectId, setProjectId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The first answer for a board preselects the issues assigned to you. */
+  const seeded = useRef<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setError(null);
     setPreview(null);
     setChosen(new Set());
+    setFilter({ assignee: "me", open: true });
+    setQuery("");
+    seeded.current = null;
     setProjectId(initialBoard?.projectId ?? "");
     setExternal(initialBoard?.externalId ?? null);
     setNeedsConnect(false);
@@ -117,31 +134,48 @@ export function WorkImportDialog({
     };
   }, [open, bridge, initialBoard, provider, attempt]);
 
+  // Words filter as you type, without a request per keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setFilter((f) => ({ ...f, query: query.trim() || undefined })), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   useEffect(() => {
     if (!open || !external) return;
     let cancelled = false;
-    setPreview(null);
+    setLoading(true);
     setError(null);
-    void bridge.importPreview({ externalBoardId: external, provider }).then((result) => {
+    const input: Parameters<WorkBridge["importPreview"]>[0] = { externalBoardId: external, provider };
+    for (const [key, value] of Object.entries(filter)) {
+      if (value && value !== "any") (input as Record<string, unknown>)[key] = value;
+    }
+    void bridge.importPreview(input).then((result) => {
       if (cancelled) return;
+      setLoading(false);
       if (!result.ok) {
         setError(result.error.message);
         return;
       }
-      setPreview(result.result);
-      // Start from the active sprint's issues that are not in yet.
-      const active = result.result.sprints.find((s) => s.state === "active");
-      const initial = result.result.issues.filter(
-        (i) => !i.importedTicketId && (result.result.board.kind !== "scrum" ? false : i.sprint?.id === active?.id),
-      );
-      setChosen(new Set(initial.map((i) => i.key)));
+      const answer = result.result;
+      // Nothing assigned to you here: show everyone instead.
+      if (seeded.current !== external && filter.assignee === "me" && (answer.facets?.mine ?? 0) === 0) {
+        seeded.current = external;
+        setFilter((f) => ({ ...f, assignee: "any" }));
+        return;
+      }
+      setPreview(answer);
+      if (seeded.current !== external) {
+        seeded.current = external;
+        setChosen(new Set(answer.issues.filter((i) => !i.importedTicketId).map((i) => i.key)));
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [open, bridge, external, provider]);
+  }, [open, bridge, external, provider, filter]);
 
   const groups = useMemo(() => (preview ? groupIssues(preview, source.sprintTerm) : []), [preview, source.sprintTerm]);
+  const facets = preview?.facets;
   const toggle = (keys: string[], on: boolean) =>
     setChosen((current) => {
       const next = new Set(current);
@@ -153,7 +187,7 @@ export function WorkImportDialog({
     });
 
   const importNow = async () => {
-    if (!external || chosen.size === 0) return;
+    if (!external || (chosen.size === 0 && !autoMine)) return;
     setBusy(true);
     setError(null);
     try {
@@ -161,6 +195,7 @@ export function WorkImportDialog({
         provider,
         externalBoardId: external,
         issueKeys: [...chosen],
+        autoImportMine: autoMine,
         projectId: projectId || undefined,
       });
       if (!result.ok) {
@@ -173,9 +208,12 @@ export function WorkImportDialog({
     }
   };
 
+  const setOne = (key: keyof WorkImportFilter) => (event: React.ChangeEvent<HTMLSelectElement>) =>
+    setFilter((f) => ({ ...f, [key]: event.target.value || undefined }));
+
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-w-2xl" data-testid="work-import-dialog">
+      <DialogContent className="sm:max-w-3xl" data-testid="work-import-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ProviderMark provider={provider} className="size-4" />
@@ -183,7 +221,7 @@ export function WorkImportDialog({
           </DialogTitle>
           <DialogDescription>
             {preview
-              ? `Choose the issues to bring in. Each keeps its ${source.name} key, and its column's prompts reach the sessions you link to it.`
+              ? `Yours are chosen; filter to add others. Each keeps its ${source.name} key, and its column's prompts reach the sessions you link to it.`
               : needsConnect
                 ? `Connect ${source.name} to see its ${boardsTerm(source)}.`
                 : `Pick the ${source.name} ${source.boardTerm} that frames the import: its columns and ${source.sprintTerm}s come with it.`}
@@ -257,20 +295,75 @@ export function WorkImportDialog({
           )
         ) : !preview && !error ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Reading the board…
+            <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Reading the {source.boardTerm}…
           </p>
         ) : preview ? (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground" data-testid="work-import-columns">
               Columns: {preview.columns.map((c) => c.name).join(" · ")}
             </p>
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filters">
+              <select aria-label="Assigned to" className={SELECT} value={filter.assignee ?? "any"} onChange={setOne("assignee")}>
+                <option value="me">Assigned to me{facets ? ` (${facets.mine})` : ""}</option>
+                <option value="any">Anyone</option>
+                <option value="none">Unassigned{facets ? ` (${facets.unassigned})` : ""}</option>
+                {(facets?.people ?? [])
+                  .filter((p) => p.id !== preview.me)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.count})
+                    </option>
+                  ))}
+              </select>
+              {facets && (facets.projects.length > 0 || facets.noProject > 0) ? (
+                <select aria-label="Project" className={SELECT} value={filter.project ?? ""} onChange={setOne("project")}>
+                  <option value="">All projects</option>
+                  {facets.projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.count})
+                    </option>
+                  ))}
+                  {facets.noProject ? <option value="none">No project ({facets.noProject})</option> : null}
+                </select>
+              ) : null}
+              <select aria-label="Status" className={SELECT} value={filter.status ?? ""} onChange={setOne("status")}>
+                <option value="">All statuses</option>
+                {(facets?.statuses ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.count})
+                  </option>
+                ))}
+              </select>
+              <div className="relative min-w-[160px] flex-1">
+                <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  aria-label="Search issues"
+                  className="h-8 pl-7 text-xs"
+                  placeholder="Key or title…"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </div>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Checkbox
+                  checked={filter.open === true}
+                  aria-label="Hide finished issues"
+                  onCheckedChange={(checked) => setFilter((f) => ({ ...f, open: checked === true || undefined }))}
+                />
+                Hide finished{facets?.finished ? ` (${facets.finished})` : ""}
+              </label>
+              {loading ? <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Filtering" /> : null}
+            </div>
             {preview.truncated ? (
               <p className="text-xs text-amber-600 dark:text-amber-400" role="status">
-                Showing {preview.issues.length} of {preview.total} issues. Import these, then import more later.
+                Showing {preview.issues.length} of {preview.total} matching issues. Narrow the filters to see the rest.
               </p>
             ) : null}
-            <div className="max-h-[340px] space-y-4 overflow-y-auto pr-1" aria-label="Issues">
-              {groups.map((group) => {
+            <div className="max-h-[320px] space-y-4 overflow-y-auto pr-1" aria-label="Issues">
+              {preview.issues.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">No issues match these filters.</p>
+              ) : null}
+              {groups.filter((g) => g.issues.length > 0).map((group) => {
                 const selectable = group.issues.filter((i) => !i.importedTicketId).map((i) => i.key);
                 const all = selectable.length > 0 && selectable.every((k) => chosen.has(k));
                 return (
@@ -293,9 +386,14 @@ export function WorkImportDialog({
                             aria-label={`Import ${issue.key}`}
                             onCheckedChange={(checked) => toggle([issue.key], checked === true)}
                           />
-                          <span className="w-20 shrink-0 font-mono text-xs text-muted-foreground">{issue.key}</span>
-                          <span className="min-w-0 flex-1 truncate">{issue.title}</span>
+                          <span className="w-20 shrink-0 truncate font-mono text-xs text-muted-foreground">{issue.key}</span>
+                          <span className="min-w-0 flex-1 truncate" title={issue.title}>
+                            {issue.title}
+                          </span>
                           <IssueTypeBadge type={issue.issueType} />
+                          <span className="w-24 shrink-0 truncate text-right text-xs text-muted-foreground" title={issue.assignee ?? "Unassigned"}>
+                            {issue.assigneeId && issue.assigneeId === preview.me ? "You" : (issue.assignee ?? "—")}
+                          </span>
                           <span className="w-24 shrink-0 truncate text-right text-xs text-muted-foreground">
                             {issue.importedTicketId ? "On the board" : issue.status.name}
                           </span>
@@ -306,6 +404,14 @@ export function WorkImportDialog({
                 );
               })}
             </div>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={autoMine}
+                aria-label="Keep importing new issues assigned to me"
+                onCheckedChange={(checked) => setAutoMine(checked === true)}
+              />
+              Keep importing new issues assigned to me on every sync
+            </label>
             <label className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">Sessions start in</span>
               <select
@@ -335,7 +441,7 @@ export function WorkImportDialog({
             Cancel
           </Button>
           {preview ? (
-            <Button disabled={busy || chosen.size === 0} onClick={() => void importNow()}>
+            <Button disabled={busy || (chosen.size === 0 && !autoMine)} onClick={() => void importNow()}>
               {busy ? <Loader2 className="animate-spin" /> : null}
               Import {chosen.size} {chosen.size === 1 ? "issue" : "issues"}
             </Button>

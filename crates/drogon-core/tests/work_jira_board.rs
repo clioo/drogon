@@ -1081,3 +1081,116 @@ fn tickets_resolve_by_their_jira_key_unless_two_boards_share_it() {
         "APP-128"
     );
 }
+
+/// Only what is yours, plus what you pick: `mine` imports the issues
+/// assigned to the connected account, and `autoImportMine` keeps bringing
+/// in new ones on sync.
+#[test]
+fn mine_imports_your_issues_and_auto_import_follows_new_assignments() {
+    let path = fake_claude_on_path();
+    let server = FixtureServer::with_data("agile-site.json");
+    let ctx = TestContext::open();
+    ctx.connect(&server);
+    // The picker: facets and the "me" filter.
+    let preview = ctx.ok(
+        "work.import_preview",
+        json!({"externalBoardId": "7", "assignee": "me"}),
+    );
+    assert_eq!(preview["me"], "fixture-user-1");
+    let mine: Vec<&str> = preview["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(mine, ["APP-142", "APP-128"]);
+    assert_eq!(preview["facets"]["mine"], 2);
+    assert_eq!(preview["facets"]["unassigned"], 1);
+    let people: Vec<&str> = preview["facets"]["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        people.contains(&"Jon Doe") && people.contains(&"Ana Lopez"),
+        "{people:?}"
+    );
+    let none = ctx.ok(
+        "work.import_preview",
+        json!({"externalBoardId": "7", "assignee": "none"}),
+    );
+    assert_eq!(none["issues"][0]["key"], "APP-150");
+    let ana = ctx.ok(
+        "work.import_preview",
+        json!({"externalBoardId": "7", "assignee": "u-al", "query": "session"}),
+    );
+    let keys: Vec<&str> = ana["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(keys, ["APP-149"]);
+    assert_eq!(ana["total"], 1);
+    assert_eq!(
+        ana["facets"]["mine"], 2,
+        "facets count every issue, not the filtered ones"
+    );
+
+    // Mine plus one picked by hand, keeping new assignments coming.
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"externalBoardId": "7", "mine": true, "issueKeys": ["APP-130"], "autoImportMine": true}),
+    );
+    assert_eq!(imported["imported"], 3);
+    assert_eq!(imported["board"]["autoImportMine"], true);
+    let board = imported["board"]["id"].as_str().unwrap().to_string();
+
+    // Assigned to you later in Jira: it comes in on the next sync.
+    server.control(
+        "issue/APP-150",
+        json!({"assignee": {"accountId": "fixture-user-1", "displayName": "Jon Doe"}}),
+    );
+    let synced = ctx.ok("work.board_sync", json!({"boardId": board}));
+    assert_eq!(synced["imported"], 1, "{synced}");
+    let t = ctx.ok("work.ticket_show", json!({"ticketId": "APP-150"}));
+    assert!(
+        t["activity"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["text"] == "Assigned to you in Jira: imported on sync")
+    );
+    assert_eq!(
+        ctx.ok("work.board_sync", json!({"boardId": board}))["imported"],
+        0,
+        "once"
+    );
+
+    // Turned off: a new assignment stays in Jira.
+    let off = ctx.ok(
+        "work.board_update",
+        json!({"boardId": board, "autoImportMine": false}),
+    );
+    assert_eq!(off["autoImportMine"], false);
+    server.control(
+        "issue/APP-146",
+        json!({"assignee": {"accountId": "fixture-user-1", "displayName": "Jon Doe"}}),
+    );
+    assert_eq!(
+        ctx.ok("work.board_sync", json!({"boardId": board}))["imported"],
+        0
+    );
+    assert!(
+        ctx.err("work.ticket_show", json!({"ticketId": "APP-146"}))
+            .message
+            .contains("not found")
+    );
+    assert!(
+        ctx.err("work.board_import", json!({"externalBoardId": "7"}))
+            .message
+            .contains("mine: true")
+    );
+    drop(path);
+}

@@ -153,6 +153,22 @@ pub enum WorkImportAction {
         /// board (every issue, default) | backlog | sprint:<id>
         #[arg(long, value_name = "SCOPE")]
         scope: Option<String>,
+        /// me | none (unassigned) | a person's id (from the facets)
+        #[arg(long, value_name = "WHO")]
+        assignee: Option<String>,
+        /// A project name (Linear project, Jira project, GitHub repository),
+        /// or none
+        #[arg(long, value_name = "PROJECT")]
+        project: Option<String>,
+        /// A status id (from the facets)
+        #[arg(long, value_name = "STATUS")]
+        status: Option<String>,
+        /// Words in the key or title
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        search: Option<String>,
+        /// Leave out finished issues (done, closed, canceled)
+        #[arg(long)]
+        open: bool,
         #[arg(long, value_name = "PROVIDER")]
         provider: Option<String>,
         #[arg(long, value_name = "SITE")]
@@ -165,11 +181,17 @@ pub enum WorkImportAction {
         #[arg(long, value_name = "ID")]
         board: String,
         /// An issue to import (repeatable), e.g. --issue APP-128
-        #[arg(long = "issue", value_name = "KEY", required_unless_present = "all")]
+        #[arg(long = "issue", value_name = "KEY", required_unless_present_any = ["all", "mine"])]
         issues: Vec<String>,
         /// Import every issue on the board
-        #[arg(long, conflicts_with = "issues")]
+        #[arg(long, conflicts_with_all = ["issues", "mine"])]
         all: bool,
+        /// Import the issues assigned to you (with any --issue as well)
+        #[arg(long)]
+        mine: bool,
+        /// Keep importing new issues assigned to you on every sync
+        #[arg(long, value_name = "true|false")]
+        auto_import_mine: Option<bool>,
         /// The Drogon project whose workspace the tickets' sessions start in
         #[arg(long, value_name = "PROJECT")]
         project: Option<String>,
@@ -177,6 +199,15 @@ pub enum WorkImportAction {
         provider: Option<String>,
         #[arg(long, value_name = "SITE")]
         site: Option<String>,
+    },
+    /// An imported board's settings: whether sync keeps importing new
+    /// issues assigned to you
+    Settings {
+        /// Imported board id or name
+        #[arg(long, value_name = "BOARD")]
+        board: String,
+        #[arg(long, value_name = "true|false", action = clap::ArgAction::Set, required = true)]
+        auto_import_mine: bool,
     },
     /// Remove an imported board and its tickets from Drogon (the provider
     /// is untouched; linked sessions keep running)
@@ -507,9 +538,9 @@ pub fn validate(action: &WorkAction) -> Result<(), CliError> {
         },
         WorkAction::Import { action } => match action {
             WorkImportAction::Boards { .. } => {}
-            WorkImportAction::Preview { board, .. } | WorkImportAction::Remove { board } => {
-                nonempty("board", board)?
-            }
+            WorkImportAction::Preview { board, .. }
+            | WorkImportAction::Remove { board }
+            | WorkImportAction::Settings { board, .. } => nonempty("board", board)?,
             WorkImportAction::Run { board, issues, .. } => {
                 nonempty("board", board)?;
                 for issue in issues {
@@ -863,13 +894,29 @@ fn import_call(action: &WorkImportAction) -> WorkCall {
         WorkImportAction::Preview {
             board,
             scope,
+            assignee,
+            project,
+            status,
+            search,
+            open,
             provider,
             site,
         } => {
             let mut params = provider_params(provider, site);
             params["externalBoardId"] = json!(board);
-            if let Some(scope) = scope {
-                params["scope"] = json!(scope);
+            if *open {
+                params["open"] = json!(true);
+            }
+            for (key, value) in [
+                ("scope", scope),
+                ("assignee", assignee),
+                ("project", project),
+                ("status", status),
+                ("query", search),
+            ] {
+                if let Some(v) = value {
+                    params[key] = json!(v);
+                }
             }
             ("work.import_preview", params, render_import_preview)
         }
@@ -877,6 +924,8 @@ fn import_call(action: &WorkImportAction) -> WorkCall {
             board,
             issues,
             all,
+            mine,
+            auto_import_mine,
             project,
             provider,
             site,
@@ -885,8 +934,14 @@ fn import_call(action: &WorkImportAction) -> WorkCall {
             params["externalBoardId"] = json!(board);
             if *all {
                 params["all"] = json!(true);
-            } else {
+            } else if !issues.is_empty() {
                 params["issueKeys"] = json!(issues);
+            }
+            if *mine {
+                params["mine"] = json!(true);
+            }
+            if let Some(on) = auto_import_mine {
+                params["autoImportMine"] = json!(on);
             }
             if let Some(p) = project {
                 params["projectId"] = json!(p);
@@ -901,6 +956,24 @@ fn import_call(action: &WorkImportAction) -> WorkCall {
                 )
             })
         }
+        WorkImportAction::Settings {
+            board,
+            auto_import_mine,
+        } => (
+            "work.board_update",
+            json!({ "boardId": board, "autoImportMine": auto_import_mine }),
+            |v| {
+                format!(
+                    "{}: {}",
+                    text(&v["name"]),
+                    if v["autoImportMine"] == true {
+                        "new issues assigned to you are imported on every sync"
+                    } else {
+                        "only the issues you import"
+                    }
+                )
+            },
+        ),
         WorkImportAction::Remove { board } => {
             ("work.board_delete", json!({ "boardId": board }), |v| {
                 format!(
@@ -1471,6 +1544,43 @@ fn render_import_preview(v: &Value) -> String {
         text(&v["board"]["name"]),
         text(&v["board"]["kind"])
     )];
+    let facets = &v["facets"];
+    if facets.is_object() {
+        let people: Vec<String> = facets["people"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|p| format!("{} [{}] {}", text(&p["name"]), text(&p["id"]), p["count"]))
+            .collect();
+        out.push(format!(
+            "assigned to you: {}, unassigned: {}; people: {}",
+            facets["mine"],
+            facets["unassigned"],
+            people.join(", ")
+        ));
+        let projects: Vec<String> = facets["projects"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|p| format!("{} {}", text(&p["name"]), p["count"]))
+            .collect();
+        if !projects.is_empty() {
+            out.push(format!(
+                "projects: {} (none: {})",
+                projects.join(", "),
+                facets["noProject"]
+            ));
+        }
+    }
+    if v["truncated"] == true {
+        out.push(format!(
+            "showing {} of {} matching issues; narrow with --assignee, --project, --status or --search",
+            v["issues"].as_array().map_or(0, Vec::len),
+            v["total"]
+        ));
+    }
     let columns: Vec<String> = v["columns"]
         .as_array()
         .cloned()
@@ -1498,11 +1608,12 @@ fn render_import_preview(v: &Value) -> String {
     for issue in v["issues"].as_array().cloned().unwrap_or_default() {
         let sprint = issue["sprint"]["name"].as_str().unwrap_or("backlog");
         out.push(format!(
-            "  {}  {}  [{} · {}]{}",
+            "  {}  {}  [{} · {} · {}]{}",
             text(&issue["key"]),
             text(&issue["title"]),
             text(&issue["status"]["name"]),
             sprint,
+            issue["assignee"].as_str().unwrap_or("unassigned"),
             if issue["importedTicketId"].is_string() {
                 "  imported"
             } else {

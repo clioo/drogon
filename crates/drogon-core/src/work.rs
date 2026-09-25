@@ -43,8 +43,9 @@ pub(crate) const WORK_SOURCES_CAPABILITY: &str = "work.sources.v1";
 pub(crate) const SCHEMA_COMPONENT: &str = "work";
 /// v1: local board. v2: imported provider boards (Jira), column↔status
 /// mapping, sprints, sync state and the ticket activity log. v3: the
-/// sources the owner allows and their connections (Linear, GitHub).
-pub(crate) const SCHEMA_VERSION: i64 = 3;
+/// sources the owner allows and their connections (Linear, GitHub). v4: a
+/// board can keep importing new issues assigned to the owner.
+pub(crate) const SCHEMA_VERSION: i64 = 4;
 
 /// How often a watched pull request is re-read (`gh pr view`).
 pub(crate) const PR_POLL_MS: i64 = 5 * 60_000;
@@ -126,6 +127,14 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
     }
     if existing.unwrap_or(0) < 3 {
         apply_v3(tx)?;
+    }
+    if existing.unwrap_or(0) < 4 {
+        add_column(
+            tx,
+            "work_boards",
+            "auto_import_mine",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
     }
     tx.execute(
         "INSERT INTO schema_versions (component, version) VALUES (?1, ?2)

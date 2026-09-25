@@ -288,20 +288,40 @@ function fakeBridge(options: { importedBoards?: boolean } = {}) {
         ],
       }),
     ),
-    importPreview: vi.fn(() =>
-      ok({
+    // Filters like the daemon: `assignee` me/none/any/<id>, `query` words.
+    importPreview: vi.fn((input: { assignee?: string; query?: string }) => {
+      const all = [
+        { ...issue("APP-142", "Improve error messages", SPRINTS[1]!, STATUSES.todo), assignee: "Jon Doe", assigneeId: "acc-me" },
+        { ...issue("APP-128", "Handle session resume", SPRINTS[1]!, STATUSES.review, "t128"), assignee: "Jon Doe", assigneeId: "acc-me" },
+        { ...issue("APP-122", "Clarify retry strategy", null, STATUSES.todo), assignee: "Ana Lopez", assigneeId: "acc-ana" },
+        issue("APP-110", "Add telemetry", null, STATUSES.done, null, [SPRINTS[0]!]),
+      ];
+      const who = input.assignee === "me" ? "acc-me" : input.assignee;
+      const issues = all.filter(
+        (i) =>
+          (!who || (who === "none" ? !("assigneeId" in i) : "assigneeId" in i && i.assigneeId === who)) &&
+          (!input.query || `${i.key} ${i.title}`.toLowerCase().includes(input.query.toLowerCase())),
+      );
+      return ok({
         provider: "jira",
         board: { id: "7", name: "Platform Delivery", kind: "scrum" },
         columns: [{ name: "To Do", statuses: [STATUSES.todo] }, { name: "Review", statuses: [STATUSES.review] }],
         sprints: SPRINTS,
-        issues: [
-          issue("APP-142", "Improve error messages", SPRINTS[1]!, STATUSES.todo),
-          issue("APP-128", "Handle session resume", SPRINTS[1]!, STATUSES.review, "t128"),
-          issue("APP-122", "Clarify retry strategy", null, STATUSES.todo),
-          issue("APP-110", "Add telemetry", null, STATUSES.done, null, [SPRINTS[0]!]),
-        ],
-      }),
-    ),
+        me: "acc-me",
+        facets: {
+          mine: 2,
+          unassigned: 1,
+          noProject: 0,
+          people: [
+            { id: "acc-me", name: "Jon Doe", count: 2 },
+            { id: "acc-ana", name: "Ana Lopez", count: 1 },
+          ],
+          projects: [{ id: "Platform Delivery", name: "Platform Delivery", count: 4 }],
+          statuses: [{ id: STATUSES.todo.id, name: "To Do", count: 2 }],
+        },
+        issues,
+      });
+    }),
     boardImport: vi.fn(() => ok({ board: PLATFORM, imported: 2, refreshed: 0 })),
     boardSync: vi.fn(() => ok({ board: PLATFORM, updated: 7, moved: 1, conflicts: 1, removed: 0, deliveries: [] })),
     boardPush: vi.fn(() => ok({ results: [], pushed: 1, failed: 0 })),
@@ -395,13 +415,23 @@ describe("Jira boards on the Work page", () => {
     fireEvent.click(await within(dialog).findByRole("button", { name: "Choose Platform Delivery" }));
     await within(dialog).findByText("Columns: To Do · Review");
     expect(bridge.providerBoards).toHaveBeenCalledWith({ provider: "jira" });
-    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7", provider: "jira" });
+    // It opens on the issues assigned to you, all chosen.
+    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7", provider: "jira", assignee: "me", open: true });
+    expect((within(dialog).getByRole("combobox", { name: "Assigned to" }) as HTMLSelectElement).value).toBe("me");
+    expect(within(dialog).queryByRole("checkbox", { name: "Import APP-122" })).toBeNull();
+    expect(within(dialog).getAllByText("You").length).toBe(2);
+    expect(within(dialog).getByRole("checkbox", { name: "Import APP-142" }).getAttribute("aria-checked")).toBe("true");
+    // Anyone shows the rest; what you chose stays chosen.
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Assigned to" }), { target: { value: "any" } });
+    await within(dialog).findByRole("checkbox", { name: "Import APP-122" });
+    expect(bridge.importPreview).toHaveBeenLastCalledWith({ externalBoardId: "7", provider: "jira", open: true });
     // Grouped like the board: active sprint, backlog, finished in a past sprint.
     expect(within(dialog).getByRole("region", { name: "Sprint 25 · Active" })).toBeTruthy();
     expect(within(dialog).getByRole("region", { name: "Backlog" })).toBeTruthy();
     expect(within(dialog).getByRole("region", { name: "Finished in past sprints" })).toBeTruthy();
-    // The active sprint's new issues start chosen; an imported one is fixed.
+    // Yours stay chosen; others are not; an imported one is fixed.
     expect(within(dialog).getByRole("checkbox", { name: "Import APP-142" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(dialog).getByRole("checkbox", { name: "Import APP-122" }).getAttribute("aria-checked")).toBe("false");
     const onBoard = within(dialog).getByRole("checkbox", { name: "Import APP-128" });
     expect(onBoard.hasAttribute("disabled")).toBe(true);
     expect(within(dialog).getByText("On the board")).toBeTruthy();
@@ -410,7 +440,13 @@ describe("Jira boards on the Work page", () => {
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Import 2 issues" }));
     });
-    expect(bridge.boardImport).toHaveBeenCalledWith({ provider: "jira", externalBoardId: "7", issueKeys: ["APP-142", "APP-122"], projectId: "p1" });
+    expect(bridge.boardImport).toHaveBeenCalledWith({
+      provider: "jira",
+      externalBoardId: "7",
+      issueKeys: ["APP-142", "APP-122"],
+      autoImportMine: true,
+      projectId: "p1",
+    });
     // The page moves to the imported board.
     await waitFor(() => expect(bridge.board).toHaveBeenCalledWith({ boardId: "b7" }));
   });
@@ -514,7 +550,7 @@ describe("Jira boards on the Work page", () => {
     // New ticket on an imported board brings issues in from Jira.
     fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
     await screen.findByText("Columns: To Do · Review");
-    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7", provider: "jira" });
+    expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7", provider: "jira", assignee: "me", open: true });
   });
 
   test("removing the board returns to My work", async () => {
