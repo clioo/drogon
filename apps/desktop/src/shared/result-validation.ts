@@ -26,6 +26,9 @@ const session = z.object({
   incarnation: id,
   command: z.string(),
   args: z.array(z.string()),
+  // Additive: a listed harness session's long argv elements are cut (the
+  // stored record is whole; harness sessions relaunch via harness.start).
+  argsTruncated: z.boolean().optional(),
   cols: z.number().int().min(1).max(1000),
   rows: z.number().int().min(1).max(1000),
   // Additive (#605): the ring offset `cols`x`rows` took effect at, so a

@@ -35,6 +35,13 @@ describe("monitor launch prompt", () => {
     expect(screen.getByTestId("monitor-launch-prompt-text").textContent).toBe("Drogon task:\nprompt");
     expect(screen.getByText(/of this headless turn/)).toBeTruthy();
   });
+  test("a prompt shortened by an oversized session list says so", () => {
+    render(<MonitorLaunchPrompt session={session({ args: ["-p", "Drogon task:\nprompt…"], argsTruncated: true })} />);
+    expect(screen.getByTestId("monitor-launch-prompt-truncated").textContent).toContain("Shortened here");
+    cleanup();
+    render(<MonitorLaunchPrompt session={session({ args: ["-p", "Drogon task:\nprompt"] })} />);
+    expect(screen.queryByTestId("monitor-launch-prompt-truncated")).toBeNull();
+  });
   test("an interactive session with no prompt in its argv shows no launch prompt at all", () => {
     render(<MonitorLaunchPrompt session={session({ causedByEventId: null, args: ["--model", "provider/model"] })} />);
     expect(screen.queryByTestId("monitor-launch-prompt")).toBeNull();

@@ -59,6 +59,11 @@ export function MonitorLaunchPrompt({ session }: { session: Session }) {
       ) : (
         <p className="text-muted-foreground">The launch prompt is unavailable for this session.</p>
       )}
+      {prompt && session.argsTruncated ? (
+        <p className="mt-1 text-muted-foreground" data-testid="monitor-launch-prompt-truncated">
+          Shortened here: the full list of sessions was too large to carry every prompt whole.
+        </p>
+      ) : null}
       {prompt && system ? <>
         <p className="my-2 font-medium">Additional system instructions</p>
         <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/30 p-3 font-mono text-xs">{system}</pre>

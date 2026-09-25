@@ -69,6 +69,9 @@ export type Session = {
   incarnation: string;
   command: string;
   args: string[];
+  /** A listed harness session's long argv elements were cut (the record is
+   *  whole; a harness session relaunches through harness.start). */
+  argsTruncated?: boolean;
   cols: number;
   rows: number;
   /**

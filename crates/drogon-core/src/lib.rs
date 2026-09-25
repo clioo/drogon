@@ -1097,6 +1097,7 @@ impl Engine {
             }
             sessions.push(value);
         }
+        bound_listed_sessions(&mut sessions, SESSION_LIST_BUDGET_BYTES);
         Ok(json!({ "sessions": sessions }))
     }
 
@@ -1309,6 +1310,63 @@ fn default_session_command() -> String {
 /// The `session.list` row projection, shared by the filtered and unfiltered
 /// queries in [`Engine::do_session_list`] so both paths return byte-identical
 /// shapes. Column order matches `row_to_session_json`'s positional reads.
+/// What a `session.list` reply may take of the 1 MiB frame before listed
+/// harness argv is cut (see [`compact_listed_args`]).
+pub(crate) const SESSION_LIST_BUDGET_BYTES: usize = 768 * 1024;
+
+/// A list that fits is returned whole (a delegated session's prompt is read
+/// from its listed argv). One that would outgrow the reply — a host-wide list
+/// of many sessions carrying task briefs — has its harness argv cut instead
+/// of failing whole, which would leave every caller with nothing.
+pub(crate) fn bound_listed_sessions(sessions: &mut [Value], budget: usize) {
+    let size: usize = sessions.iter().map(|s| s.to_string().len() + 1).sum();
+    if size <= budget {
+        return;
+    }
+    for session in sessions.iter_mut() {
+        compact_listed_args(session);
+    }
+}
+
+/// How much of one argv element a listed harness session carries: a live
+/// one keeps enough to read its brief, a finished one a glimpse.
+pub(crate) const LISTED_ARG_CHARS: usize = 4096;
+pub(crate) const LISTED_FINISHED_ARG_CHARS: usize = 512;
+
+/// A listed harness session's argv can hold a whole task brief (a worker's
+/// prompt runs to tens of KB), and a host-wide `session.list` of such
+/// sessions outgrows one reply. A harness session relaunches through
+/// `harness.start`, never through its listed argv, so each long element is
+/// cut ([`LISTED_ARG_CHARS`] live, [`LISTED_FINISHED_ARG_CHARS`] otherwise)
+/// and the row says so (`argsTruncated`). Plain
+/// terminals, which do relaunch from their argv, keep it whole; the stored
+/// record is never touched.
+pub(crate) fn compact_listed_args(value: &mut Value) {
+    if !value["harnessId"].is_string() {
+        return;
+    }
+    let limit = if value["verdict"] == "live" {
+        LISTED_ARG_CHARS
+    } else {
+        LISTED_FINISHED_ARG_CHARS
+    };
+    let Some(args) = value.get_mut("args").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let mut cut = false;
+    for arg in args.iter_mut() {
+        if let Some(text) = arg.as_str()
+            && let Some((at, _)) = text.char_indices().nth(limit)
+        {
+            *arg = Value::String(format!("{}…", &text[..at]));
+            cut = true;
+        }
+    }
+    if cut {
+        value["argsTruncated"] = Value::Bool(true);
+    }
+}
+
 const SESSION_LIST_SELECT: &str = "SELECT id, workspace_id, host_id, incarnation, command, args_json, cols, rows, verdict, exit_code, created_at, harness_id, needs_input_at, parent_session_id, turn_fact, turn_fact_at, caused_by_event_id, agent_session_id, agent_session_transcript_path FROM sessions";
 
 fn row_to_session_json(r: &rusqlite::Row) -> rusqlite::Result<(String, Value)> {
@@ -1798,5 +1856,43 @@ mod session_list_workspace_index_tests {
             )
             .unwrap();
         assert_eq!(composite, 1, "reopen must keep the composite index");
+    }
+}
+
+#[cfg(test)]
+mod listed_session_bound_tests {
+    use super::*;
+
+    #[test]
+    fn listed_sessions_are_cut_only_past_the_budget_and_only_harness_argv() {
+        let brief = "B".repeat(10_000);
+        let make = || {
+            vec![
+                json!({"id": "h1", "harnessId": "pi", "verdict": "exited", "args": ["--x", brief.clone()]}),
+                json!({"id": "h2", "harnessId": "claude", "verdict": "live", "args": [brief.clone()]}),
+                json!({"id": "s1", "harnessId": null, "verdict": "exited", "args": ["-c", brief.clone()]}),
+            ]
+        };
+        let mut fits = make();
+        bound_listed_sessions(&mut fits, 1024 * 1024);
+        assert_eq!(fits, make(), "a list that fits is untouched");
+        let mut over = make();
+        bound_listed_sessions(&mut over, 1000);
+        assert_eq!(
+            over[0]["args"][1].as_str().unwrap().chars().count(),
+            LISTED_FINISHED_ARG_CHARS + 1
+        );
+        assert_eq!(over[0]["args"][0], "--x");
+        assert_eq!(over[0]["argsTruncated"], true);
+        assert_eq!(
+            over[1]["args"][0].as_str().unwrap().chars().count(),
+            LISTED_ARG_CHARS + 1
+        );
+        assert_eq!(
+            over[2]["args"][1].as_str().unwrap().len(),
+            10_000,
+            "a plain terminal relaunches from its argv"
+        );
+        assert!(over[2].get("argsTruncated").is_none());
     }
 }

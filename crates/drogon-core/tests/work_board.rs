@@ -945,3 +945,59 @@ fn a_pr_watch_sends_when_the_pull_request_changes() {
         &format!("you said: PR PR #7 changed for {key}"),
     );
 }
+
+/// A ticket's linked sessions never carry a whole brief (the board lists
+/// every ticket at once and never shows argv), while `session.list` keeps a
+/// list that fits whole: a delegated session's prompt is read from it.
+#[test]
+fn ticket_sessions_carry_bounded_argv_and_a_fitting_session_list_stays_whole() {
+    let fx = Fixture::new();
+    let brief = "B".repeat(10_000);
+    let harness = ok(
+        &fx.engine,
+        "harness.start",
+        json!({"workspaceId": fx.workspace_id, "harnessId": "claude", "permissionMode": "inherit", "prompt": brief}),
+    );
+    let ticket = ok(
+        &fx.engine,
+        "work.ticket_create",
+        json!({"title": "Brief", "sessionIds": [harness["id"]]}),
+    );
+    let linked = &ticket["sessions"][0];
+    assert_eq!(linked["argsTruncated"], true);
+    let longest = linked["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap().chars().count())
+        .max()
+        .unwrap();
+    assert_eq!(
+        longest, 4097,
+        "a live one: 4096 characters and the ellipsis"
+    );
+    let listed = ok(&fx.engine, "session.list", json!({}));
+    let row = listed["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == harness["id"])
+        .cloned()
+        .unwrap();
+    assert!(
+        row.get("argsTruncated").is_none(),
+        "a list that fits stays whole"
+    );
+    assert!(
+        row["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a.as_str().unwrap().contains(&brief))
+    );
+    let _ = call(
+        &fx.engine,
+        "session.close",
+        json!({"sessionId": harness["id"], "incarnation": harness["incarnation"]}),
+    );
+}

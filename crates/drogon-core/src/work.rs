@@ -1096,10 +1096,14 @@ impl Engine {
         let sessions = self.sessions.lock().unwrap();
         Ok(rows
             .into_iter()
-            .map(|(id, row)| match (sessions.get(&id), row) {
-                (Some(handle), _) => crate::session::snapshot(handle),
-                (None, Some(value)) => value,
-                (None, None) => json!({ "id": id, "missing": true }),
+            .map(|(id, row)| {
+                let mut value = match (sessions.get(&id), row) {
+                    (Some(handle), _) => crate::session::snapshot(handle),
+                    (None, Some(value)) => value,
+                    (None, None) => json!({ "id": id, "missing": true }),
+                };
+                crate::compact_listed_args(&mut value);
+                value
             })
             .collect())
     }
