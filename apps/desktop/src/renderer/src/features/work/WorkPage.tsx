@@ -84,10 +84,12 @@ import {
   WORK_FILTER_LABELS,
   type WorkFilter,
 } from "./work-format";
-import { WorkColumnIcon } from "./work-icons";
+import { WorkColumnIcon, iconForColumnName, workColumnIconLabel } from "./work-icons";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { WorkColumnPanel } from "./WorkColumnPanel";
 import { WorkTicketPanel, type WorkWorkspace } from "./WorkTicketPanel";
 import { WorkImportDialog } from "./WorkImportDialog";
+import { listWorkspaceSessions, unreadableNotice, type SessionsReply } from "./work-session-candidates";
 import { isTaskSource, requestTaskSourceConnect } from "../tasks/task-source-navigation";
 import { WorkSyncActions, type WorkSyncHandlers } from "./WorkSyncActions";
 import {
@@ -120,6 +122,22 @@ import {
 } from "./WorkSources";
 
 const TICKET_MIME = "application/x-drogon-work-ticket";
+const COLUMN_MIME = "application/x-drogon-work-column";
+
+/** The line a column shows on the side a dragged column would land. */
+function columnDropClass(side: "before" | "after" | null): string {
+  if (side === "before") return "shadow-[inset_2px_0_0_0_var(--color-ring)]";
+  if (side === "after") return "shadow-[inset_-2px_0_0_0_var(--color-ring)]";
+  return "";
+}
+
+/** Where a column dragged from `from` lands when dropped on the `side` of
+ *  the column at `target` (board positions), or null when it stays put. */
+export function columnDropIndex(from: number, target: number, side: "before" | "after"): number | null {
+  const at = side === "before" ? target : target + 1;
+  const index = from < at ? at - 1 : at;
+  return index === from ? null : index;
+}
 
 type Panel = { kind: "column"; id: string } | { kind: "ticket"; id: string } | null;
 type Tab = "board" | "list" | "sources";
@@ -153,7 +171,7 @@ export function WorkPage({
   onOpenExternal = (url) => {
     void (window as unknown as { drogon?: { shell?: { openExternal?: (u: string) => unknown } } }).drogon?.shell?.openExternal?.(url);
   },
-  listSessions = defaultListSessions,
+  listSessions,
   onOpenTasks,
   onClose,
 }: {
@@ -218,6 +236,17 @@ export function WorkPage({
     if (kind === "error") toast.error(message);
     else toast.success(message);
   };
+  // Linkable sessions, one workspace at a time (see work-session-candidates).
+  const listCandidates =
+    listSessions ??
+    (async () => {
+      const { sessions, unreadable } = await listWorkspaceSessions(
+        workspaces.map((w) => w.id),
+        defaultSessionsOf,
+      );
+      if (unreadable > 0) notice(unreadableNotice(unreadable), "error");
+      return sessions;
+    });
 
   const board = state.board;
   // A board removed elsewhere (the CLI, another window): back to My work.
@@ -436,7 +465,7 @@ export function WorkPage({
                         Import new issues assigned to me
                       </DropdownMenuCheckboxItem>
                       <DropdownMenuSub>
-                        <DropdownMenuSubTrigger>Sessions start in</DropdownMenuSubTrigger>
+                        <DropdownMenuSubTrigger>Agents work in</DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
                           <DropdownMenuRadioGroup
                             value={summary.projectId ?? ""}
@@ -621,9 +650,9 @@ export function WorkPage({
                 role="status"
                 data-testid="work-board-no-project"
               >
-                New sessions on this board need a Drogon project to start in.
+                Agents on this board need a Drogon project to work in.
                 <select
-                  aria-label="Sessions start in"
+                  aria-label="Agents work in"
                   className="h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground"
                   value=""
                   onChange={(event) => event.target.value && void setBoardProject(event.target.value)}
@@ -714,6 +743,11 @@ export function WorkPage({
                     const result = await state.run(() => bridge.columnUpdate({ columnId: column.id, icon }));
                     if (!result.ok) notice(result.error, "error");
                   }}
+                  onReorderColumn={async (columnId, index) => {
+                    if (!bridge) return;
+                    const result = await state.run(() => bridge.columnUpdate({ columnId, index }));
+                    if (!result.ok) notice(result.error, "error");
+                  }}
                   onCollapseColumn={async (column, collapsed) => {
                     if (!bridge) return;
                     const result = await state.run(() => bridge.columnUpdate({ columnId: column.id, collapsed }));
@@ -777,7 +811,7 @@ export function WorkPage({
             state={state}
             bridge={bridge}
             workspaces={workspaces}
-            listSessions={listSessions}
+            listSessions={listCandidates}
             readOnly={readOnly}
             syncHandlers={syncHandlers}
             onOpenSession={(session, ticket) => void openSession(session, ticket)}
@@ -847,11 +881,9 @@ export function WorkPage({
   );
 }
 
-async function defaultListSessions(): Promise<Session[]> {
-  const drogon = (window as unknown as { drogon?: { sessions?: (w?: string) => Promise<{ ok: boolean; result?: { sessions: Session[] }; error?: { message: string } }> } }).drogon;
-  const reply = await drogon?.sessions?.(undefined);
-  if (!reply?.ok || !reply.result) throw new Error(reply?.error?.message ?? "Sessions are unavailable.");
-  return reply.result.sessions;
+function defaultSessionsOf(workspaceId: string): Promise<SessionsReply | undefined> {
+  const drogon = (window as unknown as { drogon?: { sessions?: (w?: string) => Promise<SessionsReply> } }).drogon;
+  return drogon?.sessions?.(workspaceId) ?? Promise.resolve(undefined);
 }
 
 // ----------------------------------------------------------------- board --
@@ -874,7 +906,9 @@ function BoardView({
   onIconColumn,
   onCollapseColumn,
   onDeleteTicket,
+  onReorderColumn,
 }: {
+  onReorderColumn: (columnId: string, index: number) => void;
   board: WorkBoard;
   tickets: WorkTicket[];
   selected: Panel;
@@ -919,6 +953,7 @@ function BoardView({
           onRenameColumn={onRenameColumn}
           onIconColumn={onIconColumn}
           onCollapseColumn={onCollapseColumn}
+          onReorderColumn={onReorderColumn}
           onDeleteTicket={onDeleteTicket}
         />
       ))}
@@ -954,6 +989,7 @@ function BoardColumn({
   onIconColumn,
   onCollapseColumn,
   onDeleteTicket,
+  onReorderColumn,
 }: {
   board: WorkBoard;
   column: WorkColumn;
@@ -975,8 +1011,11 @@ function BoardColumn({
   onIconColumn: (column: WorkColumn, icon: string) => void;
   onCollapseColumn: (column: WorkColumn, collapsed: boolean) => void;
   onDeleteTicket: (ticket: WorkTicket) => void;
+  onReorderColumn: (columnId: string, index: number) => void;
 }) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  // A column dragged over this one lands on this side of it.
+  const [columnSide, setColumnSide] = useState<"before" | "after" | null>(null);
   const [renaming, setRenaming] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const trigger = columnTriggerLabel(column);
@@ -990,17 +1029,40 @@ function BoardColumn({
     return at === -1 ? cards.length : at;
   };
 
+  const sideAt = (event: React.DragEvent<HTMLElement>): "before" | "after" => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+  };
+
   const dropHandlers = {
     onDragOver: (event: React.DragEvent<HTMLElement>) => {
+      if (!readOnly && event.dataTransfer.types.includes(COLUMN_MIME)) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setColumnSide(sideAt(event));
+        return;
+      }
       if (readOnly || !event.dataTransfer.types.includes(TICKET_MIME)) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
       setDropIndex(indexAt(event.clientY));
     },
     onDragLeave: (event: React.DragEvent<HTMLElement>) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropIndex(null);
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+        setDropIndex(null);
+        setColumnSide(null);
+      }
     },
     onDrop: (event: React.DragEvent<HTMLElement>) => {
+      const draggedColumn = event.dataTransfer.getData(COLUMN_MIME);
+      if (draggedColumn) {
+        event.preventDefault();
+        setColumnSide(null);
+        const from = board.columns.find((c) => c.id === draggedColumn);
+        const index = from ? columnDropIndex(from.position, column.position, sideAt(event)) : null;
+        if (index !== null) onReorderColumn(draggedColumn, index);
+        return;
+      }
       const ticketId = event.dataTransfer.getData(TICKET_MIME);
       const index = indexAt(event.clientY);
       setDropIndex(null);
@@ -1018,7 +1080,7 @@ function BoardColumn({
   if (column.collapsed) {
     return (
       <section
-        className={`flex w-11 shrink-0 flex-col items-center gap-2 border-r border-border/60 pt-3 last:border-r-0 ${dropIndex !== null ? "bg-accent/30" : ""}`}
+        className={`flex w-11 shrink-0 flex-col items-center gap-2 border-r border-border/60 pt-3 last:border-r-0 ${dropIndex !== null ? "bg-accent/30" : ""} ${columnDropClass(columnSide)}`}
         aria-label={`${column.name} column`}
         data-work-column={column.id}
         data-collapsed="true"
@@ -1043,15 +1105,23 @@ function BoardColumn({
 
   return (
     <section
-      className={`flex w-[272px] shrink-0 flex-col border-r border-border/60 px-2 last:border-r-0 ${dropIndex !== null ? "bg-accent/30" : ""}`}
+      className={`flex w-[272px] shrink-0 flex-col border-r border-border/60 px-2 last:border-r-0 ${dropIndex !== null ? "bg-accent/30" : ""} ${columnDropClass(columnSide)}`}
       aria-label={`${column.name} column`}
       data-work-column={column.id}
       {...dropHandlers}
     >
-      <div className="flex items-start gap-2 px-1 pt-3 pb-2">
+      <div
+        className={`flex items-start gap-2 px-1 pt-3 pb-2 ${readOnly || renaming ? "" : "cursor-grab active:cursor-grabbing"}`}
+        data-testid="work-column-header"
+        draggable={!readOnly && !renaming}
+        onDragStart={(event) => {
+          event.dataTransfer.setData(COLUMN_MIME, column.id);
+          event.dataTransfer.effectAllowed = "move";
+        }}
+      >
         <WorkColumnIcon icon={column.icon} className="mt-0.5 size-5" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2">
             {renaming ? (
               <input
                 aria-label="Column name"
@@ -1069,7 +1139,7 @@ function BoardColumn({
                 }}
               />
             ) : (
-              <h2 className="truncate text-sm font-semibold text-foreground">{column.name}</h2>
+              <h2 className="min-w-0 break-words text-sm font-semibold text-foreground">{column.name}</h2>
             )}
             <span className="rounded-md bg-muted px-1.5 text-xs text-muted-foreground" aria-label={`${tickets.length} tickets`}>
               {tickets.length}
@@ -1103,7 +1173,7 @@ function BoardColumn({
               <DropdownMenuSubContent>
                 {WORK_COLUMN_ICONS.map((icon) => (
                   <DropdownMenuItem key={icon} onSelect={() => onIconColumn(column, icon)}>
-                    <WorkColumnIcon icon={icon} className="size-4" /> {icon.replace("_", " ")}
+                    <WorkColumnIcon icon={icon} className="size-4" /> {workColumnIconLabel(icon)}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuSubContent>
@@ -1699,10 +1769,18 @@ function NewColumnDialog({
   onCreate: (name: string, icon: string) => Promise<string | null>;
 }) {
   const [name, setName] = useState("");
-  const [icon, setIcon] = useState("todo");
+  // The icon follows the name until you pick one yourself.
+  const [picked, setPicked] = useState<string | null>(null);
+  const icon = picked ?? iconForColumnName(name);
   const [error, setError] = useState<string | null>(null);
+  const close = () => {
+    setName("");
+    setPicked(null);
+    setError(null);
+    onClose();
+  };
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+    <Dialog open={open} onOpenChange={(next) => !next && close()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New column</DialogTitle>
@@ -1715,24 +1793,21 @@ function NewColumnDialog({
             event.preventDefault();
             const failure = await onCreate(name.trim(), icon);
             setError(failure);
-            if (!failure) setName("");
+            if (!failure) {
+              setName("");
+              setPicked(null);
+            }
           }}
         >
           <Input aria-label="Column name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          <select aria-label="Column icon" className="h-9 rounded-md border border-input bg-transparent px-2 text-sm" value={icon} onChange={(e) => setIcon(e.target.value)}>
-            {WORK_COLUMN_ICONS.map((i) => (
-              <option key={i} value={i}>
-                {i.replace("_", " ")}
-              </option>
-            ))}
-          </select>
+          <ColumnIconPicker value={icon} onChange={setPicked} />
           {error ? (
             <p className="text-sm text-destructive" role="alert">
               {error}
             </p>
           ) : null}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>
             <Button type="submit" disabled={!name.trim()}>
@@ -1742,5 +1817,61 @@ function NewColumnDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The column icons as the board draws them, one radio each (arrow keys
+ *  move and choose, like any radio group); the name is the tooltip. */
+function ColumnIconPicker({ value, onChange }: { value: string; onChange: (icon: string) => void }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const choose = (index: number) => {
+    const next = (index + WORK_COLUMN_ICONS.length) % WORK_COLUMN_ICONS.length;
+    onChange(WORK_COLUMN_ICONS[next]!);
+    refs.current[next]?.focus();
+  };
+  return (
+    <div className="flex items-center gap-3">
+      <span id="work-new-column-icon" className="text-sm text-muted-foreground">
+        Icon
+      </span>
+      <div role="radiogroup" aria-labelledby="work-new-column-icon" className="flex flex-wrap gap-1">
+        {WORK_COLUMN_ICONS.map((icon, index) => {
+          const selected = icon === value;
+          const label = workColumnIconLabel(icon);
+          return (
+            <Tooltip key={icon}>
+              <TooltipTrigger asChild>
+                <button
+                  ref={(el) => {
+                    refs.current[index] = el;
+                  }}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  aria-label={label}
+                  tabIndex={selected ? 0 : -1}
+                  className={`flex size-8 items-center justify-center rounded-md border ${
+                    selected ? "border-ring bg-accent" : "border-transparent hover:bg-accent/60"
+                  }`}
+                  onClick={() => onChange(icon)}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                      event.preventDefault();
+                      choose(index + 1);
+                    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                      event.preventDefault();
+                      choose(index - 1);
+                    }
+                  }}
+                >
+                  <WorkColumnIcon icon={icon} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{label}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+    </div>
   );
 }

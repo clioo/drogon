@@ -5,7 +5,7 @@
 // ticket's session opens in one click (a live one directly, one that is no
 // longer running through sessionOpen first).
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import type { Result } from "../../../../shared/session-contract";
 import type {
@@ -14,8 +14,9 @@ import type {
   WorkColumn,
   WorkTicket,
 } from "../../../../shared/work-contract";
-import { resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
+import { columnDropIndex, resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
 import { TooltipProvider } from "../../components/ui/tooltip";
+import { toast } from "sonner";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
@@ -235,6 +236,91 @@ describe("Work board", () => {
     );
   });
 
+  test("dragging a column by its header drops it on the side of the column it is released over", async () => {
+    const { bridge } = await mount();
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      setData: (k: string, v: string) => data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+      get types() {
+        return [...data.keys()];
+      },
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    const region = (name: string) => {
+      const el = screen.getByRole("region", { name: `${name} column` });
+      // jsdom lays nothing out: give each column a 200px-wide box.
+      el.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 600, right: 200, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+      return el;
+    };
+    // jsdom's drag events carry no pointer position; set it on the event.
+    const drag = (kind: "dragOver" | "drop", el: HTMLElement, clientX: number) => {
+      const event = createEvent[kind](el, { dataTransfer });
+      Object.defineProperty(event, "clientX", { value: clientX });
+      fireEvent(el, event);
+    };
+    const header = within(region("Review")).getByTestId("work-column-header");
+    expect(header.getAttribute("draggable")).toBe("true");
+    fireEvent.dragStart(header, { dataTransfer });
+    // Over the left half of To do: lands before it.
+    const target = region("To do");
+    drag("dragOver", target, 40);
+    expect(target.className).toContain("inset_2px");
+    drag("dragOver", target, 160);
+    expect(target.className).toContain("inset_-2px");
+    drag("drop", target, 40);
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", index: 0 }));
+    expect(target.className).not.toContain("inset_");
+    // A column is not a ticket: nothing moved.
+    expect(bridge.ticketMove).not.toHaveBeenCalled();
+    // The right half of To do puts it between To do and In progress.
+    fireEvent.dragStart(header, { dataTransfer });
+    drag("drop", region("To do"), 160);
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenLastCalledWith({ columnId: "review", index: 1 }));
+    // Released on its own place, it stays put.
+    bridge.columnUpdate.mockClear();
+    fireEvent.dragStart(header, { dataTransfer });
+    drag("drop", region("Review"), 40);
+    drag("drop", region("In progress"), 160);
+    expect(bridge.columnUpdate).not.toHaveBeenCalled();
+  });
+
+  test("a collapsed column also shows where a dragged column lands", async () => {
+    const board = boardFixture();
+    board.columns = board.columns.map((c) => (c.id === "prog" ? { ...c, collapsed: true } : c));
+    const { bridge } = await mount(fakeBridge(board));
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      setData: (k: string, v: string) => data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+      get types() {
+        return [...data.keys()];
+      },
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    const strip = screen.getByRole("region", { name: "In progress column" });
+    expect(strip.getAttribute("data-collapsed")).toBe("true");
+    strip.getBoundingClientRect = () => ({ left: 0, width: 44, top: 0, height: 600, right: 44, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.dragStart(within(screen.getByRole("region", { name: "Review column" })).getByTestId("work-column-header"), { dataTransfer });
+    const over = createEvent.dragOver(strip, { dataTransfer });
+    Object.defineProperty(over, "clientX", { value: 10 });
+    fireEvent(strip, over);
+    expect(strip.className).toContain("inset_2px");
+    const drop = createEvent.drop(strip, { dataTransfer });
+    Object.defineProperty(drop, "clientX", { value: 10 });
+    fireEvent(strip, drop);
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", index: 1 }));
+  });
+
+  test("a long column name is shown whole, wrapping instead of truncating", async () => {
+    await mount();
+    const title = within(screen.getByRole("region", { name: "Review column" })).getByRole("heading", { name: "Review" });
+    expect(title.className).toContain("break-words");
+    expect(title.className).not.toContain("truncate");
+  });
+
   test("the card menu moves a ticket without dragging", async () => {
     const { bridge } = await mount();
     openMenu(screen.getByRole("button", { name: "DRG-41 actions" }));
@@ -311,6 +397,108 @@ describe("Work board", () => {
     await waitFor(() =>
       expect(onOpenSession).toHaveBeenCalledWith({ workspaceId: "ws-2", sessionId: "resumed-3" }),
     );
+  });
+
+  test("Link a session reads each workspace; one too big to list leaves the others and says so", async () => {
+    const sessions = vi.fn(async (workspaceId?: string) =>
+      workspaceId === "ws-1"
+        ? { ok: false, error: { message: "the reply (1.8 MB) is over the 1 MB limit of one answer; narrow the request" } }
+        : { ok: true, result: { sessions: [{ id: "other-9", workspaceId: "ws-2", harnessId: "claude", verdict: "live", incarnation: "i" }] } },
+    );
+    (window as unknown as { drogon?: unknown }).drogon = { sessions };
+    try {
+      render(
+        <TooltipProvider>
+          <WorkPage
+            bridge={fakeBridge() as unknown as WorkBridge}
+            workspaces={[
+              { id: "ws-1", name: "issue-621" },
+              { id: "ws-2", name: "issue-623" },
+            ]}
+            onOpenSession={vi.fn()}
+            onOpenExternal={vi.fn()}
+          />
+        </TooltipProvider>,
+      );
+      await screen.findByText("Improve Jira resume");
+      fireEvent.click(screen.getByRole("button", { name: "Open DRG-42: Improve Jira resume" }));
+      const panel = await screen.findByRole("complementary", { name: "Ticket DRG-42" });
+      fireEvent.click(within(panel).getByRole("tab", { name: "sessions" }));
+      fireEvent.click(within(panel).getByRole("button", { name: /Link a session/ }));
+      const picker = await within(panel).findByRole("combobox", { name: "Session to link" });
+      // Never one host-wide list: each workspace on its own.
+      expect(sessions.mock.calls.map((c) => c[0]).sort()).toEqual(["ws-1", "ws-2"]);
+      expect(within(picker).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["", "other-9"]);
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Sessions of 1 workspace could not be listed."));
+    } finally {
+      delete (window as unknown as { drogon?: unknown }).drogon;
+    }
+  });
+
+  test("New column picks its icon from the real icons, suggested by the name until you choose", async () => {
+    const { bridge } = await mount();
+    fireEvent.click(screen.getAllByRole("button", { name: "New column" })[0]!);
+    const form = await screen.findByRole("form", { name: "New column" });
+    const icons = within(form).getByRole("radiogroup", { name: "Icon" });
+    const checked = () =>
+      within(icons)
+        .getAllByRole("radio")
+        .filter((r) => r.getAttribute("aria-checked") === "true")
+        .map((r) => r.getAttribute("aria-label"));
+    expect(within(icons).getAllByRole("radio").map((r) => r.getAttribute("aria-label"))).toEqual([
+      "Backlog",
+      "Todo",
+      "In progress",
+      "Review",
+      "Qa",
+      "Done",
+      "Blocked",
+    ]);
+    expect(checked()).toEqual(["Todo"]);
+    const name = within(form).getByRole("textbox", { name: "Column name" });
+    fireEvent.change(name, { target: { value: "Code Review" } });
+    expect(checked()).toEqual(["Review"]);
+    // A choice of yours sticks while the name changes.
+    fireEvent.click(within(icons).getByRole("radio", { name: "Qa" }));
+    fireEvent.change(name, { target: { value: "Code Review 2" } });
+    expect(checked()).toEqual(["Qa"]);
+    // Arrow keys move the choice like any radio group.
+    fireEvent.keyDown(within(icons).getByRole("radio", { name: "Qa" }), { key: "ArrowRight" });
+    expect(checked()).toEqual(["Done"]);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Done");
+    fireEvent.keyDown(within(icons).getByRole("radio", { name: "Backlog" }), { key: "ArrowLeft" });
+    expect(checked()).toEqual(["Blocked"]);
+    fireEvent.click(within(form).getByRole("button", { name: "Add column" }));
+    await waitFor(() =>
+      expect(bridge.columnCreate).toHaveBeenCalledWith(expect.objectContaining({ name: "Code Review 2", icon: "blocked" })),
+    );
+  });
+
+  test("a column's Icon submenu names each icon in words", async () => {
+    const { bridge } = await mount();
+    openMenu(screen.getByRole("button", { name: "Review column actions" }));
+    const sub = await screen.findByRole("menuitem", { name: "Icon" });
+    fireEvent.keyDown(sub, { key: "ArrowRight" });
+    const item = await screen.findByRole("menuitem", { name: "In progress" });
+    expect(screen.getByRole("menuitem", { name: "Blocked" })).toBeTruthy();
+    fireEvent.click(item);
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", icon: "in_progress" }));
+  });
+
+  test("a reopened New column dialog starts empty, its icon following the name again", async () => {
+    await mount();
+    fireEvent.click(screen.getAllByRole("button", { name: "New column" })[0]!);
+    let form = await screen.findByRole("form", { name: "New column" });
+    fireEvent.change(within(form).getByRole("textbox", { name: "Column name" }), { target: { value: "Doing" } });
+    fireEvent.click(within(form).getByRole("radio", { name: "Qa" }));
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("form", { name: "New column" })).toBeNull());
+    fireEvent.click(screen.getAllByRole("button", { name: "New column" })[0]!);
+    form = await screen.findByRole("form", { name: "New column" });
+    const name = within(form).getByRole("textbox", { name: "Column name" }) as HTMLInputElement;
+    expect(name.value).toBe("");
+    fireEvent.change(name, { target: { value: "Done" } });
+    expect(within(form).getByRole("radio", { name: "Done" }).getAttribute("aria-checked")).toBe("true");
   });
 
   test("the ticket panel links a session and edits fields", async () => {
@@ -399,5 +587,21 @@ describe("Work board", () => {
     cleanup();
     await mount().catch(() => {});
     expect(screen.getByRole("tab", { name: "list" }).getAttribute("aria-selected")).toBe("true");
+  });
+});
+
+describe("columnDropIndex", () => {
+  test("lands before or after the target, accounting for the column leaving its place", () => {
+    // Moving right: the column's old place closes up.
+    expect(columnDropIndex(0, 2, "after")).toBe(2);
+    expect(columnDropIndex(0, 2, "before")).toBe(1);
+    // Moving left.
+    expect(columnDropIndex(7, 4, "after")).toBe(5);
+    expect(columnDropIndex(7, 0, "before")).toBe(0);
+    // Its own place, either side of itself or of a neighbour it already touches.
+    expect(columnDropIndex(3, 3, "before")).toBeNull();
+    expect(columnDropIndex(3, 3, "after")).toBeNull();
+    expect(columnDropIndex(3, 2, "after")).toBeNull();
+    expect(columnDropIndex(3, 4, "before")).toBeNull();
   });
 });

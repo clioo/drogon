@@ -229,13 +229,21 @@ fn import_lists_boards_and_brings_only_the_chosen_issues() {
     assert_eq!(names, ["Platform Delivery", "Ops Kanban"]);
     assert_eq!(boards["boards"][0]["kind"], "scrum");
     assert_eq!(boards["boards"][0]["importedBoardId"], Value::Null);
-    // Both boards frame project APP, where you have two open issues
-    // (APP-142 to do, APP-128 in progress); one bounded search asked only
-    // for the project of your unresolved issues.
+    // Your two open issues (APP-142, APP-128) sit in Sprint 25 of board 7:
+    // they are that board's own. Board 9 frames the same project APP but
+    // holds none of them through a sprint, so it only shares the project's.
     assert_eq!(boards["boards"][0]["assignedOpen"], 2);
-    assert_eq!(boards["boards"][1]["assignedOpen"], 2);
-    let search = server
-        .request_log()
+    assert_eq!(boards["boards"][0]["assignedInProject"], 2);
+    assert_eq!(boards["boards"][1]["assignedOpen"], 0);
+    assert_eq!(boards["boards"][1]["assignedInProject"], 2);
+    // One bounded search for your unresolved issues' project and sprint,
+    // after reading where the site keeps its Sprint field.
+    let log = server.request_log();
+    assert!(
+        log.iter()
+            .any(|r| r["path"].as_str().is_some_and(|p| p.ends_with("/field")))
+    );
+    let search = log
         .into_iter()
         .find(|r| {
             r["jql"].as_str().is_some_and(|j| {
@@ -243,7 +251,7 @@ fn import_lists_boards_and_brings_only_the_chosen_issues() {
             })
         })
         .expect("the recommendation search reached Jira");
-    assert_eq!(search["fields"], json!(["project"]));
+    assert_eq!(search["fields"], json!(["project", "customfield_10020"]));
     assert_eq!(search["maxResults"], 100);
 
     let preview = ctx.ok("work.import_preview", json!({"externalBoardId": "7"}));
@@ -1068,7 +1076,7 @@ fn sessions_start_from_a_ticket_and_take_a_name() {
         .ctx
         .err("work.ticket_session_start", json!({"ticketId": "APP-142"}));
     assert!(
-        refused.message.contains("Sessions start in"),
+        refused.message.contains("Agents work in"),
         "{}",
         refused.message
     );

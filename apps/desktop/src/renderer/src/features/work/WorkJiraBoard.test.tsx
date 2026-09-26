@@ -21,7 +21,7 @@ import type {
   WorkView,
 } from "../../../../shared/work-contract";
 import { resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
-import { groupIssues } from "./WorkImportDialog";
+import { defaultChosen, groupIssues } from "./WorkImportDialog";
 import { initials, priorityLevel, sprintDates, syncHeadline } from "./work-sources";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
@@ -436,7 +436,13 @@ describe("Jira boards on the Work page", () => {
     expect(onBoard.hasAttribute("disabled")).toBe(true);
     expect(within(dialog).getByText("On the board")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Import APP-122" }));
-    fireEvent.change(within(dialog).getByRole("combobox", { name: "Drogon project for sessions" }), { target: { value: "p1" } });
+    // The project picker says what it is for.
+    const agentsWorkIn = within(dialog).getByRole("combobox", { name: "Agents work in" });
+    const hint = document.getElementById(agentsWorkIn.getAttribute("aria-describedby") ?? "");
+    expect(hint?.textContent).toBe(
+      "When a ticket starts a session (a column's prompt or New session), it opens in this project's folder.",
+    );
+    fireEvent.change(agentsWorkIn, { target: { value: "p1" } });
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Import 2 issues" }));
     });
@@ -695,6 +701,28 @@ describe("Jira board helpers", () => {
     expect(syncHeadline(jira({ sync: "synced" }))).toBeNull();
   });
 
+  test("the picker starts on the active sprint's issues, or every issue without one", () => {
+    const sprint = (id: string, state: string) => ({ id, name: `S${id}`, state, start: null, end: null, goal: null });
+    const active = sprint("25", "active");
+    const future = sprint("26", "future");
+    const preview = (sprints: ReturnType<typeof sprint>[], issues: ReturnType<typeof issue>[]) => ({
+      provider: "jira",
+      board: { id: "7", name: "P", kind: "scrum" },
+      columns: [],
+      sprints,
+      issues,
+    });
+    const now = issue("APP-1", "now", active, STATUSES.todo);
+    const onBoard = issue("APP-2", "on the board", active, STATUSES.todo, "t2");
+    const next = issue("APP-3", "next", future, STATUSES.todo);
+    const backlog = issue("APP-4", "backlog", null, STATUSES.todo);
+    // Active sprint only; an issue already on the board is not chosen again.
+    expect([...defaultChosen(preview([active, future], [now, onBoard, next, backlog]))]).toEqual(["APP-1"]);
+    // No active sprint (or nothing importable in it): every importable issue.
+    expect([...defaultChosen(preview([future], [next, backlog]))]).toEqual(["APP-3", "APP-4"]);
+    expect([...defaultChosen(preview([active, future], [onBoard, next]))]).toEqual(["APP-3"]);
+  });
+
   test("a kanban preview is one group", () => {
     const groups = groupIssues({
       provider: "jira",
@@ -753,11 +781,11 @@ describe("working on an imported board", () => {
     const bridge = withBoard((b) => ({ ...b, board: { ...b.board!, projectId: null } }));
     await openPlatform(bridge as never);
     const notice = screen.getByTestId("work-board-no-project");
-    expect(notice.textContent).toContain("New sessions on this board need a Drogon project");
-    fireEvent.change(within(notice).getByRole("combobox", { name: "Sessions start in" }), { target: { value: "p1" } });
+    expect(notice.textContent).toContain("Agents on this board need a Drogon project to work in");
+    fireEvent.change(within(notice).getByRole("combobox", { name: "Agents work in" }), { target: { value: "p1" } });
     await waitFor(() => expect(bridge.boardUpdate).toHaveBeenCalledWith({ boardId: "b7", projectId: "p1" }));
     openMenu(screen.getByRole("button", { name: "Sync options" }));
-    const sub = await screen.findByRole("menuitem", { name: "Sessions start in" });
+    const sub = await screen.findByRole("menuitem", { name: "Agents work in" });
     fireEvent.keyDown(sub, { key: "ArrowRight" });
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "No project" }));
     await waitFor(() => expect(bridge.boardUpdate).toHaveBeenLastCalledWith({ boardId: "b7", projectId: null }));

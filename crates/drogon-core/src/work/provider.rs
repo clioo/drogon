@@ -41,6 +41,15 @@ pub(crate) struct ExtBoard {
     pub project_name: Option<String>,
 }
 
+/// Your open assigned issues as they touch one board: the ones on it (in
+/// its open sprints, or the whole team for Linear) and, for a Jira board,
+/// the ones in its project — shared by every board that project has.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct AssignedOpen {
+    pub on_board: u32,
+    pub in_project: u32,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExtStatus {
@@ -135,11 +144,14 @@ pub(crate) trait WorkProvider {
         Vec::new()
     }
     fn board(&self, board_id: &str) -> ProviderResult<ExtBoard>;
-    /// How many open issues assigned to the connected account each of
-    /// `boards` holds, keyed by board id (boards with none are absent), from
-    /// one bounded query. It only ranks the board picker, so a source
-    /// without the notion answers empty.
-    fn assigned_open_counts(&self, _boards: &[ExtBoard]) -> ProviderResult<HashMap<String, u32>> {
+    /// The connected account's open assigned issues as they touch each of
+    /// `boards`, keyed by board id (boards with none are absent), from one
+    /// bounded query. It only ranks the board picker, so a source without
+    /// the notion answers empty.
+    fn assigned_open_counts(
+        &self,
+        _boards: &[ExtBoard],
+    ) -> ProviderResult<HashMap<String, AssignedOpen>> {
         Ok(HashMap::new())
     }
     fn board_columns(&self, board_id: &str) -> ProviderResult<Vec<ExtColumn>>;
@@ -256,6 +268,18 @@ impl<'a> JiraProvider<'a> {
         Ok(out)
     }
 
+    /// The site's Sprint custom field (`customfield_10020` on most Cloud
+    /// sites, but it varies); `None` when it cannot be read.
+    fn sprint_field_id(&self) -> Option<String> {
+        let raw = self.get(&format!("{}/field", self.api())).ok()?;
+        raw.as_array()?.iter().find_map(|field| {
+            (field.pointer("/schema/custom").and_then(Value::as_str)
+                == Some("com.pyxis.greenhopper.jira:gh-sprint"))
+            .then(|| field.get("id").and_then(Value::as_str).map(str::to_owned))
+            .flatten()
+        })
+    }
+
     fn statuses(&self) -> ProviderResult<Vec<ExtStatus>> {
         let raw = self.get(&format!("{}/status", self.api()))?;
         Ok(raw
@@ -333,9 +357,60 @@ impl<'a> JiraProvider<'a> {
     }
 }
 
-/// Open issues per project key in a Jira search reply.
-fn jira_project_counts(raw: &Value) -> HashMap<String, u32> {
-    let mut counts = HashMap::new();
+/// The boards an issue's Sprint field puts it on, open sprints only (an
+/// open issue in a closed sprint was carried over; that board is history).
+/// Cloud returns sprint objects; Server/DC GreenHopper's string form
+/// (`…Sprint@1a[id=25,rapidViewId=7,state=ACTIVE,…]`).
+fn sprint_boards(value: Option<&Value>) -> Vec<String> {
+    let mut boards: Vec<String> = Vec::new();
+    for sprint in value.and_then(Value::as_array).into_iter().flatten() {
+        let (board, state) = match sprint {
+            Value::Object(_) => (
+                match sprint
+                    .get("boardId")
+                    .or_else(|| sprint.get("originBoardId"))
+                {
+                    Some(Value::Number(n)) => Some(n.to_string()),
+                    Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+                    _ => None,
+                },
+                sprint
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .map(str::to_lowercase),
+            ),
+            Value::String(text) => {
+                let attr = |name: &str| {
+                    let start = text.find(&format!("{name}="))? + name.len() + 1;
+                    let rest = &text[start..];
+                    Some(rest[..rest.find([',', ']']).unwrap_or(rest.len())].to_string())
+                };
+                (
+                    attr("rapidViewId").filter(|b| !b.is_empty() && b != "<null>"),
+                    attr("state").map(|s| s.to_lowercase()),
+                )
+            }
+            _ => (None, None),
+        };
+        if let Some(board) = board
+            && state.as_deref() != Some("closed")
+            && !boards.contains(&board)
+        {
+            boards.push(board);
+        }
+    }
+    boards
+}
+
+/// Spreads a Jira search reply of your open issues onto `boards`: each
+/// board's own (through open sprints) and its project's.
+fn jira_assigned_by_board(
+    boards: &[ExtBoard],
+    raw: &Value,
+    sprint_field: Option<&str>,
+) -> HashMap<String, AssignedOpen> {
+    let mut by_project: HashMap<String, u32> = HashMap::new();
+    let mut by_board: HashMap<String, u32> = HashMap::new();
     for issue in raw
         .get("issues")
         .and_then(Value::as_array)
@@ -347,24 +422,27 @@ fn jira_project_counts(raw: &Value) -> HashMap<String, u32> {
             .and_then(Value::as_str)
             .filter(|k| !k.is_empty())
         {
-            *counts.entry(key.to_string()).or_insert(0) += 1;
+            *by_project.entry(key.to_string()).or_insert(0) += 1;
+        }
+        if let Some(field) = sprint_field {
+            for board in sprint_boards(issue.get("fields").and_then(|f| f.get(field))) {
+                *by_board.entry(board).or_insert(0) += 1;
+            }
         }
     }
-    counts
-}
-
-/// Spreads per-key counts onto the boards that carry that key (several
-/// boards can frame the same project), keyed by board id.
-pub(crate) fn counts_by_board<'b>(
-    boards: &'b [ExtBoard],
-    counts: &HashMap<String, u32>,
-    key_of: impl Fn(&'b ExtBoard) -> Option<&'b str>,
-) -> HashMap<String, u32> {
     boards
         .iter()
         .filter_map(|board| {
-            let count = *counts.get(key_of(board)?)?;
-            (count > 0).then(|| (board.id.clone(), count))
+            let counts = AssignedOpen {
+                on_board: by_board.get(&board.id).copied().unwrap_or(0),
+                in_project: board
+                    .project_key
+                    .as_deref()
+                    .and_then(|key| by_project.get(key))
+                    .copied()
+                    .unwrap_or(0),
+            };
+            (counts != AssignedOpen::default()).then(|| (board.id.clone(), counts))
         })
         .collect()
 }
@@ -420,7 +498,15 @@ impl WorkProvider for JiraProvider<'_> {
             .collect())
     }
 
-    fn assigned_open_counts(&self, boards: &[ExtBoard]) -> ProviderResult<HashMap<String, u32>> {
+    fn assigned_open_counts(
+        &self,
+        boards: &[ExtBoard],
+    ) -> ProviderResult<HashMap<String, AssignedOpen>> {
+        // A board's own share comes from the sprints your issues are in; the
+        // site names its Sprint field, so look it up (none: projects only).
+        let sprint_field = self.sprint_field_id();
+        let mut fields = vec!["project".to_string()];
+        fields.extend(sprint_field.clone());
         // Server/DC only has the classic `/search`; `/search/jql` is Cloud's.
         let path = match self.client.site.auth_type {
             JiraAuthType::Server => format!("{}/search", self.api()),
@@ -429,14 +515,16 @@ impl WorkProvider for JiraProvider<'_> {
         let body = json!({
             "jql": ASSIGNED_OPEN_JQL,
             "maxResults": ASSIGNED_OPEN_LIMIT,
-            "fields": ["project"],
+            "fields": fields,
         });
         let raw = self
             .call("POST", &path, Some(body))
             .map_err(|e| jira_error(&e))?;
-        Ok(counts_by_board(boards, &jira_project_counts(&raw), |b| {
-            b.project_key.as_deref()
-        }))
+        Ok(jira_assigned_by_board(
+            boards,
+            &raw,
+            sprint_field.as_deref(),
+        ))
     }
 
     fn board(&self, board_id: &str) -> ProviderResult<ExtBoard> {
@@ -658,32 +746,74 @@ mod tests {
     }
 
     #[test]
-    fn assigned_issues_count_per_project_and_spread_onto_its_boards() {
-        let reply = json!({"issues": [
-            {"key": "APP-1", "fields": {"project": {"key": "APP"}}},
-            {"key": "APP-2", "fields": {"project": {"key": "APP"}}},
-            {"key": "OPS-1", "fields": {"project": {"key": "OPS"}}},
-            {"key": "X-1", "fields": {}},
-            {"key": "Y-1", "fields": {"project": {"key": ""}}}
-        ]});
-        let counts = jira_project_counts(&reply);
-        assert_eq!(counts.len(), 2);
-        assert_eq!(counts["APP"], 2);
-        assert_eq!(counts["OPS"], 1);
-        assert!(jira_project_counts(&json!({})).is_empty());
+    fn sprint_boards_read_cloud_objects_and_server_strings_open_sprints_only() {
+        let cloud = json!([
+            {"id": 24, "state": "closed", "boardId": 7},
+            {"id": 25, "state": "active", "boardId": 7},
+            {"id": 40, "state": "future", "boardId": 12},
+            {"id": 41, "state": "active", "boardId": 12},
+            {"id": 42, "state": "active"}
+        ]);
+        assert_eq!(sprint_boards(Some(&cloud)), ["7", "12"]);
+        let server = json!([
+            "com.atlassian.greenhopper.service.sprint.Sprint@1a[id=24,rapidViewId=7,state=CLOSED,name=S24]",
+            "com.atlassian.greenhopper.service.sprint.Sprint@1b[id=25,rapidViewId=9,state=ACTIVE,name=S25]",
+            "com.atlassian.greenhopper.service.sprint.Sprint@1c[id=26,rapidViewId=<null>,state=FUTURE]"
+        ]);
+        assert_eq!(sprint_boards(Some(&server)), ["9"]);
+        assert!(sprint_boards(None).is_empty());
+        assert!(sprint_boards(Some(&Value::Null)).is_empty());
+    }
 
+    #[test]
+    fn assigned_issues_split_into_each_boards_own_and_its_projects() {
+        let reply = json!({"issues": [
+            {"key": "FT-1", "fields": {"project": {"key": "FT"}, "cf": [{"state": "active", "boardId": 7}]}},
+            {"key": "FT-2", "fields": {"project": {"key": "FT"}, "cf": [{"state": "active", "boardId": 7}]}},
+            {"key": "FT-3", "fields": {"project": {"key": "FT"}, "cf": null}},
+            {"key": "OPS-1", "fields": {"project": {"key": "OPS"}}},
+            {"key": "X-1", "fields": {}}
+        ]});
         let boards = [
-            board("7", Some("APP")),
-            board("9", Some("APP")),
-            board("11", Some("ZZZ")),
-            board("12", None),
+            board("7", Some("FT")),
+            board("8", Some("FT")),
+            board("20", Some("OPS")),
+            board("30", Some("ZZZ")),
+            board("31", None),
         ];
-        let by_board = counts_by_board(&boards, &counts, |b| b.project_key.as_deref());
-        assert_eq!(by_board.len(), 2);
-        assert_eq!(by_board["7"], 2);
-        assert_eq!(by_board["9"], 2);
-        let zero = HashMap::from([("APP".to_string(), 0)]);
-        assert!(counts_by_board(&boards, &zero, |b| b.project_key.as_deref()).is_empty());
+        let counts = jira_assigned_by_board(&boards, &reply, Some("cf"));
+        assert_eq!(counts.len(), 3);
+        assert_eq!(
+            counts["7"],
+            AssignedOpen {
+                on_board: 2,
+                in_project: 3
+            }
+        );
+        assert_eq!(
+            counts["8"],
+            AssignedOpen {
+                on_board: 0,
+                in_project: 3
+            }
+        );
+        assert_eq!(
+            counts["20"],
+            AssignedOpen {
+                on_board: 0,
+                in_project: 1
+            }
+        );
+        // Without a known Sprint field only the projects count.
+        let projects_only = jira_assigned_by_board(&boards, &reply, None);
+        assert_eq!(
+            projects_only["7"],
+            AssignedOpen {
+                on_board: 0,
+                in_project: 3
+            }
+        );
+        assert!(jira_assigned_by_board(&boards, &json!({}), Some("cf")).is_empty());
     }
 
     #[test]

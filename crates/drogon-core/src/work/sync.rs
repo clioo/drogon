@@ -1279,7 +1279,9 @@ impl Engine {
                         .find(|i| i.provider == provider.kind() && i.external_id == b.id)
                         .map(|i| i.id.clone())
                 );
-                row["assignedOpen"] = json!(assigned.get(&b.id).copied().unwrap_or(0));
+                let counts = assigned.get(&b.id).copied().unwrap_or_default();
+                row["assignedOpen"] = json!(counts.on_board);
+                row["assignedInProject"] = json!(counts.in_project);
                 row
             })
             .collect();
@@ -2194,7 +2196,7 @@ impl Engine {
         };
         let workspace = self.ticket_workspace(&ticket)?.ok_or_else(|| {
             error::invalid_argument(format!(
-                "{} has no workspace or project to start a session in: choose where the board's sessions start (Sync menu → Sessions start in, or `drogon-cli work import settings --project`), or set the ticket's project",
+                "{} has no workspace or project to start a session in: choose where the board's agents work (Sync menu → Agents work in, or `drogon-cli work import settings --project`), or set the ticket's project",
                 ticket.key
             ))
         })?;

@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 
 use super::provider::{
-    ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope, ProviderError,
-    ProviderResult, WorkProvider, counts_by_board,
+    AssignedOpen, ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope,
+    ProviderError, ProviderResult, WorkProvider,
 };
 use crate::jira::client::{HttpRequest, JiraRequestError, REQUEST_TIMEOUT, http_json};
 
@@ -279,13 +279,29 @@ impl WorkProvider for LinearProvider {
             .collect())
     }
 
-    fn assigned_open_counts(&self, boards: &[ExtBoard]) -> ProviderResult<HashMap<String, u32>> {
+    fn assigned_open_counts(
+        &self,
+        boards: &[ExtBoard],
+    ) -> ProviderResult<HashMap<String, AssignedOpen>> {
         let data = self.gql(
             "query DrogonLinearAssigned { viewer { assignedIssues(first: 100, filter: { state: { type: { nin: [\"completed\", \"canceled\"] } } }) { nodes { team { id } } } } }",
             json!({}),
         )?;
+        // A Linear board is its team: every open issue there is on it.
         let teams = team_counts(&data);
-        Ok(counts_by_board(boards, &teams, |b| Some(b.id.as_str())))
+        Ok(boards
+            .iter()
+            .filter_map(|b| {
+                let on_board = *teams.get(&b.id)?;
+                Some((
+                    b.id.clone(),
+                    AssignedOpen {
+                        on_board,
+                        in_project: 0,
+                    },
+                ))
+            })
+            .collect())
     }
 
     fn board(&self, board_id: &str) -> ProviderResult<ExtBoard> {

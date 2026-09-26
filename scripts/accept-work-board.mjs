@@ -483,7 +483,7 @@ try {
   await importDialog.getByRole("checkbox", { name: "Import APP-130" }).waitFor();
   await importDialog.getByRole("checkbox", { name: "All of Sprint 25 · Active" }).click();
   await importDialog.getByRole("checkbox", { name: "Import APP-122" }).click();
-  await importDialog.getByRole("combobox", { name: "Drogon project for sessions" }).selectOption({ label: "Drogon" });
+  await importDialog.getByRole("combobox", { name: "Agents work in" }).selectOption({ label: "Drogon" });
   await shot("jira-import-issues");
   await importDialog.getByRole("button", { name: "Import 7 issues" }).click();
   await importDialog.waitFor({ state: "detached" });
@@ -654,7 +654,7 @@ try {
   await page.getByRole("region", { name: "Canceled column" }).getByRole("button", { name: "Expand Canceled column" }).waitFor();
   const linearBoard = (await cli(["work", "boards"])).boards.find((b) => b.provider === "linear");
   if (!linearBoard.projectId) {
-    await page.getByTestId("work-board-no-project").getByRole("combobox", { name: "Sessions start in" }).selectOption({ label: "Drogon" });
+    await page.getByTestId("work-board-no-project").getByRole("combobox", { name: "Agents work in" }).selectOption({ label: "Drogon" });
     await waitFor("board project", async () => Boolean((await cli(["work", "boards"])).boards.find((b) => b.provider === "linear").projectId));
   }
   await page.getByRole("button", { name: "In Review column actions" }).click();

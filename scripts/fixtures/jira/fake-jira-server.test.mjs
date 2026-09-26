@@ -72,3 +72,53 @@ test('still serves its default dataset from a path with no space', async (t) => 
   const viewer = await myself(port);
   assert.ok(viewer.accountId, `the default dataset loaded: ${JSON.stringify(viewer)}`);
 });
+
+// The board picker's recommendation query: the field catalog names the
+// Sprint field, and the platform search returns it per issue — objects with
+// the board id on Cloud (v3), GreenHopper's string form on Server/DC (v2).
+async function listenOn(t, data) {
+  const child = spawn(process.execPath, [path.join(here, 'fake-jira-server.mjs'), '--port', '0', '--data', data], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => {
+    child.kill('SIGKILL');
+    return new Promise((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.on('close', resolve)));
+  });
+  for await (const line of readline.createInterface({ input: child.stdout })) {
+    const port = /^LISTEN (\d+)$/.exec(line.trim())?.[1];
+    if (port) return Number(port);
+  }
+  throw new Error('fixture never printed LISTEN');
+}
+
+async function call(port, method, pathname, body) {
+  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, {
+    method,
+    headers: { authorization: 'Bearer fixture-token', 'content-type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  assert.equal(response.status, 200);
+  return response.json();
+}
+
+test('names its Sprint field and returns it in the v3 and v2 search shapes', async (t) => {
+  const port = await listenOn(t, path.join(here, 'data', 'agile-site.json'));
+  for (const api of ['2', '3']) {
+    const fields = await call(port, 'GET', `/rest/api/${api}/field`);
+    const sprint = fields.find((f) => f.schema?.custom === 'com.pyxis.greenhopper.jira:gh-sprint');
+    assert.equal(sprint.id, 'customfield_10020');
+  }
+  const jql = 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC';
+  const v3 = await call(port, 'POST', '/rest/api/3/search/jql', { jql, maxResults: 100, fields: ['project', 'customfield_10020'] });
+  const byKey = Object.fromEntries(v3.issues.map((i) => [i.key, i.fields]));
+  assert.deepEqual(Object.keys(byKey).sort(), ['APP-128', 'APP-142']);
+  assert.deepEqual(byKey['APP-142'].customfield_10020, [{ id: 25, name: 'Sprint 25', state: 'active', boardId: 7 }]);
+  assert.equal(byKey['APP-142'].project.key, 'APP');
+  const v2 = await call(port, 'POST', '/rest/api/2/search', { jql, maxResults: 100, fields: ['project', 'customfield_10020'] });
+  assert.match(v2.issues[0].fields.customfield_10020[0], /\[id=25,rapidViewId=7,state=ACTIVE,name=Sprint 25\]$/);
+  // An issue in no sprint reads null; a search that does not ask gets nothing.
+  const all = await call(port, 'POST', '/rest/api/3/search/jql', { jql: 'project = APP', maxResults: 100, fields: ['customfield_10020'] });
+  assert.equal(all.issues.find((i) => i.key === 'APP-150').fields.customfield_10020, null);
+  const plain = await call(port, 'POST', '/rest/api/3/search/jql', { jql, maxResults: 100, fields: ['project'] });
+  assert.ok(plain.issues.every((i) => !('customfield_10020' in i.fields)));
+});

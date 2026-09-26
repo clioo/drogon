@@ -338,6 +338,14 @@ fn linear_connects_with_an_api_key_and_round_trips_a_team() {
         .map(|b| b["assignedOpen"].as_u64().unwrap())
         .collect();
     assert_eq!(assigned, [1, 1]);
+    // A Linear board is its team: nothing is only shared through a project.
+    assert!(
+        boards["boards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|b| b["assignedInProject"] == 0)
+    );
 
     let preview = ctx.ok(
         "work.import_preview",
@@ -604,7 +612,7 @@ fn a_github_project_round_trips_status_iterations_and_removal() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|b| b["assignedOpen"] == 0)
+            .all(|b| b["assignedOpen"] == 0 && b["assignedInProject"] == 0)
     );
 
     let preview = ctx.ok(
