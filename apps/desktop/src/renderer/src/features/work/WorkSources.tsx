@@ -98,8 +98,7 @@ export function WorkSourceConnectForm({
   bridge: WorkBridge;
   onConnected: (source: WorkSource) => void;
   onOpenExternal: (url: string) => void;
-  /** Opens the Tasks page on this source's connect flow. */
-  onOpenTasks?: (sourceId: string) => void;
+  onOpenTasks?: () => void;
 }) {
   const [key, setKey] = useState("");
   const [apiUrl, setApiUrl] = useState(source.apiUrl ?? "");
@@ -132,7 +131,7 @@ export function WorkSourceConnectForm({
           Work uses the {source.name} connection from the Tasks page.
         </p>
         {onOpenTasks ? (
-          <Button variant="outline" size="sm" onClick={() => onOpenTasks(source.id)}>
+          <Button variant="outline" size="sm" onClick={onOpenTasks}>
             Connect {source.name} on the Tasks page
           </Button>
         ) : null}
@@ -228,8 +227,7 @@ export function WorkSourcesPanel({
   state: WorkSourcesState;
   bridge: WorkBridge;
   onOpenExternal: (url: string) => void;
-  /** Opens the Tasks page on this source's connect flow. */
-  onOpenTasks?: (sourceId: string) => void;
+  onOpenTasks?: () => void;
   onNotice: (message: string, kind?: "error" | "success") => void;
 }) {
   const [connecting, setConnecting] = useState<string | null>(null);
@@ -291,7 +289,7 @@ export function WorkSourcesPanel({
                   </Button>
                 )
               ) : source.enabled && !source.connected && onOpenTasks ? (
-                <Button variant="outline" size="sm" onClick={() => onOpenTasks(source.id)}>
+                <Button variant="outline" size="sm" onClick={onOpenTasks}>
                   Connect
                 </Button>
               ) : null}

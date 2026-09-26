@@ -202,13 +202,14 @@ export function WorkPage({
   // Connecting through Tasks leaves this page mounted but hidden, so the
   // import dialog (a portal) must close first or it covers the Tasks page;
   // Tasks then opens on the source with its connect dialog up.
-  const openTasksToConnect = onOpenTasks
-    ? (sourceId: string) => {
-        setImporting(null);
-        if (isTaskSource(sourceId)) requestTaskSourceConnect(sourceId);
-        onOpenTasks();
-      }
-    : undefined;
+  const openTasksToConnect = (sourceId: string | undefined) => {
+    setImporting(null);
+    if (sourceId && isTaskSource(sourceId)) requestTaskSourceConnect(sourceId);
+    onOpenTasks?.();
+  };
+  // The Sources tab's Tasks-page "Connect" belongs to the source that
+  // connects through Tasks (Jira).
+  const tasksConnectSourceId = sourcesState.sources.find((s) => s.connect === "tasks")?.id;
   const allowed = allowedSources(sourcesState.sources);
   const [cardDismissed, dismissCard, restoreCard] = useSyncCardDismissed();
   const [syncing, setSyncing] = useState(false);
@@ -749,7 +750,7 @@ export function WorkPage({
                     state={sourcesState}
                     bridge={bridge}
                     onOpenExternal={onOpenExternal}
-                    onOpenTasks={openTasksToConnect}
+                    onOpenTasks={onOpenTasks ? () => openTasksToConnect(tasksConnectSourceId) : undefined}
                     onNotice={notice}
                   />
                 ) : null
@@ -830,7 +831,7 @@ export function WorkPage({
           initialBoard={importing.board ?? null}
           onClose={() => setImporting(null)}
           onOpenExternal={onOpenExternal}
-          onOpenTasks={openTasksToConnect}
+          onOpenTasks={onOpenTasks ? () => openTasksToConnect(importing.source.id) : undefined}
           onSourceChanged={() => void sourcesState.reload()}
           onImported={(imported, count) => {
             setImporting(null);

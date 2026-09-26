@@ -85,7 +85,7 @@ export function WorkImportDialog({
   onClose: () => void;
   onImported: (board: WorkBoardSummary, imported: number) => void;
   onOpenExternal: (url: string) => void;
-  onOpenTasks?: (sourceId: string) => void;
+  onOpenTasks?: () => void;
   /** A connection made from the dialog: the page reloads its sources. */
   onSourceChanged?: () => void;
 }) {

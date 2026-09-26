@@ -72,6 +72,16 @@ describe("requestTaskSourceConnect", () => {
     expect(consumePendingTaskSourceConnect()).toBeNull();
   });
 
+  test("the test reset drops a parked intent and its listeners", () => {
+    const connect = vi.fn();
+    subscribeTaskSourceConnect(connect);
+    requestTaskSourceConnect("jira");
+    resetTaskSourceNavigation();
+    expect(consumePendingTaskSourceConnect()).toBeNull();
+    requestTaskSourceConnect("jira");
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
   test("a plain navigation carries no connect intent", () => {
     requestTaskSourceNavigation("jira");
     expect(consumePendingTaskSourceConnect()).toBeNull();
