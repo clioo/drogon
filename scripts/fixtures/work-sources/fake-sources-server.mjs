@@ -110,6 +110,15 @@ function linearGraphql(op, v) {
       return { data: { viewer: { id: linear.viewer.id } } }
     case 'DrogonLinearViewer':
       return { data: { viewer: linear.viewer, organization: linear.organization } }
+    case 'DrogonLinearAssigned': {
+      // The viewer's open issues (not completed or canceled), with their team.
+      const open = linear.issues.filter((i) => {
+        if (i.deleted || i.assignee !== linear.viewer.name) return false
+        const state = linearTeam(i.team).states.find((s) => s.id === i.state)
+        return !['completed', 'canceled'].includes(state?.type)
+      })
+      return { data: { viewer: { assignedIssues: { nodes: open.map((i) => ({ team: { id: i.team } })) } } } }
+    }
     case 'DrogonLinearTeams':
       return { data: { teams: { nodes: linear.teams.map(({ id, key, name, cyclesEnabled }) => ({ id, key, name, cyclesEnabled })) } } }
     case 'DrogonLinearTeam': {

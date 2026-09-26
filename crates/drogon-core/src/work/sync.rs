@@ -1263,6 +1263,8 @@ impl Engine {
         reject_unknown(params, &["provider", "siteId"])?;
         let provider = self.provider_param(params)?;
         let boards = provider.list_boards().map_err(provider_error)?;
+        // Only a ranking hint: a failed lookup lists the boards as before.
+        let assigned = provider.assigned_open_counts(&boards).unwrap_or_default();
         let imported = {
             let conn = self.db.lock().unwrap();
             list_boards(&conn)?
@@ -1277,6 +1279,7 @@ impl Engine {
                         .find(|i| i.provider == provider.kind() && i.external_id == b.id)
                         .map(|i| i.id.clone())
                 );
+                row["assignedOpen"] = json!(assigned.get(&b.id).copied().unwrap_or(0));
                 row
             })
             .collect();

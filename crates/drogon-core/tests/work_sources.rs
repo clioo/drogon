@@ -329,6 +329,15 @@ fn linear_connects_with_an_api_key_and_round_trips_a_team() {
         .map(|b| (b["name"].as_str().unwrap(), b["kind"].as_str().unwrap()))
         .collect();
     assert_eq!(teams, [("Engineering", "scrum"), ("Operations", "kanban")]);
+    // Recommendations: your open issues per team (ENG-1 in review, OPS-1
+    // in progress; the done and unassigned ones do not count).
+    let assigned: Vec<u64> = boards["boards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["assignedOpen"].as_u64().unwrap())
+        .collect();
+    assert_eq!(assigned, [1, 1]);
 
     let preview = ctx.ok(
         "work.import_preview",
@@ -588,6 +597,14 @@ fn a_github_project_round_trips_status_iterations_and_removal() {
             ("repo:clioo/drogon", "kanban"),
             ("repo:octo-fixture/notes", "kanban"),
         ]
+    );
+    // GitHub has no recommendations yet: every board reads zero.
+    assert!(
+        boards["boards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|b| b["assignedOpen"] == 0)
     );
 
     let preview = ctx.ok(
