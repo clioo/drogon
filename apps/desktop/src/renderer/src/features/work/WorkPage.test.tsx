@@ -389,6 +389,17 @@ describe("Work board", () => {
     );
   });
 
+  test("a column's Icon submenu names each icon in words", async () => {
+    const { bridge } = await mount();
+    openMenu(screen.getByRole("button", { name: "Review column actions" }));
+    const sub = await screen.findByRole("menuitem", { name: "Icon" });
+    fireEvent.keyDown(sub, { key: "ArrowRight" });
+    const item = await screen.findByRole("menuitem", { name: "In progress" });
+    expect(screen.getByRole("menuitem", { name: "Blocked" })).toBeTruthy();
+    fireEvent.click(item);
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", icon: "in_progress" }));
+  });
+
   test("a reopened New column dialog starts empty, its icon following the name again", async () => {
     await mount();
     fireEvent.click(screen.getAllByRole("button", { name: "New column" })[0]!);
