@@ -1076,7 +1076,7 @@ fn sessions_start_from_a_ticket_and_take_a_name() {
         .ctx
         .err("work.ticket_session_start", json!({"ticketId": "APP-142"}));
     assert!(
-        refused.message.contains("Sessions start in"),
+        refused.message.contains("Agents work in"),
         "{}",
         refused.message
     );

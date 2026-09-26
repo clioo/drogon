@@ -2196,7 +2196,7 @@ impl Engine {
         };
         let workspace = self.ticket_workspace(&ticket)?.ok_or_else(|| {
             error::invalid_argument(format!(
-                "{} has no workspace or project to start a session in: choose where the board's sessions start (Sync menu → Sessions start in, or `drogon-cli work import settings --project`), or set the ticket's project",
+                "{} has no workspace or project to start a session in: choose where the board's agents work (Sync menu → Agents work in, or `drogon-cli work import settings --project`), or set the ticket's project",
                 ticket.key
             ))
         })?;

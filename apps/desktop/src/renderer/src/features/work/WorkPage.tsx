@@ -436,7 +436,7 @@ export function WorkPage({
                         Import new issues assigned to me
                       </DropdownMenuCheckboxItem>
                       <DropdownMenuSub>
-                        <DropdownMenuSubTrigger>Sessions start in</DropdownMenuSubTrigger>
+                        <DropdownMenuSubTrigger>Agents work in</DropdownMenuSubTrigger>
                         <DropdownMenuSubContent>
                           <DropdownMenuRadioGroup
                             value={summary.projectId ?? ""}
@@ -621,9 +621,9 @@ export function WorkPage({
                 role="status"
                 data-testid="work-board-no-project"
               >
-                New sessions on this board need a Drogon project to start in.
+                Agents on this board need a Drogon project to work in.
                 <select
-                  aria-label="Sessions start in"
+                  aria-label="Agents work in"
                   className="h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground"
                   value=""
                   onChange={(event) => event.target.value && void setBoardProject(event.target.value)}

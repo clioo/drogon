@@ -42,6 +42,17 @@ import { boardsTerm, WorkSourceConnectForm } from "./WorkSources";
 
 type Group = { id: string; label: string; issues: WorkProviderIssue[] };
 
+/** What the picker chooses when a board's issues first load: the active
+ *  sprint's (what you are working on now), or every listed issue when the
+ *  board has no active sprint with anything to import. Issues already on
+ *  the board are never chosen again. */
+export function defaultChosen(preview: WorkImportPreview): Set<string> {
+  const importable = (issues: WorkProviderIssue[]) => issues.filter((i) => !i.importedTicketId).map((i) => i.key);
+  const active = new Set(preview.sprints.filter((s) => s.state === "active").map((s) => s.id));
+  const inActive = importable(preview.issues.filter((i) => i.sprint && active.has(i.sprint.id)));
+  return new Set(inActive.length > 0 ? inActive : importable(preview.issues));
+}
+
 /** Issues grouped the way a scrum board reads: active sprint, upcoming
  *  sprints, backlog, then what already finished in a past sprint. */
 export function groupIssues(preview: WorkImportPreview, sprintTerm = "sprint"): Group[] {
@@ -175,7 +186,7 @@ export function WorkImportDialog({
       setPreview(answer);
       if (seeded.current !== external) {
         seeded.current = external;
-        setChosen(new Set(answer.issues.filter((i) => !i.importedTicketId).map((i) => i.key)));
+        setChosen(defaultChosen(answer));
       }
     });
     return () => {
@@ -230,7 +241,7 @@ export function WorkImportDialog({
           </DialogTitle>
           <DialogDescription>
             {preview
-              ? `Yours are chosen; filter to add others. Each keeps its ${source.name} key, and its column's prompts reach the sessions you link to it.`
+              ? `Yours in the active ${source.sprintTerm} are chosen; pick more or filter to add others. Each keeps its ${source.name} key, and its column's prompts reach the sessions you link to it.`
               : needsConnect
                 ? `Connect ${source.name} to see its ${boardsTerm(source)}.`
                 : `Pick the ${source.name} ${source.boardTerm} that frames the import: its columns and ${source.sprintTerm}s come with it.`}
@@ -399,22 +410,28 @@ export function WorkImportDialog({
               />
               Keep importing new issues assigned to me on every sync
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Sessions start in</span>
-              <select
-                aria-label="Drogon project for sessions"
-                className="h-8 flex-1 rounded-md border border-input bg-transparent px-2 text-sm"
-                value={projectId}
-                onChange={(event) => setProjectId(event.target.value)}
-              >
-                <option value="">Choose per ticket later</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="space-y-1">
+              <label className="flex items-center gap-2 text-sm">
+                <span className="shrink-0 text-muted-foreground">Agents work in</span>
+                <select
+                  aria-label="Agents work in"
+                  aria-describedby="work-import-agents-work-in-hint"
+                  className="h-8 flex-1 rounded-md border border-input bg-transparent px-2 text-sm"
+                  value={projectId}
+                  onChange={(event) => setProjectId(event.target.value)}
+                >
+                  <option value="">Choose per ticket later</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p id="work-import-agents-work-in-hint" className="text-xs text-muted-foreground">
+                When a ticket starts a session (a column&apos;s prompt or New session), it opens in this project&apos;s folder.
+              </p>
+            </div>
           </div>
         ) : null}
 
