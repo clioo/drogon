@@ -15,6 +15,21 @@ export type PickerBoard = WorkProviderBoard & {
 /** Recommendations shown before "Show all". */
 export const RECOMMENDED_LIMIT = 5;
 
+/** The recommendations to render: the first `RECOMMENDED_LIMIT` until
+ *  expanded; a filter always shows every match. `hidden` is how many wait
+ *  behind "Show all". */
+export function visibleRecommendations<B>(
+  recommended: B[],
+  { expanded, filtering }: { expanded: boolean; filtering: boolean },
+): { shown: B[]; hidden: number } {
+  if (expanded || filtering || recommended.length <= RECOMMENDED_LIMIT)
+    return { shown: recommended, hidden: 0 };
+  return {
+    shown: recommended.slice(0, RECOMMENDED_LIMIT),
+    hidden: recommended.length - RECOMMENDED_LIMIT,
+  };
+}
+
 /** Case- and accent-insensitive form for matching. */
 function fold(text: string): string {
   return text

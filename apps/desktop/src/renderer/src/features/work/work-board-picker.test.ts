@@ -1,9 +1,11 @@
 // The board picker's filter and "Recommended for you" grouping.
 import { describe, expect, test } from "vitest";
 import {
+  RECOMMENDED_LIMIT,
   assignedLabel,
   filterBoards,
   groupBoards,
+  visibleRecommendations,
   type PickerBoard,
 } from "./work-board-picker";
 
@@ -136,5 +138,31 @@ describe("assignedLabel", () => {
     ).toBe("63 in FT assigned to you");
     expect(assignedLabel(board("3", "B", { assignedInProject: 2 }))).toBeNull();
     expect(assignedLabel(board("4", "B"))).toBeNull();
+  });
+});
+
+describe("visibleRecommendations", () => {
+  const seven = [1, 2, 3, 4, 5, 6, 7];
+
+  test("shows the first five until expanded, and says how many wait", () => {
+    expect(RECOMMENDED_LIMIT).toBe(5);
+    expect(
+      visibleRecommendations(seven, { expanded: false, filtering: false }),
+    ).toEqual({ shown: [1, 2, 3, 4, 5], hidden: 2 });
+    expect(
+      visibleRecommendations(seven, { expanded: true, filtering: false }),
+    ).toEqual({ shown: seven, hidden: 0 });
+  });
+
+  test("a filter shows every match; five or fewer never hide", () => {
+    expect(
+      visibleRecommendations(seven, { expanded: false, filtering: true }),
+    ).toEqual({ shown: seven, hidden: 0 });
+    expect(
+      visibleRecommendations([1, 2, 3, 4, 5], {
+        expanded: false,
+        filtering: false,
+      }),
+    ).toEqual({ shown: [1, 2, 3, 4, 5], hidden: 0 });
   });
 });

@@ -10,8 +10,6 @@
 //   GET  /rest/api/3/project/search    GET  /rest/api/2/project  (array)
 //   GET  /rest/api/{2,3}/issue/createmeta/<project>/issuetypes[/<type>]
 //   GET  /rest/api/{2,3}/priority
-//   GET  /rest/api/{2,3}/field                  (Sprint is customfield_10020; the
-//        v2 search returns it in Server/DC's string form, v3 as objects)
 //   GET  /rest/api/{2,3}/user/search
 //   GET  /rest/api/{2,3}/issue/<key>            (detail; failure injection via -404/-429/-400 keys)
 //   GET  /rest/api/{2,3}/issue/<key>/transitions
