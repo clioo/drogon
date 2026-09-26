@@ -1,15 +1,38 @@
 // The board picker's filter and "Recommended for you" grouping.
 import { describe, expect, test } from "vitest";
-import { assignedLabel, filterBoards, groupBoards, type PickerBoard } from "./work-board-picker";
+import {
+  assignedLabel,
+  filterBoards,
+  groupBoards,
+  type PickerBoard,
+} from "./work-board-picker";
 
-function board(id: string, name: string, extra: Partial<PickerBoard> = {}): PickerBoard {
-  return { id, name, kind: "kanban", projectKey: null, projectName: null, importedBoardId: null, ...extra };
+function board(
+  id: string,
+  name: string,
+  extra: Partial<PickerBoard> = {},
+): PickerBoard {
+  return {
+    id,
+    name,
+    kind: "kanban",
+    projectKey: null,
+    projectName: null,
+    importedBoardId: null,
+    ...extra,
+  };
 }
 
 const BOARDS = [
-  board("1", "ZOPR Decommision Requests", { projectKey: "ZOPR", projectName: "Zillow Operations Production Release" }),
+  board("1", "ZOPR Decommision Requests", {
+    projectKey: "ZOPR",
+    projectName: "Zillow Operations Production Release",
+  }),
   board("2", "Renter Transactions Web and Services"),
-  board("3", "Pathfinders OnCall", { projectKey: "ZHLCX", projectName: "Zillow Home Loans - Pathfinders" }),
+  board("3", "Pathfinders OnCall", {
+    projectKey: "ZHLCX",
+    projectName: "Zillow Home Loans - Pathfinders",
+  }),
   board("4", "Diseño de Producto", { projectKey: "DP" }),
 ];
 
@@ -26,7 +49,9 @@ describe("filterBoards", () => {
   });
 
   test("every word must match, in any order, and accents do not matter", () => {
-    expect(filterBoards(BOARDS, "release zopr").map((b) => b.id)).toEqual(["1"]);
+    expect(filterBoards(BOARDS, "release zopr").map((b) => b.id)).toEqual([
+      "1",
+    ]);
     expect(filterBoards(BOARDS, "zopr renter")).toEqual([]);
     expect(filterBoards(BOARDS, "diseno").map((b) => b.id)).toEqual(["4"]);
   });
