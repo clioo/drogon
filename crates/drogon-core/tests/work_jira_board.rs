@@ -229,6 +229,22 @@ fn import_lists_boards_and_brings_only_the_chosen_issues() {
     assert_eq!(names, ["Platform Delivery", "Ops Kanban"]);
     assert_eq!(boards["boards"][0]["kind"], "scrum");
     assert_eq!(boards["boards"][0]["importedBoardId"], Value::Null);
+    // Both boards frame project APP, where you have two open issues
+    // (APP-142 to do, APP-128 in progress); one bounded search asked only
+    // for the project of your unresolved issues.
+    assert_eq!(boards["boards"][0]["assignedOpen"], 2);
+    assert_eq!(boards["boards"][1]["assignedOpen"], 2);
+    let search = server
+        .request_log()
+        .into_iter()
+        .find(|r| {
+            r["jql"].as_str().is_some_and(|j| {
+                j.starts_with("assignee = currentUser() AND resolution = Unresolved")
+            })
+        })
+        .expect("the recommendation search reached Jira");
+    assert_eq!(search["fields"], json!(["project"]));
+    assert_eq!(search["maxResults"], 100);
 
     let preview = ctx.ok("work.import_preview", json!({"externalBoardId": "7"}));
     assert_eq!(preview["columns"].as_array().unwrap().len(), 5);

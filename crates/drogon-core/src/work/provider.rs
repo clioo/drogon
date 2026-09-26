@@ -10,6 +10,8 @@
 //! `sources.rs` and one match arm in `Engine::work_provider`; the board,
 //! sync and UI code only ever see [`ExtIssue`].
 
+use std::collections::HashMap;
+
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -18,6 +20,7 @@ use crate::jira::client::{HttpRequest, JiraRequestError, api_base_path, jira_req
 use crate::jira::mapping::{as_record, as_string, as_string_or};
 use crate::jira::ops::{ClientForSite, encode_path_segment, first_client};
 use drogon_protocol::RpcError;
+use drogon_protocol::jira::JiraAuthType;
 
 /// An issue as the board knows it: its key (`APP-128`, `ENG-12`,
 /// `owner/repo#12`) and, when imported, the provider's own id for it.
@@ -132,6 +135,13 @@ pub(crate) trait WorkProvider {
         Vec::new()
     }
     fn board(&self, board_id: &str) -> ProviderResult<ExtBoard>;
+    /// How many open issues assigned to the connected account each of
+    /// `boards` holds, keyed by board id (boards with none are absent), from
+    /// one bounded query. It only ranks the board picker, so a source
+    /// without the notion answers empty.
+    fn assigned_open_counts(&self, _boards: &[ExtBoard]) -> ProviderResult<HashMap<String, u32>> {
+        Ok(HashMap::new())
+    }
     fn board_columns(&self, board_id: &str) -> ProviderResult<Vec<ExtColumn>>;
     /// Every status the site knows (what a column can be mapped to).
     fn list_statuses(&self, board_id: &str) -> ProviderResult<Vec<ExtStatus>>;
@@ -162,6 +172,11 @@ pub(crate) struct JiraProvider<'a> {
 }
 
 const AGILE: &str = "/rest/agile/1.0";
+/// Your open work, for the board picker's recommendations: one page of at
+/// most `ASSIGNED_OPEN_LIMIT` issues, only their project.
+const ASSIGNED_OPEN_JQL: &str =
+    "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC";
+const ASSIGNED_OPEN_LIMIT: u32 = 100;
 const ISSUE_FIELDS: &str =
     "summary,description,issuetype,priority,status,assignee,project,updated,sprint,closedSprints";
 
@@ -318,6 +333,42 @@ impl<'a> JiraProvider<'a> {
     }
 }
 
+/// Open issues per project key in a Jira search reply.
+fn jira_project_counts(raw: &Value) -> HashMap<String, u32> {
+    let mut counts = HashMap::new();
+    for issue in raw
+        .get("issues")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(key) = issue
+            .pointer("/fields/project/key")
+            .and_then(Value::as_str)
+            .filter(|k| !k.is_empty())
+        {
+            *counts.entry(key.to_string()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+/// Spreads per-key counts onto the boards that carry that key (several
+/// boards can frame the same project), keyed by board id.
+pub(crate) fn counts_by_board<'b>(
+    boards: &'b [ExtBoard],
+    counts: &HashMap<String, u32>,
+    key_of: impl Fn(&'b ExtBoard) -> Option<&'b str>,
+) -> HashMap<String, u32> {
+    boards
+        .iter()
+        .filter_map(|board| {
+            let count = *counts.get(key_of(board)?)?;
+            (count > 0).then(|| (board.id.clone(), count))
+        })
+        .collect()
+}
+
 fn map_status(value: Option<&Value>) -> ExtStatus {
     let status = as_record(value);
     let category = as_record(status.get("statusCategory"));
@@ -367,6 +418,25 @@ impl WorkProvider for JiraProvider<'_> {
             .iter()
             .map(Self::map_board)
             .collect())
+    }
+
+    fn assigned_open_counts(&self, boards: &[ExtBoard]) -> ProviderResult<HashMap<String, u32>> {
+        // Server/DC only has the classic `/search`; `/search/jql` is Cloud's.
+        let path = match self.client.site.auth_type {
+            JiraAuthType::Server => format!("{}/search", self.api()),
+            JiraAuthType::Cloud => "/rest/api/3/search/jql".to_string(),
+        };
+        let body = json!({
+            "jql": ASSIGNED_OPEN_JQL,
+            "maxResults": ASSIGNED_OPEN_LIMIT,
+            "fields": ["project"],
+        });
+        let raw = self
+            .call("POST", &path, Some(body))
+            .map_err(|e| jira_error(&e))?;
+        Ok(counts_by_board(boards, &jira_project_counts(&raw), |b| {
+            b.project_key.as_deref()
+        }))
     }
 
     fn board(&self, board_id: &str) -> ProviderResult<ExtBoard> {
@@ -575,6 +645,45 @@ mod tests {
         assert_eq!(board.id, "7");
         assert_eq!(board.kind, "scrum");
         assert_eq!(board.project_key.as_deref(), Some("APP"));
+    }
+
+    fn board(id: &str, key: Option<&str>) -> ExtBoard {
+        ExtBoard {
+            id: id.into(),
+            name: id.into(),
+            kind: "kanban".into(),
+            project_key: key.map(str::to_owned),
+            project_name: None,
+        }
+    }
+
+    #[test]
+    fn assigned_issues_count_per_project_and_spread_onto_its_boards() {
+        let reply = json!({"issues": [
+            {"key": "APP-1", "fields": {"project": {"key": "APP"}}},
+            {"key": "APP-2", "fields": {"project": {"key": "APP"}}},
+            {"key": "OPS-1", "fields": {"project": {"key": "OPS"}}},
+            {"key": "X-1", "fields": {}},
+            {"key": "Y-1", "fields": {"project": {"key": ""}}}
+        ]});
+        let counts = jira_project_counts(&reply);
+        assert_eq!(counts.len(), 2);
+        assert_eq!(counts["APP"], 2);
+        assert_eq!(counts["OPS"], 1);
+        assert!(jira_project_counts(&json!({})).is_empty());
+
+        let boards = [
+            board("7", Some("APP")),
+            board("9", Some("APP")),
+            board("11", Some("ZZZ")),
+            board("12", None),
+        ];
+        let by_board = counts_by_board(&boards, &counts, |b| b.project_key.as_deref());
+        assert_eq!(by_board.len(), 2);
+        assert_eq!(by_board["7"], 2);
+        assert_eq!(by_board["9"], 2);
+        let zero = HashMap::from([("APP".to_string(), 0)]);
+        assert!(counts_by_board(&boards, &zero, |b| b.project_key.as_deref()).is_empty());
     }
 
     #[test]

@@ -6,11 +6,13 @@
 //! Issues are keyed by their identifier (`ENG-12`); a status push is an
 //! `issueUpdate` of `stateId`, a sprint move one of `cycleId`.
 
+use std::collections::HashMap;
+
 use serde_json::{Value, json};
 
 use super::provider::{
     ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope, ProviderError,
-    ProviderResult, WorkProvider,
+    ProviderResult, WorkProvider, counts_by_board,
 };
 use crate::jira::client::{HttpRequest, JiraRequestError, REQUEST_TIMEOUT, http_json};
 
@@ -228,6 +230,21 @@ fn sorted_states(team: &Value) -> Vec<Value> {
     states
 }
 
+/// Open assigned issues per team id in a `DrogonLinearAssigned` reply.
+fn team_counts(data: &Value) -> HashMap<String, u32> {
+    let mut counts = HashMap::new();
+    for issue in data["viewer"]["assignedIssues"]["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        if let Some(team) = issue["team"]["id"].as_str().filter(|t| !t.is_empty()) {
+            *counts.entry(team.to_string()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
 impl WorkProvider for LinearProvider {
     fn kind(&self) -> &'static str {
         "linear"
@@ -260,6 +277,15 @@ impl WorkProvider for LinearProvider {
                 project_name: team["name"].as_str().map(str::to_owned),
             })
             .collect())
+    }
+
+    fn assigned_open_counts(&self, boards: &[ExtBoard]) -> ProviderResult<HashMap<String, u32>> {
+        let data = self.gql(
+            "query DrogonLinearAssigned { viewer { assignedIssues(first: 100, filter: { state: { type: { nin: [\"completed\", \"canceled\"] } } }) { nodes { team { id } } } } }",
+            json!({}),
+        )?;
+        let teams = team_counts(&data);
+        Ok(counts_by_board(boards, &teams, |b| Some(b.id.as_str())))
     }
 
     fn board(&self, board_id: &str) -> ProviderResult<ExtBoard> {
@@ -398,6 +424,22 @@ impl LinearProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assigned_issues_count_per_team() {
+        let data = json!({"viewer": {"assignedIssues": {"nodes": [
+            {"team": {"id": "team-eng"}},
+            {"team": {"id": "team-eng"}},
+            {"team": {"id": "team-ops"}},
+            {"team": null},
+            {"team": {"id": ""}}
+        ]}}});
+        let counts = team_counts(&data);
+        assert_eq!(counts.len(), 2);
+        assert_eq!(counts["team-eng"], 2);
+        assert_eq!(counts["team-ops"], 1);
+        assert!(team_counts(&json!({})).is_empty());
+    }
 
     #[test]
     fn cycles_read_as_sprints_with_their_state() {
