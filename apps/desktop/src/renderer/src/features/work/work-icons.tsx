@@ -25,6 +25,26 @@ const ICONS = {
   blocked: { Icon: Ban, tone: "text-rose-500" },
 } as const;
 
+/** "in_progress" → "In progress". */
+export function workColumnIconLabel(icon: string): string {
+  const words = icon.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** The icon a column's name suggests, by the rules the daemon gives the
+ *  columns it imports ("Code Review" → review, "QA" → qa, "Blocked" →
+ *  blocked…); anything else reads as a to-do column. */
+export function iconForColumnName(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes("backlog")) return "backlog";
+  if (lower.includes("block")) return "blocked";
+  if (lower.includes("review")) return "review";
+  if (lower.includes("qa") || lower.includes("test") || lower.includes("verif")) return "qa";
+  if (lower.includes("done") || lower.includes("closed")) return "done";
+  if (lower.includes("progress") || lower.includes("doing")) return "in_progress";
+  return "todo";
+}
+
 export function WorkColumnIcon({ icon, className = "size-4" }: { icon: string; className?: string }) {
   const entry = ICONS[icon as keyof typeof ICONS] ?? ICONS.todo;
   const { Icon } = entry;

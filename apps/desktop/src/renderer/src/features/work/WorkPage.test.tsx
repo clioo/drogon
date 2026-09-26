@@ -350,6 +350,61 @@ describe("Work board", () => {
     }
   });
 
+  test("New column picks its icon from the real icons, suggested by the name until you choose", async () => {
+    const { bridge } = await mount();
+    fireEvent.click(screen.getAllByRole("button", { name: "New column" })[0]!);
+    const form = await screen.findByRole("form", { name: "New column" });
+    const icons = within(form).getByRole("radiogroup", { name: "Icon" });
+    const checked = () =>
+      within(icons)
+        .getAllByRole("radio")
+        .filter((r) => r.getAttribute("aria-checked") === "true")
+        .map((r) => r.getAttribute("aria-label"));
+    expect(within(icons).getAllByRole("radio").map((r) => r.getAttribute("aria-label"))).toEqual([
+      "Backlog",
+      "Todo",
+      "In progress",
+      "Review",
+      "Qa",
+      "Done",
+      "Blocked",
+    ]);
+    expect(checked()).toEqual(["Todo"]);
+    const name = within(form).getByRole("textbox", { name: "Column name" });
+    fireEvent.change(name, { target: { value: "Code Review" } });
+    expect(checked()).toEqual(["Review"]);
+    // A choice of yours sticks while the name changes.
+    fireEvent.click(within(icons).getByRole("radio", { name: "Qa" }));
+    fireEvent.change(name, { target: { value: "Code Review 2" } });
+    expect(checked()).toEqual(["Qa"]);
+    // Arrow keys move the choice like any radio group.
+    fireEvent.keyDown(within(icons).getByRole("radio", { name: "Qa" }), { key: "ArrowRight" });
+    expect(checked()).toEqual(["Done"]);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Done");
+    fireEvent.keyDown(within(icons).getByRole("radio", { name: "Backlog" }), { key: "ArrowLeft" });
+    expect(checked()).toEqual(["Blocked"]);
+    fireEvent.click(within(form).getByRole("button", { name: "Add column" }));
+    await waitFor(() =>
+      expect(bridge.columnCreate).toHaveBeenCalledWith(expect.objectContaining({ name: "Code Review 2", icon: "blocked" })),
+    );
+  });
+
+  test("a reopened New column dialog starts empty, its icon following the name again", async () => {
+    await mount();
+    fireEvent.click(screen.getAllByRole("button", { name: "New column" })[0]!);
+    let form = await screen.findByRole("form", { name: "New column" });
+    fireEvent.change(within(form).getByRole("textbox", { name: "Column name" }), { target: { value: "Doing" } });
+    fireEvent.click(within(form).getByRole("radio", { name: "Qa" }));
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("form", { name: "New column" })).toBeNull());
+    fireEvent.click(screen.getAllByRole("button", { name: "New column" })[0]!);
+    form = await screen.findByRole("form", { name: "New column" });
+    const name = within(form).getByRole("textbox", { name: "Column name" }) as HTMLInputElement;
+    expect(name.value).toBe("");
+    fireEvent.change(name, { target: { value: "Done" } });
+    expect(within(form).getByRole("radio", { name: "Done" }).getAttribute("aria-checked")).toBe("true");
+  });
+
   test("the ticket panel links a session and edits fields", async () => {
     const listSessions = vi.fn(async () => [
       { id: "live-1", workspaceId: "ws-1", harnessId: "claude", verdict: "live" },

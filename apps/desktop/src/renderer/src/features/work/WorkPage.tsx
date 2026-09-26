@@ -84,7 +84,8 @@ import {
   WORK_FILTER_LABELS,
   type WorkFilter,
 } from "./work-format";
-import { WorkColumnIcon } from "./work-icons";
+import { WorkColumnIcon, iconForColumnName, workColumnIconLabel } from "./work-icons";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import { WorkColumnPanel } from "./WorkColumnPanel";
 import { WorkTicketPanel, type WorkWorkspace } from "./WorkTicketPanel";
 import { WorkImportDialog } from "./WorkImportDialog";
@@ -1113,7 +1114,7 @@ function BoardColumn({
               <DropdownMenuSubContent>
                 {WORK_COLUMN_ICONS.map((icon) => (
                   <DropdownMenuItem key={icon} onSelect={() => onIconColumn(column, icon)}>
-                    <WorkColumnIcon icon={icon} className="size-4" /> {icon.replace("_", " ")}
+                    <WorkColumnIcon icon={icon} className="size-4" /> {workColumnIconLabel(icon)}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuSubContent>
@@ -1709,10 +1710,18 @@ function NewColumnDialog({
   onCreate: (name: string, icon: string) => Promise<string | null>;
 }) {
   const [name, setName] = useState("");
-  const [icon, setIcon] = useState("todo");
+  // The icon follows the name until you pick one yourself.
+  const [picked, setPicked] = useState<string | null>(null);
+  const icon = picked ?? iconForColumnName(name);
   const [error, setError] = useState<string | null>(null);
+  const close = () => {
+    setName("");
+    setPicked(null);
+    setError(null);
+    onClose();
+  };
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+    <Dialog open={open} onOpenChange={(next) => !next && close()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New column</DialogTitle>
@@ -1725,24 +1734,21 @@ function NewColumnDialog({
             event.preventDefault();
             const failure = await onCreate(name.trim(), icon);
             setError(failure);
-            if (!failure) setName("");
+            if (!failure) {
+              setName("");
+              setPicked(null);
+            }
           }}
         >
           <Input aria-label="Column name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          <select aria-label="Column icon" className="h-9 rounded-md border border-input bg-transparent px-2 text-sm" value={icon} onChange={(e) => setIcon(e.target.value)}>
-            {WORK_COLUMN_ICONS.map((i) => (
-              <option key={i} value={i}>
-                {i.replace("_", " ")}
-              </option>
-            ))}
-          </select>
+          <ColumnIconPicker value={icon} onChange={setPicked} />
           {error ? (
             <p className="text-sm text-destructive" role="alert">
               {error}
             </p>
           ) : null}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>
             <Button type="submit" disabled={!name.trim()}>
@@ -1752,5 +1758,61 @@ function NewColumnDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The column icons as the board draws them, one radio each (arrow keys
+ *  move and choose, like any radio group); the name is the tooltip. */
+function ColumnIconPicker({ value, onChange }: { value: string; onChange: (icon: string) => void }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const choose = (index: number) => {
+    const next = (index + WORK_COLUMN_ICONS.length) % WORK_COLUMN_ICONS.length;
+    onChange(WORK_COLUMN_ICONS[next]!);
+    refs.current[next]?.focus();
+  };
+  return (
+    <div className="flex items-center gap-3">
+      <span id="work-new-column-icon" className="text-sm text-muted-foreground">
+        Icon
+      </span>
+      <div role="radiogroup" aria-labelledby="work-new-column-icon" className="flex flex-wrap gap-1">
+        {WORK_COLUMN_ICONS.map((icon, index) => {
+          const selected = icon === value;
+          const label = workColumnIconLabel(icon);
+          return (
+            <Tooltip key={icon}>
+              <TooltipTrigger asChild>
+                <button
+                  ref={(el) => {
+                    refs.current[index] = el;
+                  }}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  aria-label={label}
+                  tabIndex={selected ? 0 : -1}
+                  className={`flex size-8 items-center justify-center rounded-md border ${
+                    selected ? "border-ring bg-accent" : "border-transparent hover:bg-accent/60"
+                  }`}
+                  onClick={() => onChange(icon)}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                      event.preventDefault();
+                      choose(index + 1);
+                    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                      event.preventDefault();
+                      choose(index - 1);
+                    }
+                  }}
+                >
+                  <WorkColumnIcon icon={icon} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{label}</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+    </div>
   );
 }
