@@ -286,6 +286,34 @@ describe("Work board", () => {
     expect(bridge.columnUpdate).not.toHaveBeenCalled();
   });
 
+  test("a collapsed column also shows where a dragged column lands", async () => {
+    const board = boardFixture();
+    board.columns = board.columns.map((c) => (c.id === "prog" ? { ...c, collapsed: true } : c));
+    const { bridge } = await mount(fakeBridge(board));
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      setData: (k: string, v: string) => data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+      get types() {
+        return [...data.keys()];
+      },
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    const strip = screen.getByRole("region", { name: "In progress column" });
+    expect(strip.getAttribute("data-collapsed")).toBe("true");
+    strip.getBoundingClientRect = () => ({ left: 0, width: 44, top: 0, height: 600, right: 44, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.dragStart(within(screen.getByRole("region", { name: "Review column" })).getByTestId("work-column-header"), { dataTransfer });
+    const over = createEvent.dragOver(strip, { dataTransfer });
+    Object.defineProperty(over, "clientX", { value: 10 });
+    fireEvent(strip, over);
+    expect(strip.className).toContain("inset_2px");
+    const drop = createEvent.drop(strip, { dataTransfer });
+    Object.defineProperty(drop, "clientX", { value: 10 });
+    fireEvent(strip, drop);
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", index: 1 }));
+  });
+
   test("a long column name is shown whole, wrapping instead of truncating", async () => {
     await mount();
     const title = within(screen.getByRole("region", { name: "Review column" })).getByRole("heading", { name: "Review" });

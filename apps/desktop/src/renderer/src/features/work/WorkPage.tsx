@@ -904,10 +904,11 @@ function BoardView({
   onColumnAction,
   onRenameColumn,
   onIconColumn,
-  onReorderColumn,
   onCollapseColumn,
   onDeleteTicket,
+  onReorderColumn,
 }: {
+  onReorderColumn: (columnId: string, index: number) => void;
   board: WorkBoard;
   tickets: WorkTicket[];
   selected: Panel;
@@ -923,7 +924,6 @@ function BoardView({
   onColumnAction: (column: WorkColumn, action: "left" | "right" | "delete") => void;
   onRenameColumn: (column: WorkColumn, name: string) => void;
   onIconColumn: (column: WorkColumn, icon: string) => void;
-  onReorderColumn: (columnId: string, index: number) => void;
   onCollapseColumn: (column: WorkColumn, collapsed: boolean) => void;
   onDeleteTicket: (ticket: WorkTicket) => void;
 }) {
