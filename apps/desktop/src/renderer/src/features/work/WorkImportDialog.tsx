@@ -1,6 +1,5 @@
 // Import a source's board (a Jira board, a Linear team, a GitHub project or
-// repository): pick the board that frames the import (filter by name; the
-// ones holding your open issues come first), then choose which of
+// repository): pick the board that frames the import, then choose which of
 // its issues come in. A board usually spans several projects and people, so
 // the picker opens on the issues assigned to you (all chosen), and filters
 // by person, project, status and words let you add any other; what you
@@ -11,7 +10,6 @@
 // connected yet shows its connect form first.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Loader2, Search } from "lucide-react";
-import { assignedLabel, filterBoards, groupBoards, type PickerBoard } from "./work-board-picker";
 import { Button } from "../../components/ui/button";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Input } from "../../components/ui/input";
@@ -31,6 +29,7 @@ import type {
   WorkProviderIssue,
   WorkSource,
 } from "../../../../shared/work-contract";
+import { assignedLabel, filterBoards, groupBoards, type PickerBoard } from "./work-board-picker";
 import { IssueTypeBadge, ProviderMark, capitalize } from "./work-sources";
 import { boardsTerm, WorkSourceConnectForm } from "./WorkSources";
 
