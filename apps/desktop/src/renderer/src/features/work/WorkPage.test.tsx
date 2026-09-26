@@ -5,7 +5,7 @@
 // ticket's session opens in one click (a live one directly, one that is no
 // longer running through sessionOpen first).
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { installRadixJsdomStubs } from "../../components/ui/radix-jsdom-stubs";
 import type { Result } from "../../../../shared/session-contract";
 import type {
@@ -14,7 +14,7 @@ import type {
   WorkColumn,
   WorkTicket,
 } from "../../../../shared/work-contract";
-import { resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
+import { columnDropIndex, resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
 import { TooltipProvider } from "../../components/ui/tooltip";
 import { toast } from "sonner";
 
@@ -234,6 +234,63 @@ describe("Work board", () => {
     await waitFor(() =>
       expect(bridge.ticketMove).toHaveBeenCalledWith({ ticketId: "t1", columnId: "review", index: 1 }),
     );
+  });
+
+  test("dragging a column by its header drops it on the side of the column it is released over", async () => {
+    const { bridge } = await mount();
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      setData: (k: string, v: string) => data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+      get types() {
+        return [...data.keys()];
+      },
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    const region = (name: string) => {
+      const el = screen.getByRole("region", { name: `${name} column` });
+      // jsdom lays nothing out: give each column a 200px-wide box.
+      el.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 600, right: 200, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+      return el;
+    };
+    // jsdom's drag events carry no pointer position; set it on the event.
+    const drag = (kind: "dragOver" | "drop", el: HTMLElement, clientX: number) => {
+      const event = createEvent[kind](el, { dataTransfer });
+      Object.defineProperty(event, "clientX", { value: clientX });
+      fireEvent(el, event);
+    };
+    const header = within(region("Review")).getByTestId("work-column-header");
+    expect(header.getAttribute("draggable")).toBe("true");
+    fireEvent.dragStart(header, { dataTransfer });
+    // Over the left half of To do: lands before it.
+    const target = region("To do");
+    drag("dragOver", target, 40);
+    expect(target.className).toContain("inset_2px");
+    drag("dragOver", target, 160);
+    expect(target.className).toContain("inset_-2px");
+    drag("drop", target, 40);
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", index: 0 }));
+    expect(target.className).not.toContain("inset_");
+    // A column is not a ticket: nothing moved.
+    expect(bridge.ticketMove).not.toHaveBeenCalled();
+    // The right half of To do puts it between To do and In progress.
+    fireEvent.dragStart(header, { dataTransfer });
+    drag("drop", region("To do"), 160);
+    await waitFor(() => expect(bridge.columnUpdate).toHaveBeenLastCalledWith({ columnId: "review", index: 1 }));
+    // Released on its own place, it stays put.
+    bridge.columnUpdate.mockClear();
+    fireEvent.dragStart(header, { dataTransfer });
+    drag("drop", region("Review"), 40);
+    drag("drop", region("In progress"), 160);
+    expect(bridge.columnUpdate).not.toHaveBeenCalled();
+  });
+
+  test("a long column name is shown whole, wrapping instead of truncating", async () => {
+    await mount();
+    const title = within(screen.getByRole("region", { name: "Review column" })).getByRole("heading", { name: "Review" });
+    expect(title.className).toContain("break-words");
+    expect(title.className).not.toContain("truncate");
   });
 
   test("the card menu moves a ticket without dragging", async () => {
@@ -502,5 +559,21 @@ describe("Work board", () => {
     cleanup();
     await mount().catch(() => {});
     expect(screen.getByRole("tab", { name: "list" }).getAttribute("aria-selected")).toBe("true");
+  });
+});
+
+describe("columnDropIndex", () => {
+  test("lands before or after the target, accounting for the column leaving its place", () => {
+    // Moving right: the column's old place closes up.
+    expect(columnDropIndex(0, 2, "after")).toBe(2);
+    expect(columnDropIndex(0, 2, "before")).toBe(1);
+    // Moving left.
+    expect(columnDropIndex(7, 4, "after")).toBe(5);
+    expect(columnDropIndex(7, 0, "before")).toBe(0);
+    // Its own place, either side of itself or of a neighbour it already touches.
+    expect(columnDropIndex(3, 3, "before")).toBeNull();
+    expect(columnDropIndex(3, 3, "after")).toBeNull();
+    expect(columnDropIndex(3, 2, "after")).toBeNull();
+    expect(columnDropIndex(3, 4, "before")).toBeNull();
   });
 });

@@ -122,6 +122,22 @@ import {
 } from "./WorkSources";
 
 const TICKET_MIME = "application/x-drogon-work-ticket";
+const COLUMN_MIME = "application/x-drogon-work-column";
+
+/** The line a column shows on the side a dragged column would land. */
+function columnDropClass(side: "before" | "after" | null): string {
+  if (side === "before") return "shadow-[inset_2px_0_0_0_var(--color-ring)]";
+  if (side === "after") return "shadow-[inset_-2px_0_0_0_var(--color-ring)]";
+  return "";
+}
+
+/** Where a column dragged from `from` lands when dropped on the `side` of
+ *  the column at `target` (board positions), or null when it stays put. */
+export function columnDropIndex(from: number, target: number, side: "before" | "after"): number | null {
+  const at = side === "before" ? target : target + 1;
+  const index = from < at ? at - 1 : at;
+  return index === from ? null : index;
+}
 
 type Panel = { kind: "column"; id: string } | { kind: "ticket"; id: string } | null;
 type Tab = "board" | "list" | "sources";
@@ -727,6 +743,11 @@ export function WorkPage({
                     const result = await state.run(() => bridge.columnUpdate({ columnId: column.id, icon }));
                     if (!result.ok) notice(result.error, "error");
                   }}
+                  onReorderColumn={async (columnId, index) => {
+                    if (!bridge) return;
+                    const result = await state.run(() => bridge.columnUpdate({ columnId, index }));
+                    if (!result.ok) notice(result.error, "error");
+                  }}
                   onCollapseColumn={async (column, collapsed) => {
                     if (!bridge) return;
                     const result = await state.run(() => bridge.columnUpdate({ columnId: column.id, collapsed }));
@@ -883,6 +904,7 @@ function BoardView({
   onColumnAction,
   onRenameColumn,
   onIconColumn,
+  onReorderColumn,
   onCollapseColumn,
   onDeleteTicket,
 }: {
@@ -901,6 +923,7 @@ function BoardView({
   onColumnAction: (column: WorkColumn, action: "left" | "right" | "delete") => void;
   onRenameColumn: (column: WorkColumn, name: string) => void;
   onIconColumn: (column: WorkColumn, icon: string) => void;
+  onReorderColumn: (columnId: string, index: number) => void;
   onCollapseColumn: (column: WorkColumn, collapsed: boolean) => void;
   onDeleteTicket: (ticket: WorkTicket) => void;
 }) {
@@ -930,6 +953,7 @@ function BoardView({
           onRenameColumn={onRenameColumn}
           onIconColumn={onIconColumn}
           onCollapseColumn={onCollapseColumn}
+          onReorderColumn={onReorderColumn}
           onDeleteTicket={onDeleteTicket}
         />
       ))}
@@ -965,6 +989,7 @@ function BoardColumn({
   onIconColumn,
   onCollapseColumn,
   onDeleteTicket,
+  onReorderColumn,
 }: {
   board: WorkBoard;
   column: WorkColumn;
@@ -986,8 +1011,11 @@ function BoardColumn({
   onIconColumn: (column: WorkColumn, icon: string) => void;
   onCollapseColumn: (column: WorkColumn, collapsed: boolean) => void;
   onDeleteTicket: (ticket: WorkTicket) => void;
+  onReorderColumn: (columnId: string, index: number) => void;
 }) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  // A column dragged over this one lands on this side of it.
+  const [columnSide, setColumnSide] = useState<"before" | "after" | null>(null);
   const [renaming, setRenaming] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const trigger = columnTriggerLabel(column);
@@ -1001,17 +1029,40 @@ function BoardColumn({
     return at === -1 ? cards.length : at;
   };
 
+  const sideAt = (event: React.DragEvent<HTMLElement>): "before" | "after" => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientX < rect.left + rect.width / 2 ? "before" : "after";
+  };
+
   const dropHandlers = {
     onDragOver: (event: React.DragEvent<HTMLElement>) => {
+      if (!readOnly && event.dataTransfer.types.includes(COLUMN_MIME)) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setColumnSide(sideAt(event));
+        return;
+      }
       if (readOnly || !event.dataTransfer.types.includes(TICKET_MIME)) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
       setDropIndex(indexAt(event.clientY));
     },
     onDragLeave: (event: React.DragEvent<HTMLElement>) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropIndex(null);
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+        setDropIndex(null);
+        setColumnSide(null);
+      }
     },
     onDrop: (event: React.DragEvent<HTMLElement>) => {
+      const draggedColumn = event.dataTransfer.getData(COLUMN_MIME);
+      if (draggedColumn) {
+        event.preventDefault();
+        setColumnSide(null);
+        const from = board.columns.find((c) => c.id === draggedColumn);
+        const index = from ? columnDropIndex(from.position, column.position, sideAt(event)) : null;
+        if (index !== null) onReorderColumn(draggedColumn, index);
+        return;
+      }
       const ticketId = event.dataTransfer.getData(TICKET_MIME);
       const index = indexAt(event.clientY);
       setDropIndex(null);
@@ -1029,7 +1080,7 @@ function BoardColumn({
   if (column.collapsed) {
     return (
       <section
-        className={`flex w-11 shrink-0 flex-col items-center gap-2 border-r border-border/60 pt-3 last:border-r-0 ${dropIndex !== null ? "bg-accent/30" : ""}`}
+        className={`flex w-11 shrink-0 flex-col items-center gap-2 border-r border-border/60 pt-3 last:border-r-0 ${dropIndex !== null ? "bg-accent/30" : ""} ${columnDropClass(columnSide)}`}
         aria-label={`${column.name} column`}
         data-work-column={column.id}
         data-collapsed="true"
@@ -1054,15 +1105,23 @@ function BoardColumn({
 
   return (
     <section
-      className={`flex w-[272px] shrink-0 flex-col border-r border-border/60 px-2 last:border-r-0 ${dropIndex !== null ? "bg-accent/30" : ""}`}
+      className={`flex w-[272px] shrink-0 flex-col border-r border-border/60 px-2 last:border-r-0 ${dropIndex !== null ? "bg-accent/30" : ""} ${columnDropClass(columnSide)}`}
       aria-label={`${column.name} column`}
       data-work-column={column.id}
       {...dropHandlers}
     >
-      <div className="flex items-start gap-2 px-1 pt-3 pb-2">
+      <div
+        className={`flex items-start gap-2 px-1 pt-3 pb-2 ${readOnly || renaming ? "" : "cursor-grab active:cursor-grabbing"}`}
+        data-testid="work-column-header"
+        draggable={!readOnly && !renaming}
+        onDragStart={(event) => {
+          event.dataTransfer.setData(COLUMN_MIME, column.id);
+          event.dataTransfer.effectAllowed = "move";
+        }}
+      >
         <WorkColumnIcon icon={column.icon} className="mt-0.5 size-5" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2">
             {renaming ? (
               <input
                 aria-label="Column name"
@@ -1080,7 +1139,7 @@ function BoardColumn({
                 }}
               />
             ) : (
-              <h2 className="truncate text-sm font-semibold text-foreground">{column.name}</h2>
+              <h2 className="min-w-0 break-words text-sm font-semibold text-foreground">{column.name}</h2>
             )}
             <span className="rounded-md bg-muted px-1.5 text-xs text-muted-foreground" aria-label={`${tickets.length} tickets`}>
               {tickets.length}
