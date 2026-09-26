@@ -3,9 +3,17 @@
 // assigned issues, most first. Pure, so the dialog only renders.
 import type { WorkProviderBoard } from "../../../../shared/work-contract";
 
-/** A listed board; `assignedOpen` comes from a daemon that counts your open
- *  issues per board (absent from an older one, which recommends nothing). */
-export type PickerBoard = WorkProviderBoard & { assignedOpen?: number };
+/** A listed board with a newer daemon's counts of your open assigned
+ *  issues (absent from an older one, which recommends nothing):
+ *  `assignedOpen` on the board itself (its open sprints; a Linear team),
+ *  `assignedInProject` in its project — shared by every board of it. */
+export type PickerBoard = WorkProviderBoard & {
+  assignedOpen?: number;
+  assignedInProject?: number;
+};
+
+/** Recommendations shown before "Show all". */
+export const RECOMMENDED_LIMIT = 5;
 
 /** Case- and accent-insensitive form for matching. */
 function fold(text: string): string {
@@ -31,21 +39,45 @@ export function filterBoards<B extends PickerBoard>(
   });
 }
 
-/** Recommended (open assigned issues, most first; ties keep listed order)
- *  and the rest in listed order. */
+const own = (board: PickerBoard) => board.assignedOpen ?? 0;
+const inProject = (board: PickerBoard) => board.assignedInProject ?? 0;
+
+/** Recommended, then the rest in listed order. Boards holding your issues
+ *  themselves come first, most first. A board known only through its
+ *  project is recommended when no board of that project holds them itself
+ *  (then it is one of that team's views, not where your work lives). Ties
+ *  keep listed order. */
 export function groupBoards<B extends PickerBoard>(
   boards: B[],
 ): { recommended: B[]; rest: B[] } {
-  const assigned = (board: B) => board.assignedOpen ?? 0;
-  const recommended = boards
-    .map((board, index) => ({ board, index }))
-    .filter(({ board }) => assigned(board) > 0)
-    .sort((a, b) => assigned(b.board) - assigned(a.board) || a.index - b.index)
-    .map(({ board }) => board);
-  return { recommended, rest: boards.filter((board) => assigned(board) === 0) };
+  const byCount = (count: (board: B) => number) => (list: B[]) =>
+    list
+      .map((board, index) => ({ board, index }))
+      .sort((a, b) => count(b.board) - count(a.board) || a.index - b.index)
+      .map(({ board }) => board);
+  const direct = byCount(own)(boards.filter((board) => own(board) > 0));
+  const projectsWithDirect = new Set(
+    direct.map((board) => board.projectKey).filter(Boolean),
+  );
+  const viaProject = byCount(inProject)(
+    boards.filter(
+      (board) =>
+        own(board) === 0 &&
+        inProject(board) > 0 &&
+        board.projectKey &&
+        !projectsWithDirect.has(board.projectKey),
+    ),
+  );
+  const recommended = [...direct, ...viaProject];
+  const chosen = new Set<B>(recommended);
+  return { recommended, rest: boards.filter((board) => !chosen.has(board)) };
 }
 
-/** "1 assigned to you", "4 assigned to you". */
-export function assignedLabel(count: number): string {
-  return `${count} assigned to you`;
+/** What a recommended board says about your issues: its own ("4 assigned
+ *  to you") or its project's ("63 in FT assigned to you"). */
+export function assignedLabel(board: PickerBoard): string | null {
+  if (own(board) > 0) return `${own(board)} assigned to you`;
+  if (inProject(board) > 0 && board.projectKey)
+    return `${inProject(board)} in ${board.projectKey} assigned to you`;
+  return null;
 }

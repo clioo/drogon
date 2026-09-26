@@ -58,7 +58,7 @@ describe("filterBoards", () => {
 });
 
 describe("groupBoards", () => {
-  test("boards with your open issues come first, most first, ties in listed order", () => {
+  test("boards holding your issues themselves come first, most first, ties in listed order", () => {
     const boards = [
       board("a", "A"),
       board("b", "B", { assignedOpen: 1 }),
@@ -71,6 +71,42 @@ describe("groupBoards", () => {
     expect(rest.map((b) => b.id)).toEqual(["a", "e"]);
   });
 
+  test("a project's other boards are its views: they stay out once one of them holds your issues", () => {
+    // The FT case: 63 of your issues in FT, 5 of them in board 1's sprints.
+    const ft = (id: string, own = 0) =>
+      board(id, `FT ${id}`, {
+        projectKey: "FT",
+        assignedOpen: own,
+        assignedInProject: 63,
+      });
+    const boards = [ft("views-1"), ft("1", 5), ft("views-2"), ft("views-3")];
+    const { recommended, rest } = groupBoards(boards);
+    expect(recommended.map((b) => b.id)).toEqual(["1"]);
+    expect(rest.map((b) => b.id)).toEqual(["views-1", "views-2", "views-3"]);
+  });
+
+  test("a project with no board of its own is recommended through the project, after the direct ones", () => {
+    const boards = [
+      board("ops-1", "Ops One", { projectKey: "OPS", assignedInProject: 3 }),
+      board("mob", "Mobile", {
+        projectKey: "MOB",
+        assignedOpen: 1,
+        assignedInProject: 1,
+      }),
+      board("dat", "Data", { projectKey: "DS", assignedInProject: 9 }),
+      board("ops-2", "Ops Two", { projectKey: "OPS", assignedInProject: 3 }),
+      board("nokey", "No key", { assignedInProject: 4 }),
+    ];
+    const { recommended, rest } = groupBoards(boards);
+    expect(recommended.map((b) => b.id)).toEqual([
+      "mob",
+      "dat",
+      "ops-1",
+      "ops-2",
+    ]);
+    expect(rest.map((b) => b.id)).toEqual(["nokey"]);
+  });
+
   test("a daemon without counts recommends nothing", () => {
     const { recommended, rest } = groupBoards(BOARDS);
     expect(recommended).toEqual([]);
@@ -78,7 +114,27 @@ describe("groupBoards", () => {
   });
 });
 
-test("assignedLabel reads naturally", () => {
-  expect(assignedLabel(1)).toBe("1 assigned to you");
-  expect(assignedLabel(4)).toBe("4 assigned to you");
+describe("assignedLabel", () => {
+  test("says whether the issues are the board's own or its project's", () => {
+    expect(
+      assignedLabel(
+        board("1", "B", {
+          projectKey: "FT",
+          assignedOpen: 1,
+          assignedInProject: 63,
+        }),
+      ),
+    ).toBe("1 assigned to you");
+    expect(
+      assignedLabel(
+        board("2", "B", {
+          projectKey: "FT",
+          assignedOpen: 0,
+          assignedInProject: 63,
+        }),
+      ),
+    ).toBe("63 in FT assigned to you");
+    expect(assignedLabel(board("3", "B", { assignedInProject: 2 }))).toBeNull();
+    expect(assignedLabel(board("4", "B"))).toBeNull();
+  });
 });

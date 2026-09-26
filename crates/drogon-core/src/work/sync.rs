@@ -1279,7 +1279,9 @@ impl Engine {
                         .find(|i| i.provider == provider.kind() && i.external_id == b.id)
                         .map(|i| i.id.clone())
                 );
-                row["assignedOpen"] = json!(assigned.get(&b.id).copied().unwrap_or(0));
+                let counts = assigned.get(&b.id).copied().unwrap_or_default();
+                row["assignedOpen"] = json!(counts.on_board);
+                row["assignedInProject"] = json!(counts.in_project);
                 row
             })
             .collect();

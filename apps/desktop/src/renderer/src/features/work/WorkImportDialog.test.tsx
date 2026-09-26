@@ -45,6 +45,7 @@ function team(
   name: string,
   key: string | null,
   assignedOpen?: number,
+  assignedInProject?: number,
 ) {
   return {
     id,
@@ -54,6 +55,7 @@ function team(
     projectName: name,
     importedBoardId: null,
     ...(assignedOpen === undefined ? {} : { assignedOpen }),
+    ...(assignedInProject === undefined ? {} : { assignedInProject }),
   };
 }
 
@@ -108,6 +110,72 @@ describe("board picker", () => {
       "Choose Data Science",
     ]);
     expect(within(all).queryByText(/assigned to you/)).toBeNull();
+  });
+
+  test("a project's views stay out once one board holds your issues; a project-only board says so", async () => {
+    mount([
+      team("ft-person", "Fintech Scrum Board - By Person", "FT", 0, 63),
+      team("ft-billing", "Fintech Billing Scrum Board", "FT", 5, 63),
+      team("ft-team", "Fintech Scrum Board - By Team", "FT", 0, 63),
+      team("ops", "Ops Reliability", "OPS", 0, 3),
+    ]);
+    const dialog = await screen.findByTestId("work-import-dialog");
+    const recommended = await within(dialog).findByRole("region", {
+      name: "Recommended for you",
+    });
+    expect(chooseNames(recommended)).toEqual([
+      "Choose Fintech Billing Scrum Board",
+      "Choose Ops Reliability",
+    ]);
+    expect(within(recommended).getByText("5 assigned to you")).toBeTruthy();
+    expect(
+      within(recommended).getByText("3 in OPS assigned to you"),
+    ).toBeTruthy();
+    const all = within(dialog).getByRole("region", { name: "All teams" });
+    expect(chooseNames(all)).toEqual([
+      "Choose Fintech Scrum Board - By Person",
+      "Choose Fintech Scrum Board - By Team",
+    ]);
+    expect(within(all).queryByText(/assigned to you/)).toBeNull();
+  });
+
+  test("more than five recommendations show five until Show all; a filter shows every match", async () => {
+    mount(
+      Array.from({ length: 7 }, (_, i) =>
+        team(`t${i}`, `Team ${i}`, `K${i}`, 7 - i),
+      ),
+    );
+    const dialog = await screen.findByTestId("work-import-dialog");
+    const recommended = await within(dialog).findByRole("region", {
+      name: "Recommended for you",
+    });
+    expect(within(recommended).getByText("7")).toBeTruthy();
+    expect(chooseNames(recommended)).toEqual([
+      "Choose Team 0",
+      "Choose Team 1",
+      "Choose Team 2",
+      "Choose Team 3",
+      "Choose Team 4",
+    ]);
+    fireEvent.click(
+      within(recommended).getByRole("button", { name: "Show all 7" }),
+    );
+    expect(chooseNames(recommended)).toHaveLength(7);
+    fireEvent.click(
+      within(recommended).getByRole("button", { name: "Show fewer" }),
+    );
+    expect(chooseNames(recommended)).toHaveLength(5);
+    fireEvent.change(
+      within(dialog).getByRole("textbox", { name: "Filter teams" }),
+      { target: { value: "team" } },
+    );
+    const filtered = within(dialog).getByRole("region", {
+      name: "Recommended for you",
+    });
+    expect(chooseNames(filtered)).toHaveLength(7);
+    expect(
+      within(filtered).queryByRole("button", { name: /Show all|Show fewer/ }),
+    ).toBeNull();
   });
 
   test("filters by name or project key, says when nothing matches, and Enter picks a lone match", async () => {

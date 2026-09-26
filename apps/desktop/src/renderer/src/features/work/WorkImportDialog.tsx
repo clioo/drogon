@@ -29,7 +29,7 @@ import type {
   WorkProviderIssue,
   WorkSource,
 } from "../../../../shared/work-contract";
-import { assignedLabel, filterBoards, groupBoards, type PickerBoard } from "./work-board-picker";
+import { RECOMMENDED_LIMIT, assignedLabel, filterBoards, groupBoards, type PickerBoard } from "./work-board-picker";
 import { IssueTypeBadge, ProviderMark, capitalize } from "./work-sources";
 import { boardsTerm, WorkSourceConnectForm } from "./WorkSources";
 
@@ -452,7 +452,11 @@ function BoardPicker({
   const term = boardsTerm(source);
   const shown = filterBoards(boards, query);
   const { recommended, rest } = groupBoards(shown);
-  const row = (b: PickerBoard) => (
+  // A filter shows every match; otherwise the first few until "Show all".
+  const [expanded, setExpanded] = useState(false);
+  const capped = !expanded && !query.trim() && recommended.length > RECOMMENDED_LIMIT;
+  const visibleRecommended = capped ? recommended.slice(0, RECOMMENDED_LIMIT) : recommended;
+  const row = (b: PickerBoard, label: string | null = null) => (
     <li key={b.id}>
       <button
         type="button"
@@ -469,9 +473,7 @@ function BoardPicker({
             {b.projectName && b.projectName !== b.name ? ` · ${b.projectName}` : ""}
           </span>
         </span>
-        {b.assignedOpen ? (
-          <span className="shrink-0 text-xs text-muted-foreground">{assignedLabel(b.assignedOpen)}</span>
-        ) : null}
+        {label ? <span className="shrink-0 text-xs text-muted-foreground">{label}</span> : null}
         {b.importedBoardId ? (
           <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">Imported</span>
         ) : null}
@@ -515,7 +517,18 @@ function BoardPicker({
             <p className="mb-1 text-xs font-semibold text-muted-foreground">
               Recommended for you <span className="font-normal">{recommended.length}</span>
             </p>
-            <ul className="space-y-1">{recommended.map(row)}</ul>
+            <ul className="space-y-1">{visibleRecommended.map((b) => row(b, assignedLabel(b)))}</ul>
+            {recommended.length > RECOMMENDED_LIMIT && !query.trim() ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-1 h-7 px-2 text-xs text-muted-foreground"
+                onClick={() => setExpanded((open) => !open)}
+              >
+                {capped ? `Show all ${recommended.length}` : "Show fewer"}
+              </Button>
+            ) : null}
           </section>
         ) : null}
         {rest.length > 0 ? (
@@ -525,7 +538,7 @@ function BoardPicker({
                 All {term} <span className="font-normal">{rest.length}</span>
               </p>
             ) : null}
-            <ul className="space-y-1">{rest.map(row)}</ul>
+            <ul className="space-y-1">{rest.map((b) => row(b))}</ul>
           </section>
         ) : null}
       </div>
