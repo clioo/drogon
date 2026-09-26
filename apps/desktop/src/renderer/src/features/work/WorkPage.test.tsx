@@ -16,6 +16,7 @@ import type {
 } from "../../../../shared/work-contract";
 import { resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
 import { TooltipProvider } from "../../components/ui/tooltip";
+import { toast } from "sonner";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
@@ -311,6 +312,42 @@ describe("Work board", () => {
     await waitFor(() =>
       expect(onOpenSession).toHaveBeenCalledWith({ workspaceId: "ws-2", sessionId: "resumed-3" }),
     );
+  });
+
+  test("Link a session reads each workspace; one too big to list leaves the others and says so", async () => {
+    const sessions = vi.fn(async (workspaceId?: string) =>
+      workspaceId === "ws-1"
+        ? { ok: false, error: { message: "the reply (1.8 MB) is over the 1 MB limit of one answer; narrow the request" } }
+        : { ok: true, result: { sessions: [{ id: "other-9", workspaceId: "ws-2", harnessId: "claude", verdict: "live", incarnation: "i" }] } },
+    );
+    (window as unknown as { drogon?: unknown }).drogon = { sessions };
+    try {
+      render(
+        <TooltipProvider>
+          <WorkPage
+            bridge={fakeBridge() as unknown as WorkBridge}
+            workspaces={[
+              { id: "ws-1", name: "issue-621" },
+              { id: "ws-2", name: "issue-623" },
+            ]}
+            onOpenSession={vi.fn()}
+            onOpenExternal={vi.fn()}
+          />
+        </TooltipProvider>,
+      );
+      await screen.findByText("Improve Jira resume");
+      fireEvent.click(screen.getByRole("button", { name: "Open DRG-42: Improve Jira resume" }));
+      const panel = await screen.findByRole("complementary", { name: "Ticket DRG-42" });
+      fireEvent.click(within(panel).getByRole("tab", { name: "sessions" }));
+      fireEvent.click(within(panel).getByRole("button", { name: /Link a session/ }));
+      const picker = await within(panel).findByRole("combobox", { name: "Session to link" });
+      // Never one host-wide list: each workspace on its own.
+      expect(sessions.mock.calls.map((c) => c[0]).sort()).toEqual(["ws-1", "ws-2"]);
+      expect(within(picker).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["", "other-9"]);
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Sessions of 1 workspace could not be listed."));
+    } finally {
+      delete (window as unknown as { drogon?: unknown }).drogon;
+    }
   });
 
   test("the ticket panel links a session and edits fields", async () => {

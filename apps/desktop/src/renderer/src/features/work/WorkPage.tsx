@@ -88,6 +88,7 @@ import { WorkColumnIcon } from "./work-icons";
 import { WorkColumnPanel } from "./WorkColumnPanel";
 import { WorkTicketPanel, type WorkWorkspace } from "./WorkTicketPanel";
 import { WorkImportDialog } from "./WorkImportDialog";
+import { listWorkspaceSessions, unreadableNotice, type SessionsReply } from "./work-session-candidates";
 import { isTaskSource, requestTaskSourceConnect } from "../tasks/task-source-navigation";
 import { WorkSyncActions, type WorkSyncHandlers } from "./WorkSyncActions";
 import {
@@ -153,7 +154,7 @@ export function WorkPage({
   onOpenExternal = (url) => {
     void (window as unknown as { drogon?: { shell?: { openExternal?: (u: string) => unknown } } }).drogon?.shell?.openExternal?.(url);
   },
-  listSessions = defaultListSessions,
+  listSessions,
   onOpenTasks,
   onClose,
 }: {
@@ -218,6 +219,17 @@ export function WorkPage({
     if (kind === "error") toast.error(message);
     else toast.success(message);
   };
+  // Linkable sessions, one workspace at a time (see work-session-candidates).
+  const listCandidates =
+    listSessions ??
+    (async () => {
+      const { sessions, unreadable } = await listWorkspaceSessions(
+        workspaces.map((w) => w.id),
+        defaultSessionsOf,
+      );
+      if (unreadable > 0) notice(unreadableNotice(unreadable), "error");
+      return sessions;
+    });
 
   const board = state.board;
   // A board removed elsewhere (the CLI, another window): back to My work.
@@ -777,7 +789,7 @@ export function WorkPage({
             state={state}
             bridge={bridge}
             workspaces={workspaces}
-            listSessions={listSessions}
+            listSessions={listCandidates}
             readOnly={readOnly}
             syncHandlers={syncHandlers}
             onOpenSession={(session, ticket) => void openSession(session, ticket)}
@@ -847,11 +859,9 @@ export function WorkPage({
   );
 }
 
-async function defaultListSessions(): Promise<Session[]> {
-  const drogon = (window as unknown as { drogon?: { sessions?: (w?: string) => Promise<{ ok: boolean; result?: { sessions: Session[] }; error?: { message: string } }> } }).drogon;
-  const reply = await drogon?.sessions?.(undefined);
-  if (!reply?.ok || !reply.result) throw new Error(reply?.error?.message ?? "Sessions are unavailable.");
-  return reply.result.sessions;
+function defaultSessionsOf(workspaceId: string): Promise<SessionsReply | undefined> {
+  const drogon = (window as unknown as { drogon?: { sessions?: (w?: string) => Promise<SessionsReply> } }).drogon;
+  return drogon?.sessions?.(workspaceId) ?? Promise.resolve(undefined);
 }
 
 // ----------------------------------------------------------------- board --
