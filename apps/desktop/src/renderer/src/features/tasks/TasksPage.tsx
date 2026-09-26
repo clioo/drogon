@@ -34,7 +34,9 @@ import type {
 } from "../../../../shared/jira-contract";
 import {
   consumePendingTaskSource,
+  consumePendingTaskSourceConnect,
   resolveRequestedTaskSource,
+  subscribeTaskSourceConnect,
   subscribeTaskSourceNavigation,
   type TaskSource,
 } from "./task-source-navigation";
@@ -440,6 +442,32 @@ export function TasksPage({ bridge, loadGroups, onOpenTerminal, onClose, jiraBri
       return next;
     });
   }, []);
+  // Work's "Connect Jira on the Tasks page": once the status is known, an
+  // unconnected Jira opens its connect dialog (a hidden Jira is shown again,
+  // since asking to connect it is explicit); a connected one just shows.
+  const [connectRequest, setConnectRequest] = useState<TaskSource | null>(null);
+  useEffect(() => {
+    const pending = consumePendingTaskSourceConnect();
+    if (pending !== null) setConnectRequest(pending);
+    return subscribeTaskSourceConnect(setConnectRequest);
+  }, []);
+  useEffect(() => {
+    if (connectRequest === null) return;
+    // Only Jira connects on this page; anything else just navigates.
+    if (connectRequest !== "jira") {
+      setConnectRequest(null);
+      return;
+    }
+    if (!jiraStatusReady) return;
+    setConnectRequest(null);
+    setHiddenTaskSources((current) => {
+      if (!current.has("jira")) return current;
+      const next = new Set(current);
+      next.delete("jira");
+      return next;
+    });
+    if (!jiraConnected) setJiraConnectOpen(true);
+  }, [connectRequest, jiraStatusReady, jiraConnected]);
   // Fork SourceBar selectJiraSite: clear the list immediately, then let the
   // daemon switch; a failure toasts the fork's copy and keeps the old site.
   const onSelectJiraSite = useCallback(

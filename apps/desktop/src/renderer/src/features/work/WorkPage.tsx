@@ -88,6 +88,7 @@ import { WorkColumnIcon } from "./work-icons";
 import { WorkColumnPanel } from "./WorkColumnPanel";
 import { WorkTicketPanel, type WorkWorkspace } from "./WorkTicketPanel";
 import { WorkImportDialog } from "./WorkImportDialog";
+import { isTaskSource, requestTaskSourceConnect } from "../tasks/task-source-navigation";
 import { WorkSyncActions, type WorkSyncHandlers } from "./WorkSyncActions";
 import {
   BackToActive,
@@ -198,6 +199,16 @@ export function WorkPage({
     board?: { externalId: string; projectId?: string | null };
   }>(null);
   const sourcesState = useWorkSources(bridge, active);
+  // Connecting through Tasks leaves this page mounted but hidden, so the
+  // import dialog (a portal) must close first or it covers the Tasks page;
+  // Tasks then opens on the source with its connect dialog up.
+  const openTasksToConnect = onOpenTasks
+    ? (sourceId: string) => {
+        setImporting(null);
+        if (isTaskSource(sourceId)) requestTaskSourceConnect(sourceId);
+        onOpenTasks();
+      }
+    : undefined;
   const allowed = allowedSources(sourcesState.sources);
   const [cardDismissed, dismissCard, restoreCard] = useSyncCardDismissed();
   const [syncing, setSyncing] = useState(false);
@@ -738,7 +749,7 @@ export function WorkPage({
                     state={sourcesState}
                     bridge={bridge}
                     onOpenExternal={onOpenExternal}
-                    onOpenTasks={onOpenTasks}
+                    onOpenTasks={openTasksToConnect}
                     onNotice={notice}
                   />
                 ) : null
@@ -819,7 +830,7 @@ export function WorkPage({
           initialBoard={importing.board ?? null}
           onClose={() => setImporting(null)}
           onOpenExternal={onOpenExternal}
-          onOpenTasks={onOpenTasks}
+          onOpenTasks={openTasksToConnect}
           onSourceChanged={() => void sourcesState.reload()}
           onImported={(imported, count) => {
             setImporting(null);

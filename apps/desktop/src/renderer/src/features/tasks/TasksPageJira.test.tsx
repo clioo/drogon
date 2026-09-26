@@ -7,10 +7,11 @@
    page's terminal seam. */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { TooltipProvider } from "./ui/tooltip";
 import { TasksPage, clearTasksPageResultCache } from "./TasksPage";
 import {
+  requestTaskSourceConnect,
   requestTaskSourceNavigation,
   resetTaskSourceNavigation,
 } from "./task-source-navigation";
@@ -459,5 +460,47 @@ describe("TasksPage Jira surface (R17-B)", () => {
     expect(screen.getByRole("button", { name: "Hide Jira" })).not.toBeNull();
     // Never hit the list RPC while disconnected.
     expect(calls.listIssues).toHaveLength(0);
+  });
+  test("a connect request (Work's Connect Jira) opens the connect dialog when Jira is not connected", async () => {
+    const calls: JiraBridgeCalls = { listIssues: [], searchIssues: [], comments: [], startIssue: [] };
+    const disconnected: JiraBridge = {
+      ...fakeJiraBridge([], calls),
+      jiraStatus: () =>
+        Promise.resolve({
+          ok: true as const,
+          result: { connected: false, viewer: null, sites: [], activeSiteId: null, selectedSiteId: null },
+        }),
+    };
+    requestTaskSourceConnect("jira");
+    renderPage(disconnected);
+
+    expect(await screen.findByRole("dialog", { name: "Connect Jira site" })).not.toBeNull();
+    expect(screen.getByText("Connect your Jira site")).not.toBeNull();
+  });
+
+  test("a connect request arriving while the page is mounted also opens the dialog", async () => {
+    const calls: JiraBridgeCalls = { listIssues: [], searchIssues: [], comments: [], startIssue: [] };
+    const disconnected: JiraBridge = {
+      ...fakeJiraBridge([], calls),
+      jiraStatus: () =>
+        Promise.resolve({
+          ok: true as const,
+          result: { connected: false, viewer: null, sites: [], activeSiteId: null, selectedSiteId: null },
+        }),
+    };
+    renderPage(disconnected);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Connect Jira site" })).toBeNull());
+    act(() => requestTaskSourceConnect("jira"));
+
+    expect(await screen.findByRole("dialog", { name: "Connect Jira site" })).not.toBeNull();
+  });
+
+  test("a connect request for an already connected Jira just shows its issues", async () => {
+    const calls: JiraBridgeCalls = { listIssues: [], searchIssues: [], comments: [], startIssue: [] };
+    requestTaskSourceConnect("jira");
+    renderPage(fakeJiraBridge([issue()], calls));
+
+    expect(await screen.findByText("Jira issues")).not.toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Connect Jira site" })).toBeNull();
   });
 });
