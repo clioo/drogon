@@ -15,6 +15,11 @@ import type { WorkBoard, WorkBridge, WorkColumn, WorkSource, WorkTicket } from "
 import { resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
 import { importLabel, SYNC_CARD_DISMISSED_KEY } from "./WorkSources";
 import { providerLabel, sprintTerm, ticketDisplayKey } from "./work-sources";
+import {
+  consumePendingTaskSource,
+  consumePendingTaskSourceConnect,
+  resetTaskSourceNavigation,
+} from "../tasks/task-source-navigation";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
@@ -23,6 +28,7 @@ beforeEach(() => localStorage.clear());
 afterEach(() => {
   cleanup();
   resetWorkViewMemoryForTests();
+  resetTaskSourceNavigation();
 });
 
 const ok = <T,>(result: T): Promise<Result<T>> => Promise.resolve({ ok: true, result });
@@ -345,6 +351,7 @@ describe("Work sources", () => {
     const panel = await screen.findByTestId("work-sync-sources");
     fireEvent.click(within(within(panel).getByRole("listitem", { name: "Jira" })).getByRole("button", { name: "Connect" }));
     expect(onOpenTasks).toHaveBeenCalled();
+    expect(consumePendingTaskSourceConnect()).toBe("jira");
     const github = within(panel).getByRole("listitem", { name: "GitHub" });
     fireEvent.click(within(github).getByRole("button", { name: "Connect" }));
     fireEvent.click(within(github).getByRole("button", { name: "Use my gh login" }));
@@ -363,6 +370,26 @@ describe("Work sources", () => {
     await waitFor(() =>
       expect(bridge.sourceConnect).toHaveBeenLastCalledWith({ provider: "github", apiKey: "ghp_x", apiUrl: "https://ghe.example/api/v3" }),
     );
+  });
+
+  test("Connect Jira on the Tasks page closes the import dialog and opens Tasks on Jira's connect flow", async () => {
+    const onOpenTasks = vi.fn();
+    const bridge = fakeBridge();
+    bridge.providerBoards.mockImplementation(() =>
+      fail("Jira is not connected. Connect it on the Tasks page.", "jira_not_connected"),
+    );
+    await mount(bridge, { onOpenTasks });
+    openMenu(await screen.findByRole("button", { name: "Import board" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Import a Jira board/ }));
+    const dialog = await screen.findByTestId("work-import-dialog");
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Connect Jira on the Tasks page" }));
+
+    expect(onOpenTasks).toHaveBeenCalledTimes(1);
+    // The page stays mounted (hidden) behind Tasks, so a lingering dialog
+    // would cover the Tasks page: it must be gone.
+    await waitFor(() => expect(screen.queryByTestId("work-import-dialog")).toBeNull());
+    expect(consumePendingTaskSource()).toBe("jira");
+    expect(consumePendingTaskSourceConnect()).toBe("jira");
   });
 
   test("importing from an unconnected Linear connects in place, then lists its teams", async () => {

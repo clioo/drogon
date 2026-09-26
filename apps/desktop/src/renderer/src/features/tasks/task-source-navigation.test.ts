@@ -5,9 +5,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   consumePendingTaskSource,
+  consumePendingTaskSourceConnect,
+  isTaskSource,
+  requestTaskSourceConnect,
   requestTaskSourceNavigation,
   resetTaskSourceNavigation,
   resolveRequestedTaskSource,
+  subscribeTaskSourceConnect,
   subscribeTaskSourceNavigation,
 } from "./task-source-navigation";
 
@@ -57,5 +61,51 @@ describe("resolveRequestedTaskSource", () => {
 
   test("no request keeps the default source", () => {
     expect(resolveRequestedTaskSource(null, ["github"])).toBe("github");
+  });
+});
+
+describe("requestTaskSourceConnect", () => {
+  test("parks both the source and the connect intent, each consumed once", () => {
+    requestTaskSourceConnect("jira");
+    expect(consumePendingTaskSource()).toBe("jira");
+    expect(consumePendingTaskSourceConnect()).toBe("jira");
+    expect(consumePendingTaskSourceConnect()).toBeNull();
+  });
+
+  test("the test reset drops a parked intent and its listeners", () => {
+    const connect = vi.fn();
+    subscribeTaskSourceConnect(connect);
+    requestTaskSourceConnect("jira");
+    resetTaskSourceNavigation();
+    expect(consumePendingTaskSourceConnect()).toBeNull();
+    requestTaskSourceConnect("jira");
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  test("a plain navigation carries no connect intent", () => {
+    requestTaskSourceNavigation("jira");
+    expect(consumePendingTaskSourceConnect()).toBeNull();
+  });
+
+  test("mounted pages hear the source and the intent live", () => {
+    const source = vi.fn();
+    const connect = vi.fn();
+    const offSource = subscribeTaskSourceNavigation(source);
+    const offConnect = subscribeTaskSourceConnect(connect);
+    requestTaskSourceConnect("jira");
+    expect(source).toHaveBeenCalledWith("jira");
+    expect(connect).toHaveBeenCalledWith("jira");
+    offSource();
+    offConnect();
+    requestTaskSourceConnect("jira");
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("isTaskSource", () => {
+  test("accepts Tasks sources and rejects anything else", () => {
+    expect(isTaskSource("jira")).toBe(true);
+    expect(isTaskSource("linear")).toBe(true);
+    expect(isTaskSource("trello")).toBe(false);
   });
 });
