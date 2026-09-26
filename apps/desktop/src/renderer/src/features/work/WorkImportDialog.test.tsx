@@ -276,4 +276,105 @@ describe("board picker", () => {
       within(dialog).queryByRole("textbox", { name: "Filter teams" }),
     ).toBeNull();
   });
+
+  test("a sprint board opens with only the active sprint's issues chosen, and says so", async () => {
+    const JIRA: WorkSource = {
+      ...LINEAR,
+      id: "jira",
+      name: "Jira",
+      boardTerm: "board",
+      sprintTerm: "sprint",
+      connect: "tasks",
+    };
+    const sprint = (id: string, name: string, state: string) => ({
+      id,
+      name,
+      state,
+      start: null,
+      end: null,
+      goal: null,
+    });
+    const todo = { id: "1", name: "To Do", category: "new" };
+    const mine = (key: string, inSprint: ReturnType<typeof sprint> | null) => ({
+      id: key,
+      key,
+      url: `http://jira.local/browse/${key}`,
+      title: key,
+      issueType: "Story",
+      priority: null,
+      assignee: "Carlos",
+      assigneeId: "me",
+      status: todo,
+      sprint: inSprint,
+      closedSprints: [],
+      importedTicketId: null,
+    });
+    const active = sprint("20", "S20", "active");
+    const next = sprint("21", "S21", "future");
+    const bridge = {
+      providerBoards: vi.fn(),
+      importPreview: vi.fn(() =>
+        ok({
+          provider: "jira",
+          me: "me",
+          board: { id: "7", name: "L&C Scrum Board", kind: "scrum" },
+          columns: [{ name: "To Do" }],
+          sprints: [active, next],
+          issues: [
+            mine("FT-1", active),
+            mine("FT-2", active),
+            mine("FT-3", next),
+            mine("FT-4", null),
+          ],
+          facets: {
+            mine: 4,
+            finished: 0,
+            unassigned: 0,
+            noProject: 0,
+            people: [],
+            projects: [],
+            statuses: [],
+          },
+        }),
+      ),
+    };
+    render(
+      <TooltipProvider>
+        <WorkImportDialog
+          open
+          bridge={bridge as unknown as WorkBridge}
+          source={JIRA}
+          projects={[]}
+          initialBoard={{ externalId: "7" }}
+          onClose={vi.fn()}
+          onImported={vi.fn()}
+          onOpenExternal={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+    const dialog = await screen.findByTestId("work-import-dialog");
+    const checked = (key: string) =>
+      within(dialog)
+        .getByRole("checkbox", { name: `Import ${key}` })
+        .getAttribute("aria-checked");
+    await within(dialog).findByRole("checkbox", { name: "Import FT-1" });
+    expect([
+      checked("FT-1"),
+      checked("FT-2"),
+      checked("FT-3"),
+      checked("FT-4"),
+    ]).toEqual(["true", "true", "false", "false"]);
+    expect(
+      within(dialog).getByRole("button", { name: "Import 2 issues" }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        /^Yours in the active sprint are chosen; pick more or filter to add others\./,
+      ),
+    ).toBeTruthy();
+    // Finished issues start hidden.
+    expect(bridge.importPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ open: true }),
+    );
+  });
 });
