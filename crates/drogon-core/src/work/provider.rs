@@ -376,7 +376,7 @@ fn sync_jqls(keys: &[String], mine_open: bool) -> Vec<String> {
         .map(|chunk| {
             let quoted: Vec<String> = chunk
                 .iter()
-                .map(|k| format!("\"{}\"", k.replace('\\', "").replace('"', "")))
+                .map(|k| format!("\"{}\"", k.replace(['\\', '"'], "")))
                 .collect();
             format!("key in ({})", quoted.join(","))
         })

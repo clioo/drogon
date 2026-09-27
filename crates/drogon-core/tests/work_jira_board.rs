@@ -1287,7 +1287,7 @@ fn mine_imports_your_issues_and_auto_import_follows_new_assignments() {
                 .is_some_and(|p| p.ends_with("/board/7/issue"))
         })
         .filter_map(|r| r["jql"].as_str().map(str::to_owned))
-        .last()
+        .next_back()
         .unwrap();
     assert!(!off_jql.contains("currentUser"), "{off_jql}");
     assert!(
