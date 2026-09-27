@@ -90,7 +90,7 @@ import { WorkColumnPanel } from "./WorkColumnPanel";
 import { WorkTicketPanel, type WorkWorkspace } from "./WorkTicketPanel";
 import { WorkImportDialog } from "./WorkImportDialog";
 import { useDragAutoScroll } from "./work-drag-autoscroll";
-import { listWorkspaceSessions, unreadableNotice, type SessionsReply } from "./work-session-candidates";
+import { listWorkspaceSessions, type SessionsReply } from "./work-session-candidates";
 import { isTaskSource, requestTaskSourceConnect } from "../tasks/task-source-navigation";
 import { WorkSyncActions, type WorkSyncHandlers } from "./WorkSyncActions";
 import {
@@ -184,7 +184,7 @@ export function WorkPage({
   /** Selects the session's workspace and focuses its terminal tab. */
   onOpenSession: (target: WorkSessionTarget) => void;
   onOpenExternal?: (url: string) => void;
-  listSessions?: () => Promise<Session[]>;
+  listSessions?: () => Promise<Session[] | { sessions: Session[]; unreadable: number }>;
   /** Opens the Tasks page, where Jira connects. */
   onOpenTasks?: () => void;
   onClose?: () => void;
@@ -240,16 +240,7 @@ export function WorkPage({
     else toast.success(message);
   };
   // Linkable sessions, one workspace at a time (see work-session-candidates).
-  const listCandidates =
-    listSessions ??
-    (async () => {
-      const { sessions, unreadable } = await listWorkspaceSessions(
-        workspaces.map((w) => w.id),
-        defaultSessionsOf,
-      );
-      if (unreadable > 0) notice(unreadableNotice(unreadable), "error");
-      return sessions;
-    });
+  const listCandidates = listSessions ?? (() => listWorkspaceSessions(workspaces.map((w) => w.id), defaultSessionsOf));
 
   const board = state.board;
   // A board removed elsewhere (the CLI, another window): back to My work.

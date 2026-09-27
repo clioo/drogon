@@ -16,7 +16,6 @@ import type {
 } from "../../../../shared/work-contract";
 import { columnDropIndex, resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
 import { TooltipProvider } from "../../components/ui/tooltip";
-import { toast } from "sonner";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
@@ -517,7 +516,8 @@ describe("Work board", () => {
       // Never one host-wide list: each workspace on its own.
       expect(sessions.mock.calls.map((c) => c[0]).sort()).toEqual(["ws-1", "ws-2"]);
       expect(within(picker).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["", "other-9"]);
-      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Sessions of 1 workspace could not be listed."));
+      // Said beside the picker, not in a toast that goes away.
+      expect(within(panel).getByRole("status").textContent).toBe("Sessions of 1 workspace could not be listed.");
     } finally {
       delete (window as unknown as { drogon?: unknown }).drogon;
     }
@@ -600,6 +600,8 @@ describe("Work board", () => {
     fireEvent.click(within(panel).getByRole("tab", { name: "sessions" }));
     fireEvent.click(within(panel).getByRole("button", { name: /Link a session/ }));
     const picker = await within(panel).findByRole("combobox", { name: "Session to link" });
+    // Every workspace listed: nothing to say beside the picker.
+    expect(within(panel).queryByText(/could not be listed/)).toBeNull();
     // Already-linked sessions are not offered again.
     expect(within(picker).queryByText(/issue-621/)).toBeNull();
     fireEvent.change(picker, { target: { value: "other-9" } });
