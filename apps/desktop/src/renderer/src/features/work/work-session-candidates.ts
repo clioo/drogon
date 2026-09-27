@@ -4,6 +4,10 @@
 // must not hide the others.
 import type { Session } from "../../../../shared/session-contract";
 
+/** What the ticket panel's picker lists: the sessions and, when known, how
+ *  many workspaces could not be listed. */
+export type LinkCandidates = Session[] | { sessions: Session[]; unreadable: number };
+
 export type SessionsReply = {
   ok: boolean;
   result?: { sessions: Session[] };

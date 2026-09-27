@@ -83,7 +83,7 @@ function mount(
           { id: "ws-1", name: "Drogon" },
           { id: "ws-2", name: "Zillow" },
         ]}
-        listSessions={listSessions}
+        listLinkCandidates={listSessions}
         syncHandlers={{} as never}
         onOpenSession={vi.fn()}
         onOpenExternal={vi.fn()}

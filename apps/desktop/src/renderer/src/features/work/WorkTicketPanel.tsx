@@ -55,7 +55,7 @@ import {
   ticketDisplayKey,
 } from "./work-sources";
 import { WorkSyncActions, type WorkSyncHandlers } from "./WorkSyncActions";
-import { unreadableNotice } from "./work-session-candidates";
+import { type LinkCandidates, unreadableNotice } from "./work-session-candidates";
 
 export type WorkWorkspace = { id: string; name: string };
 
@@ -94,21 +94,21 @@ export function WorkTicketPanel({
   state,
   bridge,
   workspaces,
-  listSessions,
   readOnly = false,
   syncHandlers,
   onOpenSession,
   onOpenExternal,
   onClose,
   onNotice,
+  listLinkCandidates,
 }: {
+  /** Linkable sessions; with `unreadable`, how many workspaces could not be listed. */
+  listLinkCandidates: () => Promise<LinkCandidates>;
   ticket: WorkTicket;
   board: WorkBoard;
   state: WorkBoardState;
   bridge: WorkBridge;
   workspaces: WorkWorkspace[];
-  /** Linkable sessions; with `unreadable`, how many workspaces could not be listed. */
-  listSessions: () => Promise<Session[] | { sessions: Session[]; unreadable: number }>;
   /** A closed sprint's view: no moves, no sends. */
   readOnly?: boolean;
   syncHandlers: WorkSyncHandlers;
@@ -196,7 +196,7 @@ export function WorkTicketPanel({
   };
   const loadCandidates = async () => {
     try {
-      const reply = await listSessions();
+      const reply = await listLinkCandidates();
       const all = Array.isArray(reply) ? reply : reply.sessions;
       const unreadable = Array.isArray(reply) ? 0 : reply.unreadable;
       const linked = new Set(ticket.sessions.map((s) => s.id));

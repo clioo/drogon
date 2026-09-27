@@ -805,7 +805,7 @@ export function WorkPage({
             state={state}
             bridge={bridge}
             workspaces={workspaces}
-            listSessions={listCandidates}
+            listLinkCandidates={listCandidates}
             readOnly={readOnly}
             syncHandlers={syncHandlers}
             onOpenSession={(session, ticket) => void openSession(session, ticket)}
