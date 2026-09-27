@@ -184,7 +184,7 @@ export function WorkPage({
   /** Selects the session's workspace and focuses its terminal tab. */
   onOpenSession: (target: WorkSessionTarget) => void;
   onOpenExternal?: (url: string) => void;
-  listSessions?: () => Promise<Session[] | { sessions: Session[]; unreadable: number }>;
+  listSessions?: () => Promise<Session[]>;
   /** Opens the Tasks page, where Jira connects. */
   onOpenTasks?: () => void;
   onClose?: () => void;
