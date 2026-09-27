@@ -106,6 +106,13 @@ pub(crate) enum IssueScope {
     Board,
     Backlog,
     Sprint(String),
+    /// What a sync reads: the board's issues among `keys` (already imported)
+    /// and, with `mine_open`, your unresolved ones (to auto-import). A source
+    /// that cannot narrow its listing reads the whole board.
+    Sync {
+        keys: Vec<String>,
+        mine_open: bool,
+    },
 }
 
 /// A provider failure: the message is shown to the user as is.
@@ -355,6 +362,32 @@ impl<'a> JiraProvider<'a> {
             project_name: text(location.and_then(|l| l.get("projectName"))),
         }
     }
+}
+
+/// Imported keys per sync query: short enough for a URL, few enough queries.
+const SYNC_KEYS_PER_QUERY: usize = 100;
+const MINE_OPEN_JQL: &str = "assignee = currentUser() AND resolution = Unresolved";
+
+/// The JQL a sync asks a board with: the imported keys in batches, your open
+/// issues with the first batch (or alone); none when there is nothing to ask.
+fn sync_jqls(keys: &[String], mine_open: bool) -> Vec<String> {
+    let mut queries: Vec<String> = keys
+        .chunks(SYNC_KEYS_PER_QUERY)
+        .map(|chunk| {
+            let quoted: Vec<String> = chunk
+                .iter()
+                .map(|k| format!("\"{}\"", k.replace('\\', "").replace('"', "")))
+                .collect();
+            format!("key in ({})", quoted.join(","))
+        })
+        .collect();
+    if mine_open {
+        match queries.first_mut() {
+            Some(first) => *first = format!("{first} OR ({MINE_OPEN_JQL})"),
+            None => queries.push(MINE_OPEN_JQL.to_string()),
+        }
+    }
+    queries
 }
 
 /// The boards an issue's Sprint field puts it on, open sprints only (an
@@ -611,7 +644,26 @@ impl WorkProvider for JiraProvider<'_> {
 
     fn list_issues(&self, board_id: &str, scope: &IssueScope) -> ProviderResult<Vec<ExtIssue>> {
         let board = encode_path_segment(board_id);
+        if let IssueScope::Sync { keys, mine_open } = scope {
+            // A big board's whole history is thousands of issues; a sync only
+            // needs the imported ones and your open work, asked by JQL.
+            let mut out: Vec<ExtIssue> = Vec::new();
+            for jql in sync_jqls(keys, *mine_open) {
+                let path = format!(
+                    "{AGILE}/board/{board}/issue?fields={ISSUE_FIELDS}&jql={}",
+                    url::form_urlencoded::byte_serialize(jql.as_bytes()).collect::<String>()
+                );
+                for raw in self.paged(&path, "issues")? {
+                    let issue = self.map_issue(&raw);
+                    if !out.iter().any(|i| i.key == issue.key) {
+                        out.push(issue);
+                    }
+                }
+            }
+            return Ok(out);
+        }
         let path = match scope {
+            IssueScope::Sync { .. } => unreachable!("handled above"),
             IssueScope::Board => format!("{AGILE}/board/{board}/issue?fields={ISSUE_FIELDS}"),
             IssueScope::Backlog => format!("{AGILE}/board/{board}/backlog?fields={ISSUE_FIELDS}"),
             IssueScope::Sprint(id) => format!(
@@ -814,6 +866,29 @@ mod tests {
             }
         );
         assert!(jira_assigned_by_board(&boards, &json!({}), Some("cf")).is_empty());
+    }
+
+    #[test]
+    fn a_sync_asks_for_the_imported_keys_in_batches_and_your_open_work_once() {
+        assert!(sync_jqls(&[], false).is_empty());
+        assert_eq!(sync_jqls(&[], true), [MINE_OPEN_JQL]);
+        let keys = vec!["FT-1".to_string(), "FT-2".to_string()];
+        assert_eq!(sync_jqls(&keys, false), [r#"key in ("FT-1","FT-2")"#]);
+        assert_eq!(
+            sync_jqls(&keys, true),
+            [format!(r#"key in ("FT-1","FT-2") OR ({MINE_OPEN_JQL})"#)]
+        );
+        let many: Vec<String> = (0..250).map(|n| format!("FT-{n}")).collect();
+        let queries = sync_jqls(&many, true);
+        assert_eq!(queries.len(), 3);
+        assert!(queries[0].ends_with(&format!("OR ({MINE_OPEN_JQL})")));
+        assert!(!queries[1].contains("currentUser"));
+        assert_eq!(queries[2].matches("\"FT-").count(), 50);
+        // A key cannot break out of its quotes.
+        assert_eq!(
+            sync_jqls(&[r#"X-1") OR ("Y"#.to_string()], false),
+            [r#"key in ("X-1) OR (Y")"#]
+        );
     }
 
     #[test]

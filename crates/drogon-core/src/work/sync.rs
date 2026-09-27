@@ -1633,9 +1633,6 @@ impl Engine {
             let catalogue = provider
                 .list_statuses(&board.external_id)
                 .map_err(provider_error)?;
-            let issues = provider
-                .list_issues(&board.external_id, &IssueScope::Board)
-                .map_err(provider_error)?;
             let known: Vec<(String, String, Option<String>)> = {
                 let conn = self.db.lock().unwrap();
                 let mut stmt = conn
@@ -1646,6 +1643,13 @@ impl Engine {
                     .collect::<Result<_, _>>()
                     .map_err(error::from_sqlite)?
             };
+            let scope = IssueScope::Sync {
+                keys: known.iter().map(|(_, key, _)| key.clone()).collect(),
+                mine_open: board.auto_import_mine,
+            };
+            let issues = provider
+                .list_issues(&board.external_id, &scope)
+                .map_err(provider_error)?;
             // Tickets whose issue left the board's listing: read each one
             // directly (it may have moved board) before calling it gone.
             let mut off_board = HashMap::new();

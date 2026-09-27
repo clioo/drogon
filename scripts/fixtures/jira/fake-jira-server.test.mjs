@@ -122,3 +122,22 @@ test('names its Sprint field and returns it in the v3 and v2 search shapes', asy
   const plain = await call(port, 'POST', '/rest/api/3/search/jql', { jql, maxResults: 100, fields: ['project'] });
   assert.ok(plain.issues.every((i) => !('customfield_10020' in i.fields)));
 });
+
+test('the board listing honours the JQL a sync sends: imported keys OR your open issues', async (t) => {
+  const port = await listenOn(t, path.join(here, 'data', 'agile-site.json'));
+  const keys = async (jql) => {
+    const query = jql === null ? '' : `?jql=${encodeURIComponent(jql)}`;
+    const page = await call(port, 'GET', `/rest/agile/1.0/board/7/issue${query}`);
+    return page.issues.map((i) => i.key).sort();
+  };
+  const all = await keys(null);
+  assert.ok(all.length > 5, `no JQL lists the whole board: ${all}`);
+  assert.deepEqual(await keys('key in ("APP-146","APP-110")'), ['APP-110', 'APP-146']);
+  // Your open issues: APP-142 and APP-128 (none of yours is done here).
+  assert.deepEqual(await keys('assignee = currentUser() AND resolution = Unresolved'), ['APP-128', 'APP-142']);
+  assert.deepEqual(
+    await keys('key in ("APP-146") OR (assignee = currentUser() AND resolution = Unresolved)'),
+    ['APP-128', 'APP-142', 'APP-146'],
+  );
+  assert.deepEqual(await keys('key in ("NOPE-1")'), []);
+});

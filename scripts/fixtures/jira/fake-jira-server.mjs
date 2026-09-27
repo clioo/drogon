@@ -256,7 +256,11 @@ async function agile(req, res, url, path) {
     if (rest === '/backlog') {
       return issuePage(boardIssues(board).filter((issue) => issue.sprintId == null && issue.fields.status.statusCategory.key !== 'done'))
     }
-    if (rest === '/issue') return issuePage(boardIssues(board))
+    if (rest === '/issue') {
+      const jql = url.searchParams.get('jql')
+      if (jql !== null) logRequest({ path, method: req.method, jql })
+      return issuePage(jql === null ? boardIssues(board) : boardIssues(board).filter((issue) => matchesBoardJql(issue, jql)))
+    }
   }
   const agileIssueMatch = path.match(/^\/rest\/agile\/1\.0\/issue\/([^/]+)$/)
   if (req.method === 'GET' && agileIssueMatch) {
@@ -540,6 +544,18 @@ function matchesJql(issue, jql) {
   if (/resolution IS NOT EMPTY/.test(trimmed) && issue.fields.resolution == null) return false
   if (/resolution = Unresolved/.test(trimmed) && issue.fields.resolution != null) return false
   return true
+}
+
+// The board listing's JQL as a sync sends it: clauses joined by OR, each
+// `key in ("A","B")` or a parenthesised `assignee = currentUser() AND
+// resolution = Unresolved`.
+function matchesBoardJql(issue, jql) {
+  return jql.split(/\s+OR\s+(?![^(]*\))/).some((clause) => {
+    const keys = /^key in \((.*)\)$/.exec(clause.trim())
+    if (keys) return keys[1].split(',').map((k) => k.trim().replace(/^"|"$/g, '')).includes(issue.key)
+    const inner = clause.trim().replace(/^\((.*)\)$/, '$1')
+    return matchesJql(issue, inner) && (!/resolution = Unresolved/.test(inner) || issue.fields.status.statusCategory.key !== 'done')
+  })
 }
 
 // Mirrors the daemon's ISSUE_LIST_FIELDS so a "fields" request is honored

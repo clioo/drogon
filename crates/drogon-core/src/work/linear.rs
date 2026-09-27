@@ -381,7 +381,8 @@ impl WorkProvider for LinearProvider {
             after = page["pageInfo"]["endCursor"].as_str().map(str::to_owned);
         }
         Ok(match scope {
-            IssueScope::Board => out,
+            // Its listing cannot be narrowed: a sync reads the whole board.
+            IssueScope::Board | IssueScope::Sync { .. } => out,
             IssueScope::Backlog => out
                 .into_iter()
                 .filter(|i| i.sprint.is_none() && i.status.category != "done")
