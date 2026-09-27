@@ -55,6 +55,7 @@ import {
   ticketDisplayKey,
 } from "./work-sources";
 import { WorkSyncActions, type WorkSyncHandlers } from "./WorkSyncActions";
+import { type LinkCandidates, unreadableNotice } from "./work-session-candidates";
 
 export type WorkWorkspace = { id: string; name: string };
 
@@ -93,20 +94,21 @@ export function WorkTicketPanel({
   state,
   bridge,
   workspaces,
-  listSessions,
   readOnly = false,
   syncHandlers,
   onOpenSession,
   onOpenExternal,
   onClose,
   onNotice,
+  listLinkCandidates,
 }: {
+  /** Linkable sessions; with `unreadable`, how many workspaces could not be listed. */
+  listLinkCandidates: () => Promise<LinkCandidates>;
   ticket: WorkTicket;
   board: WorkBoard;
   state: WorkBoardState;
   bridge: WorkBridge;
   workspaces: WorkWorkspace[];
-  listSessions: () => Promise<Session[]>;
   /** A closed sprint's view: no moves, no sends. */
   readOnly?: boolean;
   syncHandlers: WorkSyncHandlers;
@@ -131,6 +133,8 @@ export function WorkTicketPanel({
   const [sends, setSends] = useState<WorkSend[]>([]);
   const [activity, setActivity] = useState<WorkActivity[]>([]);
   const [candidates, setCandidates] = useState<Session[] | null>(null);
+  // Said beside the picker: some workspaces' sessions are missing from it.
+  const [candidatesNote, setCandidatesNote] = useState<string | null>(null);
   const [linkChoice, setLinkChoice] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
 
@@ -192,8 +196,11 @@ export function WorkTicketPanel({
   };
   const loadCandidates = async () => {
     try {
-      const all = await listSessions();
+      const reply = await listLinkCandidates();
+      const all = Array.isArray(reply) ? reply : reply.sessions;
+      const unreadable = Array.isArray(reply) ? 0 : reply.unreadable;
       const linked = new Set(ticket.sessions.map((s) => s.id));
+      setCandidatesNote(unreadable > 0 ? unreadableNotice(unreadable) : null);
       setCandidates(all.filter((s) => !linked.has(s.id)));
     } catch (err) {
       onNotice(err instanceof Error ? err.message : String(err), "error");
@@ -592,6 +599,11 @@ export function WorkTicketPanel({
                 </Button>
               </div>
             )}
+            {candidates !== null && candidatesNote ? (
+              <p className="text-xs text-amber-700 dark:text-amber-300" role="status">
+                {candidatesNote}
+              </p>
+            ) : null}
           </section>
         ) : null}
 

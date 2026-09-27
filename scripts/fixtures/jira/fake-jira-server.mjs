@@ -169,6 +169,19 @@ function sprintRef(id) {
   return { ...rest, originBoardId: boardId }
 }
 
+const SPRINT_FIELD = 'customfield_10020'
+
+// The platform search's Sprint field: Cloud (v3) returns sprint objects with
+// their board id; Server/DC (v2) returns GreenHopper's string form.
+function sprintFieldValue(issue, api) {
+  const sprint = issue.sprintId == null ? null : (dataset.sprints ?? []).find((s) => s.id === issue.sprintId)
+  if (!sprint) return null
+  if (api === 'v2') {
+    return [`com.atlassian.greenhopper.service.sprint.Sprint@1a2b[id=${sprint.id},rapidViewId=${sprint.boardId},state=${sprint.state.toUpperCase()},name=${sprint.name}]`]
+  }
+  return [{ id: sprint.id, name: sprint.name, state: sprint.state, boardId: sprint.boardId }]
+}
+
 // An issue as the agile API returns it: its current (non-closed) sprint in
 // `fields.sprint`, the closed ones it passed through in `fields.closedSprints`.
 function agileIssue(issue) {
@@ -243,7 +256,11 @@ async function agile(req, res, url, path) {
     if (rest === '/backlog') {
       return issuePage(boardIssues(board).filter((issue) => issue.sprintId == null && issue.fields.status.statusCategory.key !== 'done'))
     }
-    if (rest === '/issue') return issuePage(boardIssues(board))
+    if (rest === '/issue') {
+      const jql = url.searchParams.get('jql')
+      if (jql !== null) logRequest({ path, method: req.method, jql })
+      return issuePage(jql === null ? boardIssues(board) : boardIssues(board).filter((issue) => matchesBoardJql(issue, jql)))
+    }
   }
   const agileIssueMatch = path.match(/^\/rest\/agile\/1\.0\/issue\/([^/]+)$/)
   if (req.method === 'GET' && agileIssueMatch) {
@@ -334,13 +351,27 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' })
     return res.end(
       JSON.stringify({
-        issues: window.map((issue) => pickFields(issue, body.fields)),
+        issues: window.map((issue) => {
+          const picked = pickFields(issue, body.fields)
+          if (Array.isArray(body.fields) && body.fields.includes(SPRINT_FIELD)) picked.fields[SPRINT_FIELD] = sprintFieldValue(issue, api)
+          return picked
+        }),
         startAt,
         maxResults,
         total: matching.length,
         isLast: startAt + maxResults >= matching.length,
       }),
     )
+  }
+
+  // Field catalog: where the site keeps its Sprint custom field.
+  if (api && req.method === 'GET' && path.endsWith('/field')) {
+    logRequest({ path, method: req.method })
+    return json(res, 200, [
+      { id: 'summary', name: 'Summary', custom: false, schema: { type: 'string', system: 'summary' } },
+      { id: SPRINT_FIELD, name: 'Sprint', custom: true, schema: { type: 'array', items: 'json', custom: 'com.pyxis.greenhopper.jira:gh-sprint', customId: 10020 } },
+      { id: 'customfield_10016', name: 'Story point estimate', custom: true, schema: { type: 'number', custom: 'com.pyxis.greenhopper.jira:jsw-story-points' } },
+    ])
   }
 
   // Project picker: paged search (Cloud) or the plain array (Server/DC).
@@ -513,6 +544,18 @@ function matchesJql(issue, jql) {
   if (/resolution IS NOT EMPTY/.test(trimmed) && issue.fields.resolution == null) return false
   if (/resolution = Unresolved/.test(trimmed) && issue.fields.resolution != null) return false
   return true
+}
+
+// The board listing's JQL as a sync sends it: clauses joined by OR, each
+// `key in ("A","B")` or a parenthesised `assignee = currentUser() AND
+// resolution = Unresolved`.
+function matchesBoardJql(issue, jql) {
+  return jql.split(/\s+OR\s+(?![^(]*\))/).some((clause) => {
+    const keys = /^key in \((.*)\)$/.exec(clause.trim())
+    if (keys) return keys[1].split(',').map((k) => k.trim().replace(/^"|"$/g, '')).includes(issue.key)
+    const inner = clause.trim().replace(/^\((.*)\)$/, '$1')
+    return matchesJql(issue, inner) && (!/resolution = Unresolved/.test(inner) || issue.fields.status.statusCategory.key !== 'done')
+  })
 }
 
 // Mirrors the daemon's ISSUE_LIST_FIELDS so a "fields" request is honored

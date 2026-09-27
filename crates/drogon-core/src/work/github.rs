@@ -751,7 +751,8 @@ impl WorkProvider for GithubProvider {
             }
         };
         Ok(match scope {
-            IssueScope::Board => all,
+            // Its listing cannot be narrowed: a sync reads the whole board.
+            IssueScope::Board | IssueScope::Sync { .. } => all,
             IssueScope::Backlog => all
                 .into_iter()
                 .filter(|i| i.sprint.is_none() && i.status.category != "done")

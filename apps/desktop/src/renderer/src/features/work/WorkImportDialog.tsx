@@ -29,11 +29,29 @@ import type {
   WorkProviderIssue,
   WorkSource,
 } from "../../../../shared/work-contract";
-import { assignedLabel, filterBoards, groupBoards, type PickerBoard } from "./work-board-picker";
+import {
+  RECOMMENDED_LIMIT,
+  assignedLabel,
+  filterBoards,
+  groupBoards,
+  visibleRecommendations,
+  type PickerBoard,
+} from "./work-board-picker";
 import { IssueTypeBadge, ProviderMark, capitalize } from "./work-sources";
 import { boardsTerm, WorkSourceConnectForm } from "./WorkSources";
 
 type Group = { id: string; label: string; issues: WorkProviderIssue[] };
+
+/** What the picker chooses when a board's issues first load: the active
+ *  sprint's (what you are working on now), or every listed issue when the
+ *  board has no active sprint with anything to import. Issues already on
+ *  the board are never chosen again. */
+export function defaultChosen(preview: WorkImportPreview): Set<string> {
+  const importable = (issues: WorkProviderIssue[]) => issues.filter((i) => !i.importedTicketId).map((i) => i.key);
+  const active = new Set(preview.sprints.filter((s) => s.state === "active").map((s) => s.id));
+  const inActive = importable(preview.issues.filter((i) => i.sprint && active.has(i.sprint.id)));
+  return new Set(inActive.length > 0 ? inActive : importable(preview.issues));
+}
 
 /** Issues grouped the way a scrum board reads: active sprint, upcoming
  *  sprints, backlog, then what already finished in a past sprint. */
@@ -168,7 +186,7 @@ export function WorkImportDialog({
       setPreview(answer);
       if (seeded.current !== external) {
         seeded.current = external;
-        setChosen(new Set(answer.issues.filter((i) => !i.importedTicketId).map((i) => i.key)));
+        setChosen(defaultChosen(answer));
       }
     });
     return () => {
@@ -223,7 +241,7 @@ export function WorkImportDialog({
           </DialogTitle>
           <DialogDescription>
             {preview
-              ? `Yours are chosen; filter to add others. Each keeps its ${source.name} key, and its column's prompts reach the sessions you link to it.`
+              ? `Yours in the active ${source.sprintTerm} are chosen; pick more or filter to add others. Each keeps its ${source.name} key, and its column's prompts reach the sessions you link to it.`
               : needsConnect
                 ? `Connect ${source.name} to see its ${boardsTerm(source)}.`
                 : `Pick the ${source.name} ${source.boardTerm} that frames the import: its columns and ${source.sprintTerm}s come with it.`}
@@ -392,22 +410,28 @@ export function WorkImportDialog({
               />
               Keep importing new issues assigned to me on every sync
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Sessions start in</span>
-              <select
-                aria-label="Drogon project for sessions"
-                className="h-8 flex-1 rounded-md border border-input bg-transparent px-2 text-sm"
-                value={projectId}
-                onChange={(event) => setProjectId(event.target.value)}
-              >
-                <option value="">Choose per ticket later</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="space-y-1">
+              <label className="flex items-center gap-2 text-sm">
+                <span className="shrink-0 text-muted-foreground">Agents work in</span>
+                <select
+                  aria-label="Agents work in"
+                  aria-describedby="work-import-agents-work-in-hint"
+                  className="h-8 flex-1 rounded-md border border-input bg-transparent px-2 text-sm"
+                  value={projectId}
+                  onChange={(event) => setProjectId(event.target.value)}
+                >
+                  <option value="">Choose per ticket later</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p id="work-import-agents-work-in-hint" className="text-xs text-muted-foreground">
+                When a ticket starts a session (a column&apos;s prompt or New session), it opens in this project&apos;s folder.
+              </p>
+            </div>
           </div>
         ) : null}
 
@@ -452,7 +476,14 @@ function BoardPicker({
   const term = boardsTerm(source);
   const shown = filterBoards(boards, query);
   const { recommended, rest } = groupBoards(shown);
-  const row = (b: PickerBoard) => (
+  const [expanded, setExpanded] = useState(false);
+  const filtering = Boolean(query.trim());
+  const visible = visibleRecommendations(recommended, { expanded, filtering });
+  // Only a recommendation says how many of your issues it holds.
+  const isRecommended = new Set(recommended);
+  const row = (b: PickerBoard) => {
+    const label = isRecommended.has(b) ? assignedLabel(b) : null;
+    return (
     <li key={b.id}>
       <button
         type="button"
@@ -469,15 +500,14 @@ function BoardPicker({
             {b.projectName && b.projectName !== b.name ? ` · ${b.projectName}` : ""}
           </span>
         </span>
-        {b.assignedOpen ? (
-          <span className="shrink-0 text-xs text-muted-foreground">{assignedLabel(b.assignedOpen)}</span>
-        ) : null}
+        {label ? <span className="shrink-0 text-xs text-muted-foreground">{label}</span> : null}
         {b.importedBoardId ? (
           <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">Imported</span>
         ) : null}
       </button>
     </li>
   );
+  };
   if (boards.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -515,7 +545,18 @@ function BoardPicker({
             <p className="mb-1 text-xs font-semibold text-muted-foreground">
               Recommended for you <span className="font-normal">{recommended.length}</span>
             </p>
-            <ul className="space-y-1">{recommended.map(row)}</ul>
+            <ul className="space-y-1">{visible.shown.map(row)}</ul>
+            {recommended.length > RECOMMENDED_LIMIT && !filtering ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-1 h-7 px-2 text-xs text-muted-foreground"
+                onClick={() => setExpanded((open) => !open)}
+              >
+                {visible.hidden > 0 ? `Show all ${recommended.length}` : "Show fewer"}
+              </Button>
+            ) : null}
           </section>
         ) : null}
         {rest.length > 0 ? (
