@@ -314,6 +314,94 @@ describe("Work board", () => {
     await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "review", index: 1 }));
   });
 
+  test("dragging near the board's edge scrolls it after a short delay and stops away from the edge", async () => {
+    const { bridge } = await mount();
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      setData: (k: string, v: string) => data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+      get types() {
+        return [...data.keys()];
+      },
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    const board = screen.getByTestId("work-board");
+    board.getBoundingClientRect = () => ({ left: 0, width: 1000, top: 0, height: 600, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    const over = (clientX: number, types = dataTransfer) => {
+      const event = createEvent.dragOver(board, { dataTransfer: types });
+      Object.defineProperty(event, "clientX", { value: clientX });
+      fireEvent(board, event);
+    };
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+    try {
+      fireEvent.dragStart(within(screen.getByRole("region", { name: "To do column" })).getByTestId("work-column-header"), { dataTransfer });
+      over(995);
+      // Passing over the edge does not scroll yet.
+      act(() => vi.advanceTimersByTime(100));
+      expect(board.scrollLeft).toBe(0);
+      act(() => vi.advanceTimersByTime(200));
+      const moved = board.scrollLeft;
+      expect(moved).toBeGreaterThan(0);
+      act(() => vi.advanceTimersByTime(100));
+      expect(board.scrollLeft).toBeGreaterThan(moved);
+      // Back in the middle: it stops.
+      over(500);
+      const stopped = board.scrollLeft;
+      act(() => vi.advanceTimersByTime(500));
+      expect(board.scrollLeft).toBe(stopped);
+      // Near the start it scrolls back; a drop ends it.
+      over(5);
+      act(() => vi.advanceTimersByTime(400));
+      expect(board.scrollLeft).toBeLessThan(stopped);
+      fireEvent.drop(board, { dataTransfer });
+      const dropped = board.scrollLeft;
+      act(() => vi.advanceTimersByTime(500));
+      expect(board.scrollLeft).toBe(dropped);
+      // Something dragged in from outside (a file, text) never scrolls it.
+      const file = { ...dataTransfer, types: ["Files"] };
+      board.scrollLeft = 0;
+      over(995, file as never);
+      act(() => vi.advanceTimersByTime(500));
+      expect(board.scrollLeft).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(bridge.columnUpdate).not.toHaveBeenCalled();
+  });
+
+  test("dragging a card near a column's bottom edge scrolls its list", async () => {
+    await mount();
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      setData: (k: string, v: string) => data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+      get types() {
+        return [...data.keys()];
+      },
+      effectAllowed: "",
+      dropEffect: "",
+    };
+    const card = screen.getByRole("article", { name: "DRG-41 Plan the personal workspace" });
+    const list = card.closest("[class*='overflow-y-auto']") as HTMLElement;
+    list.getBoundingClientRect = () => ({ left: 0, width: 272, top: 100, height: 400, right: 272, bottom: 500, x: 0, y: 100, toJSON: () => ({}) });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+    try {
+      fireEvent.dragStart(card, { dataTransfer });
+      const event = createEvent.dragOver(list, { dataTransfer });
+      Object.defineProperty(event, "clientY", { value: 495 });
+      fireEvent(list, event);
+      act(() => vi.advanceTimersByTime(400));
+      expect(list.scrollTop).toBeGreaterThan(0);
+      fireEvent(window, new Event("dragend"));
+      const ended = list.scrollTop;
+      act(() => vi.advanceTimersByTime(400));
+      expect(list.scrollTop).toBe(ended);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("a long column name is shown whole, wrapping instead of truncating", async () => {
     await mount();
     const title = within(screen.getByRole("region", { name: "Review column" })).getByRole("heading", { name: "Review" });

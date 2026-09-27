@@ -89,6 +89,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/too
 import { WorkColumnPanel } from "./WorkColumnPanel";
 import { WorkTicketPanel, type WorkWorkspace } from "./WorkTicketPanel";
 import { WorkImportDialog } from "./WorkImportDialog";
+import { useDragAutoScroll } from "./work-drag-autoscroll";
 import { listWorkspaceSessions, unreadableNotice, type SessionsReply } from "./work-session-candidates";
 import { isTaskSource, requestTaskSourceConnect } from "../tasks/task-source-navigation";
 import { WorkSyncActions, type WorkSyncHandlers } from "./WorkSyncActions";
@@ -123,6 +124,8 @@ import {
 
 const TICKET_MIME = "application/x-drogon-work-ticket";
 const COLUMN_MIME = "application/x-drogon-work-column";
+/** What the board's edges scroll for while dragged. */
+const BOARD_DRAG_TYPES = [TICKET_MIME, COLUMN_MIME] as const;
 
 /** The line a column shows on the side a dragged column would land. */
 function columnDropClass(side: "before" | "after" | null): string {
@@ -927,8 +930,10 @@ function BoardView({
   onCollapseColumn: (column: WorkColumn, collapsed: boolean) => void;
   onDeleteTicket: (ticket: WorkTicket) => void;
 }) {
+  const boardRef = useRef<HTMLDivElement>(null);
+  useDragAutoScroll(boardRef, "x", BOARD_DRAG_TYPES);
   return (
-    <div className="flex min-h-0 flex-1 gap-0 overflow-x-auto px-3 pb-4" data-testid="work-board">
+    <div ref={boardRef} className="flex min-h-0 flex-1 gap-0 overflow-x-auto px-3 pb-4" data-testid="work-board">
       {board.columns.map((column, index) => (
         <BoardColumn
           key={column.id}
@@ -1018,6 +1023,7 @@ function BoardColumn({
   const [columnSide, setColumnSide] = useState<"before" | "after" | null>(null);
   const [renaming, setRenaming] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  useDragAutoScroll(listRef, "y", BOARD_DRAG_TYPES);
   const trigger = columnTriggerLabel(column);
 
   const indexAt = (clientY: number): number => {
