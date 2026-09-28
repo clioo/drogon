@@ -493,6 +493,37 @@ const server = createServer(async (req, res) => {
       res.writeHead(400, { 'content-type': 'application/json' })
       return res.end(JSON.stringify({ errorMessages: ['The issue could not be created (fixture FAIL_CREATE switch).'], errors: {} }))
     }
+    if (dataset.stateful) {
+      // Work creates issues on an imported board: keep them, like Jira.
+      const projectKey = body?.fields?.project?.key
+      const project = (dataset.projects ?? []).find((p) => p.key === projectKey)
+      if (!project) return json(res, 400, { errorMessages: [], errors: { project: 'valid project is required' } })
+      const type = (dataset.createmeta?.issueTypes ?? []).find((t) => t.id === body?.fields?.issuetype?.id)
+      if (!type) return json(res, 400, { errorMessages: [], errors: { issuetype: 'valid issue type is required' } })
+      const numbers = (dataset.issues ?? []).filter((i) => i.key.startsWith(`${projectKey}-`)).map((i) => Number(i.key.split('-')[1]) || 0)
+      const key = `${projectKey}-${Math.max(0, ...numbers) + 1}`
+      const assigneeId = body?.fields?.assignee?.accountId
+      const issue = {
+        id: String(40000 + dataset.issues.length),
+        key,
+        sprintId: null,
+        closedSprintIds: [],
+        fields: {
+          summary,
+          project,
+          issuetype: { id: type.id, name: type.name },
+          priority: { id: '3', name: 'Medium' },
+          status: dataset.statuses[0],
+          assignee: assigneeId === dataset.myself.accountId ? { accountId: assigneeId, displayName: dataset.myself.displayName } : null,
+          labels: [],
+          created: new Date().toISOString(),
+          updated: new Date().toISOString(),
+          description: body?.fields?.description ?? null,
+        },
+      }
+      dataset.issues.push(issue)
+      return json(res, 201, { id: issue.id, key, self: `https://fixture.local/rest/api/3/issue/${key}` })
+    }
     const maxNumber = Math.max(0, ...(dataset.issues ?? []).map((issue) => Number(issue.key.split('-')[1]) || 0))
     const key = `DROG-${maxNumber + 1}`
     res.writeHead(201, { 'content-type': 'application/json' })

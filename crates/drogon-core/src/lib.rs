@@ -722,6 +722,7 @@ impl Engine {
             "work.board_push" => self.mutating(request, Self::do_work_board_push),
             "work.board_delete" => self.mutating(request, Self::do_work_board_delete),
             "work.board_update" => self.mutating(request, Self::do_work_board_update),
+            "work.create_options" => self.work_create_options(&request.params),
             "work.ticket_push" => self.mutating(request, Self::do_work_ticket_push),
             "work.ticket_resolve" => self.mutating(request, Self::do_work_ticket_resolve),
             "work.ticket_sprint" => self.mutating(request, Self::do_work_ticket_sprint),

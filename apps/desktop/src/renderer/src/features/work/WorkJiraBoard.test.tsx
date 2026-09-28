@@ -553,8 +553,9 @@ describe("Jira boards on the Work page", () => {
       expect(bridge.ticketMove).toHaveBeenCalledWith({ ticketId: "t142", columnId: "review", index: 2, sprintId: "25" }),
     );
 
-    // New ticket on an imported board brings issues in from Jira.
-    fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    // Import more issues brings existing issues in from Jira.
+    openMenu(screen.getByRole("button", { name: "Sync options" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Import more issues…" }));
     await screen.findByText("Columns: To Do · Review");
     expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7", provider: "jira", assignee: "me", open: true });
   });
@@ -855,5 +856,65 @@ describe("reading a real board", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Collapse empty columns" }));
     await waitFor(() => expect(bridge.columnUpdate).toHaveBeenCalledWith({ columnId: "done", collapsed: true }));
     expect(bridge.columnUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  test("+ on a column creates a Jira issue in that column's status, sprint and type", async () => {
+    const base = fakeBridge();
+    const created = jira({ id: "t200", key: "DRG-9", externalKey: "APP-151", title: "Created here", columnId: "review" });
+    const bridge = {
+      ...base,
+      createOptions: vi.fn(() =>
+        ok({ provider: "jira", boardId: "b7", issueTypes: [{ id: "2", name: "Task" }, { id: "1", name: "Bug" }], repos: [] }),
+      ),
+      ticketCreate: vi.fn(() => ok({ ...created, warnings: [] })),
+    };
+    await openPlatform(bridge);
+    fireEvent.click(screen.getByRole("button", { name: "New ticket in Review" }));
+    const dialog = await screen.findByTestId("work-create-issue-dialog");
+    expect(within(dialog).getByText("New Jira issue")).toBeTruthy();
+    expect(within(dialog).getByTestId("work-create-issue-status").textContent).toBe("It starts in Jira as In Review.");
+    // The sprint being viewed; closed sprints are not offered.
+    const sprint = within(dialog).getByRole("combobox", { name: "Sprint" }) as HTMLSelectElement;
+    expect(sprint.value).toBe("25");
+    expect(Array.from(sprint.options).map((o) => o.value)).toEqual(["backlog", "25", "26"]);
+    const type = (await within(dialog).findByRole("combobox", { name: "Issue type" })) as HTMLSelectElement;
+    await waitFor(() => expect(type.value).toBe("2"));
+    const submit = within(dialog).getByRole("button", { name: "Create in Jira" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Title" }), { target: { value: "Created here" } });
+    fireEvent.change(type, { target: { value: "1" } });
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Assign to me" }));
+    fireEvent.click(submit);
+    await waitFor(() =>
+      expect(bridge.ticketCreate).toHaveBeenCalledWith({
+        boardId: "b7",
+        title: "Created here",
+        columnId: "review",
+        assignToMe: false,
+        sprintId: "25",
+        issueType: "1",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByTestId("work-create-issue-dialog")).toBeNull());
+    expect(bridge.createOptions).toHaveBeenCalledWith({ boardId: "b7" });
+    expect(base.importPreview).not.toHaveBeenCalled();
+  });
+
+  test("a failed create keeps the form and says why", async () => {
+    const bridge = {
+      ...fakeBridge(),
+      createOptions: vi.fn(() => ok({ provider: "jira", boardId: "b7", issueTypes: [{ id: "2", name: "Task" }], repos: [] })),
+      ticketCreate: vi.fn(() =>
+        Promise.resolve({ ok: false as const, error: { code: "jira_error", message: "Jira refused: summary too long", retryable: false } }),
+      ),
+    };
+    await openPlatform(bridge);
+    fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    const dialog = await screen.findByTestId("work-create-issue-dialog");
+    expect((within(dialog).getByRole("combobox", { name: "Column" }) as HTMLSelectElement).value).toBe("todo");
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Title" }), { target: { value: "Too long" } });
+    await waitFor(() => expect((within(dialog).getByRole("button", { name: "Create in Jira" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create in Jira" }));
+    expect((await within(dialog).findByRole("alert")).textContent).toContain("summary too long");
   });
 });

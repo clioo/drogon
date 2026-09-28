@@ -956,6 +956,27 @@ fn sources_are_listed_toggled_connected_and_a_linear_team_imported_from_the_cli(
         imported.contains("Imported 2 issue(s) into Engineering"),
         "{imported}"
     );
+    // A new Linear issue from the board, in the column's status.
+    let created = fx.text(&[
+        "work",
+        "ticket",
+        "create",
+        "--board",
+        "Engineering",
+        "--column",
+        "In Progress",
+        "--title",
+        "Made from the CLI",
+        "--sprint",
+        "backlog",
+    ]);
+    assert!(created.contains("Made from the CLI"), "{created}");
+    let shown = fx.json(&["work", "ticket", "show", "--ticket", "ENG-6"]);
+    assert_eq!(shown["externalStatus"]["name"], "In Progress");
+    assert!(
+        fx.text(&["work", "ticket", "options", "--board", "Engineering"])
+            .contains("Nothing to choose")
+    );
     let settings = fx.text(&[
         "work",
         "import",

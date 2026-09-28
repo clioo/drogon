@@ -1502,8 +1502,35 @@ impl Engine {
                 "sourceUrl",
                 "nextStep",
                 "sessionIds",
+                "boardId",
+                "assignToMe",
+                "issueType",
+                "repo",
+                "sprintId",
             ],
         )?;
+        // On an imported board the ticket is a new issue in its source.
+        let on_board = {
+            let conn = self.db.lock().unwrap();
+            let board = sync::resolve_board_param(&conn, str_field(params, "boardId")?)?;
+            match (board, str_field(params, "columnId")?) {
+                (Some(board), column) => Some((board, column.map(str::to_owned))),
+                (None, Some(column)) => get_column(&conn, column)?
+                    .board_id
+                    .map(|board| (board, Some(column.to_string()))),
+                (None, None) => None,
+            }
+        };
+        if let Some((board, column)) = on_board {
+            return self.create_ticket_on_board(&board, column.as_deref(), params);
+        }
+        for field in ["assignToMe", "issueType", "repo", "sprintId"] {
+            if params.get(field).is_some() {
+                return Err(error::invalid_argument(format!(
+                    "{field} is for a ticket created on an imported board"
+                )));
+            }
+        }
         let title = bounded_text(&required(params, "title")?, "title", MAX_TITLE, false)?;
         let description = bounded_text(
             str_field(params, "description")?.unwrap_or(""),
@@ -1554,11 +1581,6 @@ impl Engine {
                     .next()
                     .ok_or_else(|| error::invalid_argument("the board has no columns"))?,
             };
-            if column.board_id.is_some() {
-                return Err(error::invalid_argument(
-                    "tickets on an imported board come from its provider: create the issue there, then import it",
-                ));
-            }
             for session in &session_ids {
                 self.require_session_row(&conn, session)?;
             }

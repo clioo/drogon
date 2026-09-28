@@ -1119,3 +1119,160 @@ fn the_linear_picker_filters_by_person_project_status_and_words() {
     );
     assert_eq!(imported["imported"], 1);
 }
+
+/// "+" on an imported board's column creates the issue in its source, in
+/// that column's status, in the cycle being worked, assigned to the owner.
+#[test]
+fn a_ticket_created_on_a_linear_board_is_a_new_linear_issue_in_that_column() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "linear", "apiKey": "lin_api_fixture", "apiUrl": fx.url("linear")}),
+    );
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"provider": "linear", "externalBoardId": "team-eng", "mine": true}),
+    );
+    let board = imported["board"]["id"].as_str().unwrap().to_string();
+    let view = ctx.ok("work.board", json!({"boardId": board}));
+
+    let created = ctx.ok(
+        "work.ticket_create",
+        json!({"boardId": board, "columnId": "In Progress", "title": "Wire the create form", "description": "From **Drogon**", "nextStep": "Draft it"}),
+    );
+    assert_eq!(created["externalKey"], "ENG-6");
+    assert_eq!(created["externalStatus"]["name"], "In Progress");
+    assert_eq!(column_name(&view, &created), "In Progress");
+    assert_eq!(
+        created["sprintName"], "Cycle 12 · Resume polish",
+        "the active cycle by default"
+    );
+    assert_eq!(created["assignee"], "Jon Doe");
+    assert_eq!(created["nextStep"], "Draft it");
+    assert_eq!(created["sync"], "synced");
+    assert_eq!(created["warnings"], json!([]));
+    let activity = activity(&ctx, "ENG-6");
+    assert!(
+        activity.contains(&"Created ENG-6 in Linear from Drogon".to_string()),
+        "{activity:?}"
+    );
+    assert!(!activity.iter().any(|a| a.starts_with("Imported")));
+    // It is really in Linear.
+    let preview = ctx.ok(
+        "work.import_preview",
+        json!({"provider": "linear", "externalBoardId": "team-eng", "query": "wire"}),
+    );
+    assert_eq!(preview["issues"][0]["key"], "ENG-6");
+    assert_eq!(preview["issues"][0]["importedTicketId"], created["id"]);
+
+    // Backlog, unassigned, by column id.
+    let todo = column_id(&view, "Todo");
+    let later = ctx.ok(
+        "work.ticket_create",
+        json!({"columnId": todo, "title": "Someday", "sprintId": "backlog", "assignToMe": false}),
+    );
+    assert_eq!(later["sprintId"], Value::Null);
+    assert_eq!(later["assignee"], Value::Null);
+    assert_eq!(later["externalStatus"]["name"], "Todo");
+    // A Drogon-only column keeps the card; Linear takes its default.
+    let parking = ctx.ok(
+        "work.column_create",
+        json!({"boardId": board, "name": "Parking"}),
+    );
+    let parked = ctx.ok(
+        "work.ticket_create",
+        json!({"columnId": parking["id"], "title": "Parked"}),
+    );
+    assert_eq!(parked["columnId"], parking["id"]);
+    assert_eq!(parked["externalStatus"]["name"], "Todo");
+    // Refusals.
+    assert!(
+        ctx.err(
+            "work.ticket_create",
+            json!({"boardId": board, "title": "x", "sprintId": "Cycle 11"})
+        )
+        .message
+        .contains("closed")
+    );
+    assert!(
+        ctx.err(
+            "work.ticket_create",
+            json!({"boardId": board, "title": "x", "columnId": "Nope"})
+        )
+        .message
+        .contains("no column Nope")
+    );
+    assert!(
+        ctx.err(
+            "work.ticket_create",
+            json!({"boardId": board, "title": "x", "projectId": "p"})
+        )
+        .message
+        .contains("set it on the ticket afterwards")
+    );
+    assert!(
+        ctx.err(
+            "work.ticket_create",
+            json!({"title": "x", "assignToMe": true})
+        )
+        .message
+        .contains("imported board")
+    );
+    // The column's on-enter prompt reaches a created ticket too.
+    let review = column_id(&view, "In Review");
+    ctx.ok("work.column_update", json!({"columnId": review, "sendOnEnter": true, "message": "Review {ticket.key}", "harnessId": "claude"}));
+    let prompted = ctx.ok(
+        "work.ticket_create",
+        json!({"columnId": review, "title": "Prompted"}),
+    );
+    assert_eq!(prompted["delivery"]["trigger"], "enter");
+}
+
+#[test]
+fn github_creates_issues_in_a_repository_board_and_a_project() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "github", "apiKey": "ghp_fixture", "apiUrl": fx.url("github")}),
+    );
+    let project = ctx.ok("work.board_import", json!({"provider": "github", "externalBoardId": "project:PVT_roadmap", "issueKeys": ["clioo/drogon#10"]}));
+    let board = project["board"]["id"].as_str().unwrap().to_string();
+    let options = ctx.ok("work.create_options", json!({"boardId": board}));
+    assert_eq!(options["repos"], json!(["clioo/drogon"]));
+    assert!(
+        ctx.err(
+            "work.ticket_create",
+            json!({"boardId": board, "columnId": "Todo", "title": "No repo"})
+        )
+        .message
+        .contains("choose the repository")
+    );
+    let created = ctx.ok(
+        "work.ticket_create",
+        json!({"boardId": board, "columnId": "In Progress", "title": "From Drogon", "repo": "clioo/drogon"}),
+    );
+    assert_eq!(created["externalKey"], "clioo/drogon#16");
+    assert_eq!(created["externalStatus"]["name"], "In Progress");
+    assert_eq!(
+        created["sprintName"], "Iteration 2",
+        "the active iteration by default"
+    );
+    assert_eq!(created["assignee"], "Octo Fixture");
+
+    let repo = ctx.ok("work.board_import", json!({"provider": "github", "externalBoardId": "repo:clioo/drogon", "issueKeys": ["clioo/drogon#10"]}));
+    let repo_board = repo["board"]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        ctx.ok("work.create_options", json!({"boardId": repo_board}))["repos"],
+        json!([])
+    );
+    let issue = ctx.ok(
+        "work.ticket_create",
+        json!({"boardId": repo_board, "title": "Plain issue"}),
+    );
+    assert_eq!(issue["externalKey"], "clioo/drogon#17");
+    assert_eq!(issue["externalStatus"]["name"], "Open");
+}

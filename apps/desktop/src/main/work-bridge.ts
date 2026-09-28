@@ -34,6 +34,7 @@ export const WORK_SLOW_OPS: ReadonlySet<string> = new Set([
   "columnSend",
   "ticketMove",
   "ticketCreate",
+  "createOptions",
   "ticketSessionStart",
   "sessionOpen",
 ]);

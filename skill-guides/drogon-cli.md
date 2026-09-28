@@ -379,12 +379,21 @@ active sprint.** A closed sprint is read-only; its reply carries
 ticket over or send it back, then push, like a status move:
 
 ```text
+drogon-cli work ticket create --board 7 --column Review --title Harden-the-retry
+drogon-cli work ticket options --board 7
 drogon-cli work ticket sprint --ticket APP-122 --to active
 drogon-cli work push --ticket APP-122
 drogon-cli work ticket new-session --ticket APP-128 --harness claude
 drogon-cli work ticket rename-session --ticket APP-128 --session <SESSION_ID> --title Implement
 drogon-cli work import remove --board 7
 ```
+
+New work goes straight into the source: `work ticket create --board <BOARD>
+--column <COLUMN>` creates the issue there (Linear, Jira, GitHub) in that
+column's status, in the sprint being worked (`--sprint backlog` for none),
+assigned to you (`--unassigned` otherwise). Jira takes `--issue-type`
+(default Task) and a GitHub Project `--repo`; `work ticket options` lists
+them.
 
 In a prompt on an imported ticket, `{ticket.id}` and `{ticket.key}` are the
 source key, `{ticket.status}` its status there and `{ticket.drogon_key}` the

@@ -811,5 +811,29 @@
     }
    }
   }
- ]
+ ],
+ "createmeta": {
+  "issueTypes": [
+   {
+    "id": "1",
+    "name": "Bug",
+    "subtask": false
+   },
+   {
+    "id": "2",
+    "name": "Task",
+    "subtask": false
+   },
+   {
+    "id": "3",
+    "name": "Feature",
+    "subtask": false
+   },
+   {
+    "id": "99",
+    "name": "Sub-task",
+    "subtask": true
+   }
+  ]
+ }
 }
