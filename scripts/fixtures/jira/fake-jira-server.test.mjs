@@ -141,3 +141,30 @@ test('the board listing honours the JQL a sync sends: imported keys OR your open
   );
   assert.deepEqual(await keys('key in ("NOPE-1")'), []);
 });
+
+test('a stateful site keeps an issue Work creates, numbered after the project, Task-typed and assigned', async (t) => {
+  const port = await listenOn(t, path.join(here, 'data', 'agile-site.json'));
+  const types = await call(port, 'GET', '/rest/api/3/issue/createmeta/APP/issuetypes');
+  const task = (types.issueTypes ?? types.values).find((type) => type.name === 'Task');
+  const post = (fields) =>
+    fetch(`http://127.0.0.1:${port}/rest/api/3/issue`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer fixture-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+  const created = await post({ project: { key: 'APP' }, summary: 'From the board', issuetype: { id: task.id }, assignee: { accountId: 'fixture-user-1' } });
+  assert.equal(created.status, 201);
+  const { key } = await created.json();
+  const before = await call(port, 'POST', '/rest/api/3/search/jql', { jql: 'project = APP', maxResults: 200, fields: ['summary'] });
+  const highest = Math.max(...before.issues.filter((i) => i.key !== key).map((i) => Number(i.key.split('-')[1])));
+  assert.equal(key, `APP-${highest + 1}`);
+  const issue = before.issues.find((i) => i.key === key);
+  assert.equal(issue.fields.summary, 'From the board');
+  const full = await call(port, 'GET', `/rest/api/3/issue/${key}`);
+  assert.equal(full.fields.issuetype.name, 'Task');
+  assert.equal(full.fields.status.name, 'To Do');
+  assert.equal(full.fields.assignee.displayName, 'Jon Doe');
+  // Jira refuses what it cannot place: an unknown project or issue type.
+  assert.equal((await post({ project: { key: 'NOPE' }, summary: 'x', issuetype: { id: task.id } })).status, 400);
+  assert.equal((await post({ project: { key: 'APP' }, summary: 'x', issuetype: { id: '424242' } })).status, 400);
+});
