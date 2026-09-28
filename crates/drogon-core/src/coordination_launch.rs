@@ -281,7 +281,19 @@ impl Engine {
             &cli,
             &graph.intent.policy,
         ));
-        let mut harness = harness::resolve_launch(&launch_request)?;
+        // A worker is a daemon-owned tab nobody sits at: its requested
+        // permission mode stands (as for a Work Graph role), and it runs with
+        // the owner's agent settings like any session they start — default
+        // args (their unattended flags), command override, disabled agents.
+        // A bare PATH plan dropped all of that, so workers stopped at every
+        // permission prompt with nobody there to answer.
+        launch_request.daemon_visible = true;
+        let mut harness = match self.read_agent_settings()? {
+            Some(settings) => {
+                crate::agent_settings::plan_with_settings(&launch_request, &settings)?
+            }
+            None => harness::resolve_launch(&launch_request)?,
+        };
         let pi_extension = (launch.harness_id == "pi").then(|| {
             let path = harness::harness_hooks::pi::nonce_extension_path(
                 &self.data_dir,
