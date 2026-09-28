@@ -12,8 +12,7 @@ use serde_json::{Value, json};
 
 use super::provider::{
     AssignedOpen, ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope,
-    NewIssue,
-    ProviderError, ProviderResult, WorkProvider,
+    NewIssue, ProviderError, ProviderResult, WorkProvider,
 };
 use crate::jira::client::{HttpRequest, JiraRequestError, REQUEST_TIMEOUT, http_json};
 
