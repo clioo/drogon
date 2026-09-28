@@ -354,10 +354,28 @@ pub enum WorkTicketAction {
         #[arg(long, value_name = "SPRINT")]
         sprint: Option<String>,
     },
-    /// Create a ticket; entering a column with an on-enter prompt sends it
+    /// Create a ticket; entering a column with an on-enter prompt sends it.
+    /// On an imported board (--board) it is a new issue in the source, in
+    /// the column's status, the sprint being worked, assigned to you
     Create {
         #[arg(long, value_name = "TITLE")]
         title: String,
+        /// An imported board (id or name): create the issue in its source
+        #[arg(long, value_name = "BOARD")]
+        board: Option<String>,
+        /// Imported boards: leave the new issue unassigned
+        #[arg(long)]
+        unassigned: bool,
+        /// Imported boards: active (default on a sprint board), backlog, or
+        /// a sprint id or name
+        #[arg(long, value_name = "SPRINT")]
+        sprint: Option<String>,
+        /// Jira: the issue type id (`work ticket options`; default Task)
+        #[arg(long, value_name = "ID")]
+        issue_type: Option<String>,
+        /// GitHub Project: the repository to create the issue in
+        #[arg(long, value_name = "OWNER/REPO")]
+        repo: Option<String>,
         /// Project id or name (keys follow it: Drogon → DRG-n)
         #[arg(long, value_name = "PROJECT")]
         project: Option<String>,
@@ -381,6 +399,13 @@ pub enum WorkTicketAction {
         /// Link a session (repeatable)
         #[arg(long = "session", value_name = "ID")]
         sessions: Vec<String>,
+    },
+    /// What creating an issue on an imported board can choose: Jira issue
+    /// types, a GitHub Project's repositories
+    Options {
+        /// Imported board id or name
+        #[arg(long, value_name = "BOARD")]
+        board: String,
     },
     /// Show a ticket with its sessions and recent sends
     Show {
@@ -602,6 +627,7 @@ pub fn validate(action: &WorkAction) -> Result<(), CliError> {
         WorkAction::Ticket { action } => match action {
             WorkTicketAction::List { .. } => {}
             WorkTicketAction::Create { title, .. } => nonempty("title", title)?,
+            WorkTicketAction::Options { board } => nonempty("board", board)?,
             WorkTicketAction::Move { ticket, column, .. } => {
                 nonempty("ticket", ticket)?;
                 nonempty("column", column)?;
@@ -852,7 +878,9 @@ fn needs_boards(action: &WorkAction) -> bool {
         WorkAction::Ticket { action } => match action {
             WorkTicketAction::List { board, sprint, .. } => board.is_some() || sprint.is_some(),
             WorkTicketAction::Move { sprint, .. } => sprint.is_some(),
-            WorkTicketAction::Resolve { .. }
+            WorkTicketAction::Create { board, .. } => board.is_some(),
+            WorkTicketAction::Options { .. }
+            | WorkTicketAction::Resolve { .. }
             | WorkTicketAction::Sprint { .. }
             | WorkTicketAction::NewSession { .. }
             | WorkTicketAction::RenameSession { .. } => true,
@@ -1203,8 +1231,36 @@ fn ticket_call(action: &WorkTicketAction) -> Result<WorkCall, CliError> {
             json!({ "ticketId": ticket, "sessionId": session, "title": title }),
             render_ticket,
         ),
+        WorkTicketAction::Options { board } => {
+            ("work.create_options", json!({ "boardId": board }), |v| {
+                let types: Vec<String> = v["issueTypes"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|t| format!("{} [{}]", text(&t["name"]), text(&t["id"])))
+                    .collect();
+                let repos: Vec<String> = v["repos"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|r| r.as_str().map(str::to_owned))
+                    .collect();
+                match (types.is_empty(), repos.is_empty()) {
+                    (false, _) => format!("issue types: {}", types.join(", ")),
+                    (true, false) => format!("repositories: {}", repos.join(", ")),
+                    (true, true) => "Nothing to choose: a title is enough.".to_string(),
+                }
+            })
+        }
         WorkTicketAction::Create {
             title,
+            board,
+            unassigned,
+            sprint,
+            issue_type,
+            repo,
             project,
             workspace,
             column,
@@ -1215,7 +1271,14 @@ fn ticket_call(action: &WorkTicketAction) -> Result<WorkCall, CliError> {
             sessions,
         } => {
             let mut params = json!({ "title": title });
+            if *unassigned {
+                params["assignToMe"] = json!(false);
+            }
             for (key, value) in [
+                ("boardId", board),
+                ("sprintId", sprint),
+                ("issueType", issue_type),
+                ("repo", repo),
                 ("projectId", project),
                 ("workspaceId", workspace),
                 ("columnId", column),

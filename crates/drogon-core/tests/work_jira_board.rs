@@ -513,12 +513,14 @@ fn imported_tickets_carry_jira_fields_and_a_hidden_drogon_key() {
         json!({"ticketId": t["id"], "nextStep": "Resume flow", "prUrl": "#84"}),
     );
     assert_eq!(updated["prNumber"], 84);
-    // Tickets on an imported board come from Jira, not from New ticket.
-    let refused = b.ctx.err(
+    // A ticket created in an imported board's column is a new Jira issue
+    // (a_ticket_created_on_a_jira_board_… covers it), never a Drogon-only one.
+    let created = b.ctx.ok(
         "work.ticket_create",
         json!({"title": "x", "columnId": b.column("Review")["id"]}),
     );
-    assert!(refused.message.contains("come from its provider"));
+    assert_eq!(created["provider"], "jira");
+    assert!(created["externalKey"].as_str().unwrap().starts_with("APP-"));
     // A card only moves within its board.
     let local = b.ctx.ok("work.board", json!({}))["columns"][0]["id"].clone();
     assert!(
@@ -1317,4 +1319,66 @@ fn mine_imports_your_issues_and_auto_import_follows_new_assignments() {
             .contains("mine: true")
     );
     drop(path);
+}
+
+/// A Jira issue created from the board: Task by default (or the chosen
+/// type), moved to the column's status through the workflow, in the sprint
+/// being worked, assigned to the owner.
+#[test]
+fn a_ticket_created_on_a_jira_board_is_a_new_jira_issue_in_that_column() {
+    let b = Board::imported();
+    let options = b
+        .ctx
+        .ok("work.create_options", json!({"boardId": b.board_id}));
+    let names: Vec<&str> = options["issueTypes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["Task", "Bug", "Feature"],
+        "Task first, no sub-tasks"
+    );
+    let created = b.ctx.ok(
+        "work.ticket_create",
+        json!({"boardId": b.board_id, "columnId": "Review", "title": "Created from Drogon", "description": "Body"}),
+    );
+    assert_eq!(created["externalKey"], "APP-151");
+    assert_eq!(created["issueType"], "Task");
+    assert_eq!(
+        created["externalStatus"]["name"], "In Review",
+        "moved through the workflow"
+    );
+    assert_eq!(created["sprintName"], "Sprint 25");
+    assert_eq!(created["assignee"], "Jon Doe");
+    assert_eq!(b.column_name_of(&created), "Review");
+    let bug = b.ctx.ok(
+        "work.ticket_create",
+        json!({"boardId": b.board_id, "title": "A bug", "issueType": "1", "sprintId": "backlog"}),
+    );
+    assert_eq!(bug["issueType"], "Bug");
+    // Sessions link at creation; an unknown one refuses before Jira is touched.
+    let refused = b.ctx.err(
+        "work.ticket_create",
+        json!({"boardId": b.board_id, "title": "x", "sessionIds": ["nope"]}),
+    );
+    assert!(refused.message.contains("session nope not found"));
+    let started = b.ctx.ok(
+        "work.ticket_session_start",
+        json!({"ticketId": "APP-151", "harnessId": "claude"}),
+    );
+    let session = started["session"]["id"].clone();
+    let linked = b.ctx.ok(
+        "work.ticket_create",
+        json!({"boardId": b.board_id, "title": "Linked", "sessionIds": [session]}),
+    );
+    assert_eq!(linked["sessions"][0]["id"], session);
+    assert_eq!(
+        linked["externalKey"], "APP-153",
+        "the refused create made nothing in Jira"
+    );
+    assert_eq!(bug["sprintId"], Value::Null);
+    assert_eq!(b.column_name_of(&bug), "To Do");
 }

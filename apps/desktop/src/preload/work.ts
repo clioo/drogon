@@ -16,6 +16,7 @@ export const work: WorkBridge = {
   columnDelete: (input) => call("columnDelete", input),
   columnSend: (input) => call("columnSend", input),
   ticketCreate: (input) => call("ticketCreate", input),
+  createOptions: (input) => call("createOptions", input),
   ticketUpdate: (input) => call("ticketUpdate", input),
   ticketMove: (input) => call("ticketMove", input),
   ticketDelete: (input) => call("ticketDelete", input),

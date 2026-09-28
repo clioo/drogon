@@ -28,7 +28,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::provider::{ExtBoard, ExtIssue, ExtSprint, IssueRef, IssueScope, WorkProvider};
+use super::provider::{
+    ExtBoard, ExtIssue, ExtSprint, IssueRef, IssueScope, NewIssue, WorkProvider,
+};
 use super::*;
 
 pub(super) const LOCAL_BOARD: &str = "local";
@@ -1784,6 +1786,190 @@ impl Engine {
             "imported": added,
             "deliveries": deliveries,
         }))
+    }
+
+    /// `work.create_options`: what creating an issue on an imported board
+    /// needs chosen (Jira issue types, a GitHub Project's repositories).
+    pub(crate) fn work_create_options(&self, params: &Value) -> Result<Value, RpcError> {
+        reject_unknown(params, &["boardId"])?;
+        let board = {
+            let conn = self.db.lock().unwrap();
+            get_board(&conn, &required(params, "boardId")?)?
+        };
+        let provider = self.board_provider(&board)?;
+        let options = provider
+            .create_options(&board.external_id)
+            .map_err(provider_error)?;
+        Ok(
+            json!({ "provider": board.provider, "boardId": board.id, "issueTypes": options.issue_types, "repos": options.repos }),
+        )
+    }
+
+    /// A new issue in an imported board's source, in the status of
+    /// `column` (its first mapped one; a Drogon-only column keeps the
+    /// source's default and the card stays in it), in the sprint named by
+    /// `sprintId` (default: the active one on a sprint board; `backlog` for
+    /// none), assigned to the owner unless `assignToMe` is false. The
+    /// ticket comes in like an imported one, and the column's on-enter
+    /// prompt fires as for any ticket entering it.
+    pub(super) fn create_ticket_on_board(
+        &self,
+        board_id: &str,
+        column: Option<&str>,
+        params: &Value,
+    ) -> Result<Value, RpcError> {
+        for field in ["projectId", "workspaceId", "prUrl", "sourceUrl"] {
+            if params.get(field).is_some() {
+                return Err(error::invalid_argument(format!(
+                    "{field} is not set when creating an issue on an imported board (set it on the ticket afterwards)"
+                )));
+            }
+        }
+        let title = bounded_text(&required(params, "title")?, "title", MAX_TITLE, false)?;
+        let description = bounded_text(
+            str_field(params, "description")?.unwrap_or(""),
+            "description",
+            MAX_TEXT,
+            true,
+        )?;
+        let next_step = bounded_text(
+            str_field(params, "nextStep")?.unwrap_or(""),
+            "nextStep",
+            MAX_TITLE,
+            true,
+        )?;
+        let assign_to_me = bool_field(params, "assignToMe")?.unwrap_or(true);
+        let session_ids: Vec<String> = match params.get("sessionIds") {
+            None | Some(Value::Null) => vec![],
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| error::invalid_argument("sessionIds must be strings"))
+                })
+                .collect::<Result<_, _>>()?,
+            Some(_) => return Err(error::invalid_argument("sessionIds must be an array")),
+        };
+        let (board, column, sprint) = {
+            let conn = self.db.lock().unwrap();
+            // Checked before anything is created in the source.
+            for session in &session_ids {
+                self.require_session_row(&conn, session)?;
+            }
+            let board = get_board(&conn, board_id)?;
+            let columns = list_columns(&conn, Some(&board.id))?;
+            let column = match column {
+                Some(c) => columns
+                    .iter()
+                    .find(|x| x.id == c || x.name.eq_ignore_ascii_case(c))
+                    .cloned()
+                    .ok_or_else(|| error::not_found(format!("{} has no column {c}", board.name)))?,
+                None => columns
+                    .first()
+                    .cloned()
+                    .ok_or_else(|| error::invalid_argument("the board has no columns"))?,
+            };
+            let sprints = list_sprints(&conn, &board.id)?;
+            let sprint = match str_field(params, "sprintId")?.map(str::trim) {
+                Some("backlog") | Some("") => None,
+                None if board.kind == "scrum" => active_sprint(&sprints).map(|s| s.id.clone()),
+                None => None,
+                Some("active") => Some(
+                    active_sprint(&sprints)
+                        .ok_or_else(|| {
+                            error::invalid_argument(format!("{} has no active sprint", board.name))
+                        })?
+                        .id
+                        .clone(),
+                ),
+                Some(wanted) => {
+                    let sprint = sprints
+                        .iter()
+                        .find(|s| s.id == wanted || s.name.eq_ignore_ascii_case(wanted))
+                        .ok_or_else(|| {
+                            error::not_found(format!("{} has no sprint {wanted}", board.name))
+                        })?;
+                    if sprint.state == "closed" {
+                        return Err(error::invalid_argument(format!(
+                            "{} is closed; it takes no issues",
+                            sprint.name
+                        )));
+                    }
+                    Some(sprint.id.clone())
+                }
+            };
+            (board, column, sprint)
+        };
+        let provider = self.board_provider(&board)?;
+        let (issue, warnings) = provider
+            .create_issue(
+                &board.external_id,
+                &NewIssue {
+                    title: &title,
+                    description: &description,
+                    status_id: column.statuses.first().map(|s| s.id.as_str()),
+                    sprint_id: sprint.as_deref(),
+                    assign_to_me,
+                    issue_type: str_field(params, "issueType")?.filter(|s| !s.trim().is_empty()),
+                    repo: str_field(params, "repo")?.filter(|s| !s.trim().is_empty()),
+                },
+            )
+            .map_err(provider_error)?;
+        let label = provider_label(&board.provider);
+        let ticket_id = {
+            let mut conn = self.db.lock().unwrap();
+            let tx = conn.transaction().map_err(error::from_sqlite)?;
+            let mut board = get_board(&tx, &board.id)?;
+            let columns = list_columns(&tx, Some(&board.id))?;
+            if let Some(sprint) = &issue.sprint {
+                ensure_sprint(&tx, &board.id, sprint)?;
+            }
+            let id = insert_issue(&tx, &mut board, &columns, &issue)?;
+            // A Drogon-only column keeps the card it was created in.
+            if column.statuses.is_empty() {
+                let ticket = get_ticket(&tx, &id)?;
+                if ticket.column_id != column.id {
+                    relocate(&tx, &ticket, &column.id)?;
+                }
+            }
+            if !next_step.is_empty() {
+                tx.execute(
+                    "UPDATE work_tickets SET next_step = ?2 WHERE id = ?1",
+                    params![id, next_step],
+                )
+                .map_err(error::from_sqlite)?;
+            }
+            for session in &session_ids {
+                link_session_in(&tx, &id, session)?;
+            }
+            // Created here, not imported: the activity says so.
+            tx.execute(
+                "DELETE FROM work_activity WHERE ticket_id = ?1 AND kind = 'imported'",
+                params![id],
+            )
+            .map_err(error::from_sqlite)?;
+            log_activity(
+                &tx,
+                &id,
+                "created",
+                &format!("Created {} in {label} from Drogon", issue.key),
+            );
+            for warning in &warnings {
+                log_activity(&tx, &id, "created", warning);
+            }
+            tx.commit().map_err(error::from_sqlite)?;
+            id
+        };
+        let delivery = self.deliver_on_enter(&ticket_id)?;
+        let ticket = {
+            let conn = self.db.lock().unwrap();
+            get_ticket(&conn, &ticket_id)?
+        };
+        let mut value = self.ticket_json(&ticket)?;
+        value["delivery"] = delivery;
+        value["warnings"] = json!(warnings);
+        Ok(value)
     }
 
     /// `work.board_update`: an imported board's own settings.

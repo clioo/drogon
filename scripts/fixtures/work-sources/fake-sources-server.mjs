@@ -162,6 +162,32 @@ function linearGraphql(op, v) {
       if (!issue) return { data: { issue: null }, errors: [{ message: 'Entity not found: Issue', extensions: { code: 'NOT_FOUND' } }] }
       return { data: { issue: linearIssueJson(issue) } }
     }
+    case 'DrogonLinearCreate': {
+      const input = v.input ?? {}
+      const team = linearTeam(input.teamId)
+      if (!team) return { data: null, errors: [{ message: 'Entity not found: Team' }] }
+      if (!input.title) return { data: null, errors: [{ message: 'Argument Validation Error: title should not be empty' }] }
+      if (input.stateId && !team.states.some((s) => s.id === input.stateId)) {
+        return { data: null, errors: [{ message: 'Invalid input: the workflow state does not belong to this team' }] }
+      }
+      const numbers = linear.issues.filter((i) => i.team === team.id).map((i) => Number(i.identifier.split('-')[1]) || 0)
+      const number = Math.max(0, ...numbers) + 1
+      const issue = {
+        id: `li-new-${linear.issues.length + 1}`,
+        identifier: `${team.key}-${number}`,
+        team: team.id,
+        title: input.title,
+        description: input.description ?? '',
+        priority: 'No priority',
+        assignee: input.assigneeId === linear.viewer.id ? linear.viewer.name : null,
+        // Linear's default: the team's first unstarted state.
+        state: input.stateId ?? (team.states.find((s) => s.type === 'unstarted') ?? team.states[0]).id,
+        cycle: input.cycleId ?? null,
+        labels: [],
+      }
+      linear.issues.push(issue)
+      return { data: { issueCreate: { success: true, issue: linearIssueJson(issue) } } }
+    }
     case 'DrogonLinearUpdate': {
       const issue = linearIssue(v.id)
       if (!issue) return { data: null, errors: [{ message: 'Entity not found: Issue' }] }
@@ -322,6 +348,15 @@ function ghGraphql(op, v) {
       if (!json) return { data: { node: null }, errors: [{ type: 'NOT_FOUND', message: `Could not resolve to a node with the global id of '${v.id}'` }] }
       return { data: { node: json } }
     }
+    case 'DrogonGhAddItem': {
+      const p = ghProject(v.project)
+      const match = String(v.content ?? '').match(/^I_(.+)_(\d+)$/)
+      const issue = match && ghIssue(`${match[1]}#${match[2]}`)
+      if (!p || !issue) return { data: null, errors: [{ message: 'Could not resolve the content to add' }] }
+      const item = { id: `PVTI_new_${github.items.length + 1}`, project: p.id, issue: `${issue.repo}#${issue.number}`, status: null, priority: null, iteration: null }
+      github.items.push(item)
+      return { data: { addProjectV2ItemById: { item: { id: item.id } } } }
+    }
     case 'DrogonGhSetField':
     case 'DrogonGhClearField': {
       const p = ghProject(v.project)
@@ -368,6 +403,17 @@ async function githubRest(req, res, path, url) {
     const perPage = Number(url.searchParams.get('per_page') ?? 30)
     const all = github.issues.filter((i) => i.repo === repo && !i.deleted)
     return send(res, 200, all.slice((page - 1) * perPage, page * perPage).map(ghIssueRest))
+  }
+  if (req.method === 'POST' && list) {
+    const repo = `${list[1]}/${list[2]}`
+    if (!github.repos.some((r) => r.full_name === repo)) return send(res, 404, { message: 'Not Found' })
+    const body = await readBody(req)
+    log({ path, method: req.method, body })
+    if (!body.title) return send(res, 422, { message: 'Validation Failed', errors: [{ field: 'title', code: 'missing_field' }] })
+    const number = Math.max(0, ...github.issues.filter((i) => i.repo === repo).map((i) => i.number)) + 1
+    const issue = { repo, number, title: body.title, body: body.body ?? '', state: 'open', assignees: body.assignees ?? [], labels: [] }
+    github.issues.push(issue)
+    return send(res, 201, ghIssueRest(issue))
   }
   const one = path.match(/^\/github\/repos\/([^/]+)\/([^/]+)\/issues\/(\d+)$/)
   if (one) {

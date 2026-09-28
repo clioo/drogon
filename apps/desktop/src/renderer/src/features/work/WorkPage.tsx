@@ -92,6 +92,7 @@ import { WorkImportDialog } from "./WorkImportDialog";
 import { useDragAutoScroll } from "./work-drag-autoscroll";
 import { listWorkspaceSessions, type SessionsReply } from "./work-session-candidates";
 import { isTaskSource, requestTaskSourceConnect } from "../tasks/task-source-navigation";
+import { WorkCreateIssueDialog } from "./WorkCreateIssueDialog";
 import { WorkSyncActions, type WorkSyncHandlers } from "./WorkSyncActions";
 import {
   BackToActive,
@@ -516,9 +517,7 @@ export function WorkPage({
                 </DropdownMenu>
               ) : null}
               <Button
-                onClick={() =>
-                  imported && summary ? importMore() : setNewTicketColumn(board?.columns[0]?.id ?? "")
-                }
+                onClick={() => setNewTicketColumn(board?.columns[0]?.id ?? "")}
                 disabled={!board || readOnly}
               >
                 <Plus /> New ticket
@@ -703,11 +702,7 @@ export function WorkPage({
                   onSprint={(ticket, to) => void moveSprint(ticket, to)}
                   onOpenColumn={(id) => setPanel({ kind: "column", id })}
                   onOpenTicket={(id) => setPanel({ kind: "ticket", id })}
-                  onNewTicket={(columnId) =>
-                    imported && summary
-                      ? importMore()
-                      : setNewTicketColumn(columnId)
-                  }
+                  onNewTicket={(columnId) => setNewTicketColumn(columnId)}
                   onNewColumn={() => setNewColumnOpen(true)}
                   onColumnAction={async (column, action) => {
                     if (!bridge) return;
@@ -818,7 +813,27 @@ export function WorkPage({
           <SprintOutcomePanel outcome={view.outcome} tickets={board.tickets} term={term} onOpenTicket={openTicket} />
         ) : null}
       </div>
-      {bridge && board ? (
+      {bridge && board && summary && imported ? (
+        <WorkCreateIssueDialog
+          open={newTicketColumn !== null}
+          bridge={bridge}
+          board={board}
+          summary={summary}
+          initialColumn={newTicketColumn ?? ""}
+          onClose={() => setNewTicketColumn(null)}
+          onCreate={async (input) => {
+            const result = await state.run(() => bridge.ticketCreate(input));
+            if (!result.ok) return result.error;
+            setNewTicketColumn(null);
+            setPanel({ kind: "ticket", id: result.value.id });
+            const warnings = result.value.warnings ?? [];
+            if (warnings.length) notice(`Created ${result.value.externalKey ?? result.value.key}. ${warnings.join(" ")}`, "error");
+            else notice(`Created ${result.value.externalKey ?? result.value.key} in ${providerLabel(summary.provider)}`);
+            return null;
+          }}
+        />
+      ) : null}
+      {bridge && board && !imported ? (
         <NewTicketDialog
           open={newTicketColumn !== null}
           board={board}

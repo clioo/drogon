@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use super::provider::{
     AssignedOpen, ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope,
-    ProviderError, ProviderResult, WorkProvider,
+    NewIssue, ProviderError, ProviderResult, WorkProvider,
 };
 use crate::jira::client::{HttpRequest, JiraRequestError, REQUEST_TIMEOUT, http_json};
 
@@ -417,6 +417,48 @@ impl WorkProvider for LinearProvider {
         sprint_id: Option<&str>,
     ) -> ProviderResult<()> {
         self.update(issue, json!({ "cycleId": sprint_id }))
+    }
+
+    fn create_issue(
+        &self,
+        board_id: &str,
+        new: &NewIssue,
+    ) -> ProviderResult<(ExtIssue, Vec<String>)> {
+        Ok((self.create(board_id, new)?, Vec::new()))
+    }
+}
+
+impl LinearProvider {
+    /// `issueCreate` on the team: its state, cycle and assignee in one call.
+    fn create(&self, team: &str, new: &NewIssue) -> ProviderResult<ExtIssue> {
+        let mut input = json!({ "teamId": team, "title": new.title });
+        if !new.description.trim().is_empty() {
+            input["description"] = json!(new.description.trim());
+        }
+        if let Some(state) = new.status_id {
+            input["stateId"] = json!(state);
+        }
+        if let Some(cycle) = new.sprint_id {
+            input["cycleId"] = json!(cycle);
+        }
+        if new.assign_to_me
+            && let Some(me) = self.me()?
+        {
+            input["assigneeId"] = json!(me);
+        }
+        let query = format!(
+            "mutation DrogonLinearCreate($input: IssueCreateInput!) {{
+               issueCreate(input: $input) {{ success issue {{ {ISSUE_FIELDS} }} }} }}"
+        );
+        let data = self.gql(&query, json!({ "input": input }))?;
+        let created = &data["issueCreate"];
+        if created["success"] != true || created["issue"].is_null() {
+            return Err(ProviderError::new(
+                "linear_error",
+                "Linear did not create the issue",
+            ));
+        }
+        Ok(self.map_issue(&created["issue"]))
     }
 }
 

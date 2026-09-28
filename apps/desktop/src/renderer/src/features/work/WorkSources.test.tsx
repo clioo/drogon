@@ -450,6 +450,80 @@ describe("Work sources", () => {
   });
 });
 
+describe("creating issues on an imported board", () => {
+  test("+ on a Linear column asks only for a title and creates it in the viewed cycle", async () => {
+    const created = { ...linearTicket(), id: "t9", externalKey: "ENG-6", title: "From the board" };
+    const bridge = { ...fakeBridge({ withLinearBoard: true }), createOptions: vi.fn(), ticketCreate: vi.fn(() => ok({ ...created, warnings: [] })) };
+    await mount(bridge);
+    openMenu(screen.getByRole("button", { name: "Board" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Engineering · Linear" }));
+    await screen.findByText("Resume Linear sessions");
+    fireEvent.click(screen.getByRole("button", { name: "New ticket in In Review" }));
+    const dialog = await screen.findByTestId("work-create-issue-dialog");
+    expect(within(dialog).getByText("New Linear issue")).toBeTruthy();
+    expect(within(dialog).queryByRole("combobox", { name: "Issue type" })).toBeNull();
+    expect(within(dialog).queryByRole("combobox", { name: "Repository" })).toBeNull();
+    // A Drogon-only column: Linear's default status, the card stays here.
+    expect(within(dialog).getByTestId("work-create-issue-status").textContent).toContain("has no Linear status");
+    expect((within(dialog).getByRole("combobox", { name: "Cycle" }) as HTMLSelectElement).value).toBe("cy-12");
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Title" }), { target: { value: "From the board" } });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Description" }), { target: { value: "Some **markdown**" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create in Linear" }));
+    await waitFor(() =>
+      expect(bridge.ticketCreate).toHaveBeenCalledWith({
+        boardId: "bl",
+        title: "From the board",
+        columnId: "review",
+        description: "Some **markdown**",
+        assignToMe: true,
+        sprintId: "cy-12",
+      }),
+    );
+    expect(bridge.createOptions).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByTestId("work-create-issue-dialog")).toBeNull());
+  });
+
+  test("a GitHub Project asks which repository; none tracked yet blocks the create", async () => {
+    const base = fakeBridge({ withLinearBoard: true });
+    const project = { ...LINEAR_BOARD, id: "bg", provider: "github", name: "Roadmap", kind: "kanban", externalId: "project:PVT_1" };
+    const board = base.board;
+    let repos = ["clioo/drogon", "clioo/site"];
+    const bridge = {
+      ...base,
+      board: vi.fn(async (input?: { boardId?: string }) => {
+        const result = await board(input);
+        if (!result.ok || input?.boardId !== "bl") return result;
+        return { ok: true as const, result: { ...result.result, board: project, view: { ...result.result.view!, kind: "all" as const, sprint: null, sprints: [] } } };
+      }),
+      createOptions: vi.fn(() => ok({ provider: "github", boardId: "bg", issueTypes: [], repos })),
+      ticketCreate: vi.fn(() => ok({ ...linearTicket(), provider: "github", externalKey: "clioo/site#3", warnings: ["Created with no status: refused"] })),
+    };
+    await mount(bridge);
+    openMenu(screen.getByRole("button", { name: "Board" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Engineering · Linear" }));
+    await screen.findByText("Resume Linear sessions");
+    fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    let dialog = await screen.findByTestId("work-create-issue-dialog");
+    const repo = (await within(dialog).findByRole("combobox", { name: "Repository" })) as HTMLSelectElement;
+    await waitFor(() => expect(repo.value).toBe("clioo/drogon"));
+    expect(within(dialog).queryByRole("combobox", { name: "Iteration" })).toBeNull();
+    fireEvent.change(repo, { target: { value: "clioo/site" } });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Title" }), { target: { value: "Site fix" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create in GitHub" }));
+    await waitFor(() =>
+      expect(bridge.ticketCreate).toHaveBeenCalledWith({ boardId: "bg", title: "Site fix", columnId: "review", assignToMe: true, repo: "clioo/site" }),
+    );
+    await waitFor(() => expect(screen.queryByTestId("work-create-issue-dialog")).toBeNull());
+
+    repos = [];
+    fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
+    dialog = await screen.findByTestId("work-create-issue-dialog");
+    await within(dialog).findByRole("option", { name: "No repository in this project yet" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Title" }), { target: { value: "Nowhere" } });
+    expect((within(dialog).getByRole("button", { name: "Create in GitHub" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
 describe("source vocabulary", () => {
   test("names, sprint words, keys and import labels per source", () => {
     expect(providerLabel("linear")).toBe("Linear");

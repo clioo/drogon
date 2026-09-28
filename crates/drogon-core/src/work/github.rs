@@ -16,8 +16,8 @@ use chrono::{DateTime, Duration as ChronoDuration, NaiveDate};
 use serde_json::{Value, json};
 
 use super::provider::{
-    ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope, ProviderError,
-    ProviderResult, WorkProvider,
+    CreateOptions, ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope,
+    NewIssue, ProviderError, ProviderResult, WorkProvider,
 };
 use crate::jira::client::{HttpRequest, JiraRequestError, REQUEST_TIMEOUT, http_json};
 
@@ -871,6 +871,111 @@ impl WorkProvider for GithubProvider {
                 "github_error",
                 "repository issues have no iterations",
             )),
+        }
+    }
+
+    fn create_options(&self, board_id: &str) -> ProviderResult<CreateOptions> {
+        match board_ref(board_id)? {
+            BoardRef::Project(project) => {
+                // The repositories the project already tracks issues from.
+                let fields = self.project(project)?;
+                let mut repos: Vec<String> = self
+                    .project_items(project, &fields)?
+                    .into_iter()
+                    .filter_map(|i| i.project)
+                    .collect();
+                repos.sort();
+                repos.dedup();
+                Ok(CreateOptions {
+                    issue_types: Vec::new(),
+                    repos,
+                })
+            }
+            BoardRef::Repo(_) => Ok(CreateOptions::default()),
+        }
+    }
+
+    fn create_issue(
+        &self,
+        board_id: &str,
+        new: &NewIssue,
+    ) -> ProviderResult<(ExtIssue, Vec<String>)> {
+        let repo = match board_ref(board_id)? {
+            BoardRef::Repo(repo) => repo.to_string(),
+            BoardRef::Project(_) => new.repo.map(str::to_owned).ok_or_else(|| {
+                ProviderError::new(
+                    "invalid_argument",
+                    "choose the repository to create the issue in",
+                )
+            })?,
+        };
+        let mut body = json!({ "title": new.title });
+        if !new.description.trim().is_empty() {
+            body["body"] = json!(new.description.trim());
+        }
+        if new.assign_to_me
+            && let Some(me) = self.me()?
+        {
+            body["assignees"] = json!([me]);
+        }
+        let created = self.rest("POST", &format!("/repos/{repo}/issues"), Some(body))?;
+        let mut warnings = Vec::new();
+        match board_ref(board_id)? {
+            BoardRef::Repo(repo) => {
+                let issue = self.map_rest_issue(repo, &created);
+                if new.status_id == Some("closed") {
+                    self.set_status(
+                        board_id,
+                        IssueRef {
+                            key: &issue.key,
+                            id: None,
+                        },
+                        "closed",
+                    )?;
+                    let closed = self
+                        .get_issue(
+                            board_id,
+                            IssueRef {
+                                key: &issue.key,
+                                id: None,
+                            },
+                        )?
+                        .unwrap_or(issue);
+                    return Ok((closed, warnings));
+                }
+                Ok((issue, warnings))
+            }
+            BoardRef::Project(project) => {
+                let content = text(&created["node_id"]);
+                let added = self.gql(
+                    "mutation DrogonGhAddItem($project: ID!, $content: ID!) {
+                       addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } } }",
+                    json!({ "project": project, "content": content }),
+                )?;
+                let item = text(&added["addProjectV2ItemById"]["item"]["id"]);
+                let key = format!("{repo}#{}", created["number"].as_i64().unwrap_or_default());
+                let issue = IssueRef {
+                    key: &key,
+                    id: Some(&item),
+                };
+                if let Some(status) = new.status_id.filter(|s| *s != NO_STATUS)
+                    && let Err(error) = self.set_status(board_id, issue, status)
+                {
+                    warnings.push(format!("Created with no status: {}", error.message));
+                }
+                if let Some(sprint) = new.sprint_id
+                    && let Err(error) = self.move_to_sprint(board_id, issue, Some(sprint))
+                {
+                    warnings.push(format!("Created with no iteration: {}", error.message));
+                }
+                let fresh = self.get_issue(board_id, issue)?.ok_or_else(|| {
+                    ProviderError::new(
+                        "github_error",
+                        format!("{key} was added but cannot be read back"),
+                    )
+                })?;
+                Ok((fresh, warnings))
+            }
         }
     }
 }

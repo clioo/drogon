@@ -100,6 +100,32 @@ pub(crate) struct ExtIssue {
     pub updated: String,
 }
 
+/// A new issue for [`WorkProvider::create_issue`].
+#[derive(Debug, Default)]
+pub(crate) struct NewIssue<'a> {
+    pub title: &'a str,
+    pub description: &'a str,
+    /// The status it starts in (`None`: the source's default).
+    pub status_id: Option<&'a str>,
+    /// The sprint it goes into (`None`: the backlog).
+    pub sprint_id: Option<&'a str>,
+    pub assign_to_me: bool,
+    /// Jira: the issue type id (default: Task, else the first standard one).
+    pub issue_type: Option<&'a str>,
+    /// GitHub Project: the repository the issue is created in.
+    pub repo: Option<&'a str>,
+}
+
+/// What a create form must offer for a board.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CreateOptions {
+    /// Jira issue types (`{id, name}`), default first.
+    pub issue_types: Vec<Value>,
+    /// GitHub Project: repositories an issue can be created in.
+    pub repos: Vec<String>,
+}
+
 /// Which issues of a board to list for import.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum IssueScope {
@@ -181,6 +207,17 @@ pub(crate) trait WorkProvider {
         issue: IssueRef,
         sprint_id: Option<&str>,
     ) -> ProviderResult<()>;
+    /// What creating an issue on this board needs chosen.
+    fn create_options(&self, _board_id: &str) -> ProviderResult<CreateOptions> {
+        Ok(CreateOptions::default())
+    }
+    /// Creates an issue on the board; the second value lists what could
+    /// not be applied (a status the workflow refused), in the owner's words.
+    fn create_issue(
+        &self,
+        board_id: &str,
+        new: &NewIssue,
+    ) -> ProviderResult<(ExtIssue, Vec<String>)>;
 }
 
 // ------------------------------------------------------------------ Jira --
@@ -285,6 +322,20 @@ impl<'a> JiraProvider<'a> {
             .then(|| field.get("id").and_then(Value::as_str).map(str::to_owned))
             .flatten()
         })
+    }
+
+    /// The project's standard issue types as `{id, name}`, Task first
+    /// (the Tasks page's createmeta reader, with its envelope handling).
+    fn issue_types(&self, project: &str) -> ProviderResult<Vec<Value>> {
+        let mut types: Vec<Value> =
+            crate::jira::ops::list_issue_types(self.state, project, Some(&self.client.site.id))
+                .map_err(|e| ProviderError::new(&e.code, e.message))?
+                .into_iter()
+                .filter(|t| t.subtask != Some(true))
+                .map(|t| json!({ "id": t.id, "name": t.name }))
+                .collect();
+        types.sort_by_key(|t| t["name"] != "Task");
+        Ok(types)
     }
 
     fn statuses(&self) -> ProviderResult<Vec<ExtStatus>> {
@@ -758,6 +809,101 @@ impl WorkProvider for JiraProvider<'_> {
         self.call("POST", &path, Some(json!({ "issues": [key] })))
             .map(|_| ())
             .map_err(|e| jira_error(&e))
+    }
+
+    fn create_options(&self, board_id: &str) -> ProviderResult<CreateOptions> {
+        let board = self.board(board_id)?;
+        let Some(project) = board.project_key else {
+            return Ok(CreateOptions::default());
+        };
+        Ok(CreateOptions {
+            issue_types: self.issue_types(&project)?,
+            repos: Vec::new(),
+        })
+    }
+
+    fn create_issue(
+        &self,
+        board_id: &str,
+        new: &NewIssue,
+    ) -> ProviderResult<(ExtIssue, Vec<String>)> {
+        let board = self.board(board_id)?;
+        let project = board.project_key.ok_or_else(|| {
+            ProviderError::new(
+                "invalid_argument",
+                "this Jira board has no project to create issues in",
+            )
+        })?;
+        let issue_type = match new.issue_type {
+            Some(id) => id.to_string(),
+            None => self
+                .issue_types(&project)?
+                .first()
+                .and_then(|t| t["id"].as_str().map(str::to_owned))
+                .ok_or_else(|| {
+                    ProviderError::new(
+                        "jira_error",
+                        format!("{project} has no issue type to create"),
+                    )
+                })?,
+        };
+        let mut fields = json!({
+            "project": { "key": project },
+            "issuetype": { "id": issue_type },
+            "summary": new.title,
+        });
+        if !new.description.trim().is_empty() {
+            fields["description"] =
+                crate::jira::adf::to_body_text(self.client.site.auth_type, new.description.trim());
+        }
+        if new.assign_to_me && !self.client.site.account_id.is_empty() {
+            fields["assignee"] = match self.client.site.auth_type {
+                drogon_protocol::jira::JiraAuthType::Cloud => {
+                    json!({ "accountId": self.client.site.account_id })
+                }
+                drogon_protocol::jira::JiraAuthType::Server => {
+                    json!({ "name": self.client.site.account_id })
+                }
+            };
+        }
+        let created = self
+            .call(
+                "POST",
+                &format!("{}/issue", self.api()),
+                Some(json!({ "fields": fields })),
+            )
+            .map_err(|e| jira_error(&e))?;
+        let key = as_string(created.get("key"));
+        let issue = IssueRef {
+            key: &key,
+            id: None,
+        };
+        let mut warnings = Vec::new();
+        if let Some(sprint) = new.sprint_id
+            && let Err(error) = self.move_to_sprint(board_id, issue, Some(sprint))
+        {
+            warnings.push(format!("Created in the backlog: {}", error.message));
+        }
+        let fresh = self.get_issue(board_id, issue)?.ok_or_else(|| {
+            ProviderError::new(
+                "jira_error",
+                format!("{key} was created but cannot be read back"),
+            )
+        })?;
+        if let Some(status) = new.status_id
+            && fresh.status.id != status
+        {
+            if let Err(error) = self.set_status(board_id, issue, status) {
+                warnings.push(format!(
+                    "Created in {}: {}",
+                    fresh.status.name, error.message
+                ));
+                return Ok((fresh, warnings));
+            }
+            let moved = self.get_issue(board_id, issue)?.unwrap_or(fresh);
+            return Ok((moved, warnings));
+        }
+        Ok((fresh, warnings))
     }
 }
 

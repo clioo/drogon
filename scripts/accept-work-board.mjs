@@ -681,6 +681,26 @@ try {
   await shot("linear-board");
   check("a-linear-team-imports-in-cycles-and-follows-linear-on-sync");
 
+  // 16. "+" on a column creates the issue in Linear, in that column's status.
+  await page.getByRole("button", { name: "New ticket in In Progress" }).click();
+  const create = page.getByTestId("work-create-issue-dialog");
+  await create.getByText("It starts in Linear as In Progress.").waitFor();
+  await create.getByRole("textbox", { name: "Title" }).fill("Created from the board");
+  await create.getByRole("textbox", { name: "Description" }).fill("Made with **Drogon**");
+  await shot("linear-create-issue");
+  await create.getByRole("button", { name: "Create in Linear" }).click();
+  await create.waitFor({ state: "detached" });
+  const createdCard = page.getByRole("region", { name: "In Progress column" }).getByRole("article", { name: /Created from the board/ });
+  await createdCard.waitFor({ timeout: 20000 });
+  const inLinear = await cli(["work", "import", "preview", "--board", "team-eng", "--provider", "linear", "--search", "Created from the board"]);
+  assert.equal(inLinear.issues.length, 1, "the issue exists in Linear");
+  assert.equal(inLinear.issues[0].status.name, "In Progress");
+  assert.equal(inLinear.issues[0].assignee, "Jon Doe");
+  const createdTicket = await ticket(inLinear.issues[0].key);
+  assert.equal(createdTicket.sync, "synced");
+  assert.ok(createdTicket.activity.some((a) => a.text === `Created ${inLinear.issues[0].key} in Linear from Drogon`));
+  check("plus-on-a-column-creates-the-issue-in-linear-in-that-status");
+
   // Light theme, chosen through the real Settings pane (the app's theme does
   // not follow an emulated color scheme): the board and both panels.
   await selectSettingsTheme(page, "light");

@@ -345,6 +345,24 @@ export type WorkTicketCreate = {
   sourceUrl?: string;
   nextStep?: string;
   sessionIds?: string[];
+  /** Imported boards: the ticket is a new issue in the board's source. */
+  boardId?: string;
+  /** Imported boards (default true). */
+  assignToMe?: boolean;
+  /** Jira: the issue type id (default Task). */
+  issueType?: string;
+  /** GitHub Project: the repository the issue is created in. */
+  repo?: string;
+  /** Imported boards: `backlog`, `active` or a sprint id (default: active on a sprint board). */
+  sprintId?: string;
+};
+
+/** What creating an issue on an imported board can choose. */
+export type WorkCreateOptions = {
+  provider: string;
+  boardId: string;
+  issueTypes: { id: string; name: string }[];
+  repos: string[];
 };
 
 export type WorkTicketUpdate = {
@@ -367,7 +385,8 @@ export interface WorkBridge {
   columnUpdate(input: WorkColumnUpdate): Promise<Result<WorkColumn>>;
   columnDelete(input: { columnId: string; moveTicketsTo?: string }): Promise<Result<{ deleted: string; movedTickets: number }>>;
   columnSend(input: { columnId: string; ticketId?: string; message?: string }): Promise<Result<{ columnId: string; sends: WorkDelivery[] }>>;
-  ticketCreate(input: WorkTicketCreate): Promise<Result<WorkTicket>>;
+  ticketCreate(input: WorkTicketCreate): Promise<Result<WorkTicket & { warnings?: string[] }>>;
+  createOptions(input: { boardId: string }): Promise<Result<WorkCreateOptions>>;
   ticketUpdate(input: WorkTicketUpdate): Promise<Result<WorkTicket>>;
   ticketMove(input: { ticketId: string; columnId: string; index?: number; sprintId?: string }): Promise<Result<WorkTicket>>;
   ticketDelete(input: { ticketId: string }): Promise<Result<{ deleted: string; key: string }>>;
@@ -558,6 +577,12 @@ export const workPreviewSchema = z.looseObject({
 });
 export const workColumnDeleteSchema = z.looseObject({ deleted: z.string(), movedTickets: z.number() });
 export const workColumnSendSchema = z.looseObject({ columnId: z.string(), sends: z.array(deliverySchema) });
+export const workCreateOptionsSchema = z.looseObject({
+  provider: z.string(),
+  boardId: z.string(),
+  issueTypes: z.array(z.looseObject({ id: z.string(), name: z.string() })),
+  repos: z.array(z.string()),
+});
 export const workTicketDeleteSchema = z.looseObject({ deleted: z.string(), key: z.string() });
 export const workSessionOpenSchema = z.looseObject({
   action: z.enum(["open", "resumed", "started"]),
@@ -575,6 +600,7 @@ export const WORK_OPS = {
   columnDelete: { method: "work.column_delete", schema: workColumnDeleteSchema },
   columnSend: { method: "work.column_send", schema: workColumnSendSchema },
   ticketCreate: { method: "work.ticket_create", schema: workTicketSchema },
+  createOptions: { method: "work.create_options", schema: workCreateOptionsSchema },
   ticketUpdate: { method: "work.ticket_update", schema: workTicketSchema },
   ticketMove: { method: "work.ticket_move", schema: workTicketSchema },
   ticketDelete: { method: "work.ticket_delete", schema: workTicketDeleteSchema },
