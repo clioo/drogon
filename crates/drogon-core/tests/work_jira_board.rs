@@ -1382,3 +1382,112 @@ fn a_ticket_created_on_a_jira_board_is_a_new_jira_issue_in_that_column() {
     assert_eq!(bug["sprintId"], Value::Null);
     assert_eq!(b.column_name_of(&bug), "To Do");
 }
+
+/// New session on a ticket starts in the ticket's own workspace, shown in
+/// the sidebar under the project: a named workspace over a folder project's
+/// folder, a worktree of a git project. Later sessions reuse it; each ticket
+/// gets its own; an archived one is made again.
+#[test]
+fn new_session_on_a_ticket_makes_and_reuses_its_own_workspace() {
+    let b = Board::imported();
+    let listed = |ctx: &support::TestContext, project: &str| -> Vec<Value> {
+        ctx.ok("worktree.list", json!({"projectId": project}))["worktrees"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let before = listed(&b.ctx, &b.project_id).len();
+    let id = b.ticket_id("APP-128");
+    let title = b.ticket("APP-128")["title"].as_str().unwrap().to_string();
+
+    // A folder project: a named workspace over the same folder.
+    let first = b.ctx.ok(
+        "work.ticket_session_start",
+        json!({"ticketId": id, "harnessId": "claude"}),
+    );
+    let workspace = first["workspaceId"].as_str().unwrap().to_string();
+    let worktrees = listed(&b.ctx, &b.project_id);
+    assert_eq!(worktrees.len(), before + 1, "one new sidebar section");
+    let own = worktrees
+        .iter()
+        .find(|w| w["workspaceId"] == workspace.as_str())
+        .expect("the ticket's workspace is listed under the project");
+    assert_eq!(own["title"], format!("APP-128 · {title}").as_str(), "{own}");
+    assert!(
+        b.activity("APP-128")
+            .iter()
+            .any(|a| a == &format!("Made a workspace for this ticket: APP-128 · {title}"))
+    );
+
+    // The next session reuses it.
+    let second = b.ctx.ok(
+        "work.ticket_session_start",
+        json!({"ticketId": id, "harnessId": "claude"}),
+    );
+    assert_eq!(second["workspaceId"], workspace.as_str());
+    assert_eq!(listed(&b.ctx, &b.project_id).len(), before + 1);
+
+    // Another ticket gets its own.
+    let other = b.ctx.ok(
+        "work.ticket_session_start",
+        json!({"ticketId": b.ticket_id("APP-142"), "harnessId": "claude"}),
+    );
+    assert_ne!(other["workspaceId"], workspace.as_str());
+    assert_eq!(listed(&b.ctx, &b.project_id).len(), before + 2);
+
+    // Archived, it is made again.
+    b.ctx.ok(
+        "worktree.update",
+        json!({"worktreeId": own["id"], "isArchived": true}),
+    );
+    let again = b.ctx.ok(
+        "work.ticket_session_start",
+        json!({"ticketId": id, "harnessId": "claude"}),
+    );
+    assert_ne!(again["workspaceId"], workspace.as_str());
+
+    // A git project: a real worktree on a branch named after the ticket.
+    let repo_dir = tempfile::tempdir().unwrap();
+    let repo = repo_dir.path().join("app");
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.email", "test@example.com"]);
+    git(&["config", "user.name", "Test"]);
+    std::fs::write(repo.join("README.md"), "hi\n").unwrap();
+    git(&["add", "README.md"]);
+    git(&["commit", "-q", "-m", "initial"]);
+    let git_project = b
+        .ctx
+        .ok("project.add", json!({"path": repo.to_str().unwrap()}))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    b.ctx.ok(
+        "work.board_update",
+        json!({"boardId": b.board_id, "projectId": git_project}),
+    );
+    let on_git = b.ctx.ok(
+        "work.ticket_session_start",
+        json!({"ticketId": b.ticket_id("APP-130"), "harnessId": "claude"}),
+    );
+    let git_ws = on_git["workspaceId"].as_str().unwrap();
+    let tree = listed(&b.ctx, &git_project)
+        .into_iter()
+        .find(|w| w["workspaceId"] == git_ws)
+        .expect("the ticket's worktree is listed under the git project");
+    let branch = tree["branch"].as_str().unwrap();
+    assert!(branch.starts_with("app-130-"), "{tree}");
+    assert!(
+        std::path::Path::new(tree["path"].as_str().unwrap())
+            .join("README.md")
+            .is_file()
+    );
+}

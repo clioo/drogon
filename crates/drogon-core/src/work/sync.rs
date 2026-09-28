@@ -2384,12 +2384,15 @@ impl Engine {
             let conn = self.db.lock().unwrap();
             get_ticket(&conn, &required(params, "ticketId")?)?
         };
-        let workspace = self.ticket_workspace(&ticket)?.ok_or_else(|| {
-            error::invalid_argument(format!(
-                "{} has no workspace or project to start a session in: choose where the board's agents work (Sync menu → Agents work in, or `drogon-cli work import settings --project`), or set the ticket's project",
-                ticket.key
-            ))
-        })?;
+        let workspace = match self.ticket_own_workspace(&ticket)? {
+            Some(workspace) => workspace,
+            None => self.ticket_workspace(&ticket)?.ok_or_else(|| {
+                error::invalid_argument(format!(
+                    "{} has no workspace or project to start a session in: choose where the board's agents work (Sync menu → Agents work in, or `drogon-cli work import settings --project`), or set the ticket's project",
+                    ticket.key
+                ))
+            })?,
+        };
         let harness = match str_field(params, "harnessId")? {
             Some(h) => validate_harness(h)?,
             None => {
@@ -2409,7 +2412,7 @@ impl Engine {
         {
             let conn = self.db.lock().unwrap();
             link_session_in(&conn, &ticket.id, &new_id)?;
-            if ticket.workspace_id.is_none() {
+            if ticket.workspace_id.as_deref() != Some(workspace.as_str()) {
                 conn.execute(
                     "UPDATE work_tickets SET workspace_id = ?2 WHERE id = ?1",
                     params![ticket.id, workspace],
@@ -2430,6 +2433,67 @@ impl Engine {
         let mut value = self.ticket_json(&fresh)?;
         value["session"] = launched;
         Ok(value)
+    }
+
+    /// The ticket's own workspace, where its sessions start: the one made
+    /// for it earlier, else a new one in its project — a worktree of a git
+    /// project, a named workspace over a folder project's folder — shown in
+    /// the sidebar under the project. `None` without a project (the caller
+    /// then uses the ticket's workspace, if any).
+    fn ticket_own_workspace(&self, ticket: &Ticket) -> Result<Option<String>, RpcError> {
+        // Still there and not archived; a removed one is made again.
+        let existing = {
+            let conn = self.db.lock().unwrap();
+            conn.query_row(
+                "SELECT t.workspace_id FROM work_ticket_workspaces t JOIN worktrees w ON w.workspace_id = t.workspace_id
+                 WHERE t.ticket_id = ?1 AND w.is_archived = 0",
+                params![ticket.id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(error::from_sqlite)?
+        };
+        if existing.is_some() {
+            return Ok(existing);
+        }
+        let Some(project_id) = &ticket.project_id else {
+            return Ok(None);
+        };
+        let kind = {
+            let conn = self.db.lock().unwrap();
+            crate::project::get(&conn, project_id)?.kind
+        };
+        // Named by the key the owner reads on the card: the provider's
+        // (FT-19018), else Drogon's own.
+        let key = ticket.ext.key.as_deref().unwrap_or(&ticket.key);
+        let name = if kind == "git" {
+            ticket_worktree_slug(key, &ticket.title)
+        } else {
+            ticket_workspace_title(key, &ticket.title)
+        };
+        let created = self.do_worktree_create(&json!({
+            "projectId": project_id,
+            "name": name,
+            "note": format!("Sessions for {key}"),
+        }))?;
+        let workspace = created["workspaceId"]
+            .as_str()
+            .ok_or_else(|| error::internal_error("the new workspace has no id"))?
+            .to_string();
+        let conn = self.db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO work_ticket_workspaces (ticket_id, workspace_id) VALUES (?1, ?2)
+             ON CONFLICT(ticket_id) DO UPDATE SET workspace_id = excluded.workspace_id",
+            params![ticket.id, workspace],
+        )
+        .map_err(error::from_sqlite)?;
+        log_activity(
+            &conn,
+            &ticket.id,
+            "session",
+            &format!("Made a workspace for this ticket: {name}"),
+        );
+        Ok(Some(workspace))
     }
 
     /// `work.ticket_session_rename`: the name a linked session goes by on
@@ -2481,6 +2545,39 @@ impl Engine {
     }
 }
 
+/// A git worktree (and branch) name for a ticket: its key and title in
+/// lowercase words joined by `-`, at most 60 characters.
+pub(super) fn ticket_worktree_slug(key: &str, title: &str) -> String {
+    let mut slug = String::new();
+    for c in format!("{key} {title}").chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if !slug.ends_with('-') && !slug.is_empty() {
+            slug.push('-');
+        }
+    }
+    let mut slug: String = slug.chars().take(60).collect();
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "ticket".to_string()
+    } else {
+        slug
+    }
+}
+
+/// A folder workspace's sidebar title for a ticket: `KEY · Title`.
+pub(super) fn ticket_workspace_title(key: &str, title: &str) -> String {
+    let title = title.trim();
+    let text = if title.is_empty() {
+        key.to_string()
+    } else {
+        format!("{key} · {title}")
+    };
+    text.chars().take(80).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2506,6 +2603,22 @@ mod tests {
         for name in ["Done", "In Review", "Backlog", "Todo"] {
             assert!(!starts_collapsed(name), "{name}");
         }
+    }
+
+    #[test]
+    fn ticket_workspaces_are_named_after_the_ticket() {
+        assert_eq!(
+            ticket_worktree_slug("FT-19018", "S20 MR Reviews — Carlos"),
+            "ft-19018-s20-mr-reviews-carlos"
+        );
+        assert_eq!(ticket_worktree_slug("", "  "), "ticket");
+        let long = ticket_worktree_slug("APP-1", &"word ".repeat(40));
+        assert!(long.len() <= 60 && !long.ends_with('-'), "{long}");
+        assert_eq!(
+            ticket_workspace_title("FT-19018", " S20 MR Reviews — Carlos "),
+            "FT-19018 · S20 MR Reviews — Carlos"
+        );
+        assert_eq!(ticket_workspace_title("FT-1", ""), "FT-1");
     }
 
     #[test]

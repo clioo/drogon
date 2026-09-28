@@ -196,6 +196,11 @@ fn apply_v1(tx: &Transaction) -> rusqlite::Result<()> {
             PRIMARY KEY(ticket_id, session_id)
         );
         CREATE INDEX IF NOT EXISTS work_ticket_sessions_session ON work_ticket_sessions(session_id);
+        -- The workspace made for a ticket, where its New session starts.
+        CREATE TABLE IF NOT EXISTS work_ticket_workspaces (
+            ticket_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS work_key_counters (
             prefix TEXT PRIMARY KEY,
             next INTEGER NOT NULL
