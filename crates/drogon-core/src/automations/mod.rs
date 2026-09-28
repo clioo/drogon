@@ -5,6 +5,7 @@
 pub mod direct;
 pub mod execution;
 pub mod records;
+pub mod run_session_release;
 pub mod runner;
 pub mod scheduler;
 pub mod storage;

@@ -218,6 +218,10 @@ pub struct TickSummary {
     /// process: closed out as `DispatchFailed` without claiming
     /// completion, never silently left behind.
     pub stranded: usize,
+    /// Exited sessions of superseded runs released from their workspace
+    /// (see [`super::run_session_release`]): each automation keeps only its
+    /// newest run's session.
+    pub released: usize,
     /// Monitor change events committed to the delegation outbox by the
     /// producer tick this pass.
     pub monitor_events: usize,
@@ -552,6 +556,7 @@ pub fn tick_once(engine: &Engine, now_ms: f64) -> TickSummary {
         }
     }
     reconcile_outstanding(engine, now_ms, &mut summary);
+    summary.released += super::run_session_release::release_superseded_run_sessions(engine, now_ms);
     // P2: Bot monitors ride this SAME scheduler tick (no second timer).
     // The monitor tick is best-effort and never fails the automation tick.
     let msummary = crate::bot_self_mgmt::tick_bot_monitors(engine, now_ms);
