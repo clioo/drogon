@@ -370,7 +370,12 @@ export function WorkTicketPanel({
             <div className="text-sm text-muted-foreground">
               {/* The source's markdown (Linear, GitHub; Jira's ADF comes as
                   markdown too), rendered as elements, never raw HTML. */}
-              <div data-testid="work-panel-description" className={expanded ? "" : "max-h-32 overflow-hidden"}>
+              {/* Expanded, it scrolls on its own: the header does not, so an
+                  unbounded description pushed the tabs off screen. */}
+              <div
+                data-testid="work-panel-description"
+                className={expanded ? "max-h-[45vh] overflow-y-auto pr-1" : "max-h-32 overflow-hidden"}
+              >
                 <JiraMarkdown content={fullDescription ?? ticket.description} className="text-sm" />
               </div>
               {(fullDescription ?? ticket.description).length > 280 ||
