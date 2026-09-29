@@ -27,6 +27,25 @@ export async function probePiLayout({ page, session, output, getFixtureReceipt }
       return terminal?.element?.offsetParent !== null && terminal && native?.incarnation === session.incarnation
         && native.verdict === "live" && native.cols === terminal.cols && native.rows === terminal.rows;
     }, session, { timeout: 20000 });
+    // A fresh mount's seek replay rides the shared daemon connection pool:
+    // after a reload every pane re-issues its reads at once, so the seek
+    // pages can land well after the daemon's grid report agrees with the
+    // fresh emulator. Grid agreement is not replay completion — wait,
+    // bounded, for the retained reply to be parsed before judging
+    // retention. A reply truly lost in replay still fails here, at the
+    // timeout, with whatever the buffer actually holds.
+    await page.waitForFunction(
+      (id) => {
+        const terminal = window.__drogonTerminals?.get(id);
+        if (!terminal) return false;
+        let text = "";
+        for (let row = 0; row < terminal.buffer.active.length; row++)
+          text += terminal.buffer.active.getLine(row)?.translateToString(true) ?? "";
+        return /195,\s*196,\s*197,\s*198,\s*199,\s*200/.test(text);
+      },
+      session.id,
+      { timeout: 15000 },
+    );
     const proof = await page.evaluate((session) => {
       const terminal = window.__drogonTerminals.get(session.id);
       const screen = terminal.element.querySelector(".xterm-screen");
