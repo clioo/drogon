@@ -114,7 +114,7 @@ async function recordFreshBuild() {
     { cwd: root, env: buildEnv, timeout: 600_000 },
   );
   const desktopBuild = await runAcceptanceProcess(
-    "/Users/carlos/.local/bin/pnpm",
+    "pnpm",
     ["--filter", "@drogon/desktop", "build"],
     { cwd: root, env: buildEnv, timeout: 600_000 },
   );
@@ -144,7 +144,10 @@ function cleanEnv(extra = {}) {
     ...env,
     // Keep harness discovery on deterministic shell fixtures only; do not let
     // a hidden rendered check start the developer's installed coding agents.
-    PATH: "/tmp/dg-toolchain-bin:/Users/carlos/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    // The node bin dir rides the running node, never a hardcoded home.
+    PATH: `${path.join(tmpdir(), "dg-toolchain-bin")}:${path.dirname(
+      process.execPath,
+    )}:/usr/bin:/bin:/usr/sbin:/sbin`,
     SDKROOT: "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
     CC_aarch64_apple_darwin: "/Library/Developer/CommandLineTools/usr/bin/clang",
     CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER: "/Library/Developer/CommandLineTools/usr/bin/clang",
