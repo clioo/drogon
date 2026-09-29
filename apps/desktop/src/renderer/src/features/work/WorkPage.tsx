@@ -561,7 +561,7 @@ export function WorkPage({
                     view={view?.kind === "backlog" ? "backlog" : (view?.sprint ?? null)}
                     term={Term}
                     onSelect={(sprint) =>
-                      selectSprint(sprint === "backlog" ? "backlog" : sprint.state === "active" ? undefined : sprint.id)
+                      selectSprint(sprint === "backlog" ? "backlog" : sprint.id)
                     }
                   />
                   {readOnly || view?.kind === "backlog" ? (

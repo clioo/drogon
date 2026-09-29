@@ -582,6 +582,40 @@ describe("Jira boards on the Work page", () => {
     await waitFor(() => expect(bridge.board).toHaveBeenCalledWith({ boardId: "b7", sprintId: "24" }));
   });
 
+  test("selecting another active sprint shows its tickets when the board has multiple active sprints", async () => {
+    const bridge = fakeBridge();
+    const originalBoard = bridge.board.getMockImplementation()!;
+    const emptySprint: WorkSprint = { ...SPRINTS[1]!, id: "empty", name: "2026.Q4.S1" };
+    bridge.board.mockImplementation((input) => {
+      if (!input?.boardId) return originalBoard(input);
+      const selected = input.sprintId === "25" ? SPRINTS[1]! : emptySprint;
+      return ok({
+        columns: columns(),
+        projects: [{ id: "p1", name: "Drogon" }],
+        board: PLATFORM,
+        boards: [LOCAL, PLATFORM],
+        tickets: selected.id === "25" ? activeTickets() : [],
+        view: view("sprint", selected, { sprints: [emptySprint, SPRINTS[1]!] }),
+      });
+    });
+    await mount(bridge);
+    openMenu(screen.getByRole("button", { name: "Board" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Platform Delivery · Jira" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sprint" }).textContent).toContain("2026.Q4.S1"));
+    expect(screen.queryByText("Improve error messages")).toBeNull();
+
+    openMenu(screen.getByRole("button", { name: "Sprint" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Sprint 25 · Active" }));
+    await waitFor(() => expect(bridge.board).toHaveBeenCalledWith({ boardId: "b7", sprintId: "25" }));
+    expect(await screen.findByText("Improve error messages")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sprint" }).textContent).toContain("Sprint 25 · Active");
+
+    openMenu(screen.getByRole("button", { name: "Sprint" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "2026.Q4.S1 · Active" }));
+    await waitFor(() => expect(bridge.board).toHaveBeenCalledWith({ boardId: "b7", sprintId: "empty" }));
+    expect(screen.queryByText("Improve error messages")).toBeNull();
+  });
+
   test("a closed sprint is a read-only record with its outcome and carry-over", async () => {
     const { bridge } = await openPlatform();
     openMenu(screen.getByRole("button", { name: "Sprint" }));
