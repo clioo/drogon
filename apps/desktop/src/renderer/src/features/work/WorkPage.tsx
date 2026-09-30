@@ -153,18 +153,56 @@ export type WorkSessionTarget = { workspaceId: string; sessionId: string };
 
 /** The view the page returns to after a remount (Settings, a reload of the
  *  shell): the tab, the open panel and the board, for this renderer's
- *  lifetime. */
-const lastView: { tab: Tab; panel: Panel; selection: Selection } = {
+ *  lifetime. The board also survives a restart (an update reinstalls the
+ *  app): it is kept in the renderer's storage, read once per launch. */
+const lastView: { tab: Tab; panel: Panel; selection: Selection; seeded: boolean } = {
   tab: "board",
   panel: null,
   selection: { boardId: WORK_LOCAL_BOARD },
+  seeded: false,
 };
 
-/** Test seam: forget the remembered view. */
+export const WORK_BOARD_KEY = "drogon:work:board";
+
+function remembered(): Selection {
+  if (!lastView.seeded) {
+    lastView.seeded = true;
+    try {
+      const stored = localStorage.getItem(WORK_BOARD_KEY);
+      if (stored) lastView.selection = { boardId: stored };
+    } catch {
+      // Storage unavailable: My work, as before.
+    }
+  }
+  return lastView.selection;
+}
+
+function remember(selection: Selection): void {
+  if (selection.boardId === lastView.selection.boardId && lastView.seeded) {
+    lastView.selection = selection;
+    return;
+  }
+  lastView.selection = selection;
+  lastView.seeded = true;
+  try {
+    if (selection.boardId === WORK_LOCAL_BOARD) localStorage.removeItem(WORK_BOARD_KEY);
+    else localStorage.setItem(WORK_BOARD_KEY, selection.boardId);
+  } catch {
+    // Storage unavailable: remembered until the app closes.
+  }
+}
+
+/** Test seam: forget the remembered view (this launch's and the stored board). */
 export function resetWorkViewMemoryForTests(): void {
   lastView.tab = "board";
   lastView.panel = null;
   lastView.selection = { boardId: WORK_LOCAL_BOARD };
+  lastView.seeded = false;
+  try {
+    localStorage.removeItem(WORK_BOARD_KEY);
+  } catch {
+    // Nothing stored to forget.
+  }
 }
 
 export function WorkPage({
@@ -190,9 +228,9 @@ export function WorkPage({
   onOpenTasks?: () => void;
   onClose?: () => void;
 }) {
-  const [selection, setSelectionState] = useState<Selection>(lastView.selection);
+  const [selection, setSelectionState] = useState<Selection>(remembered);
   const setSelection = (next: Selection) => {
-    lastView.selection = next;
+    remember(next);
     setSelectionState(next);
   };
   const state = useWorkBoard(bridge, active, {

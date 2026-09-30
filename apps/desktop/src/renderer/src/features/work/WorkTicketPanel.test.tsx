@@ -132,3 +132,45 @@ describe("session picker", () => {
     expect(screen.queryByText(/could not be listed/)).toBeNull();
   });
 });
+
+describe("description", () => {
+  test("Show all expands a long description into its own scroll, so the tabs stay reachable", async () => {
+    const long = Array.from(
+      { length: 40 },
+      (_, i) => `Line ${i + 1} of the acceptance criteria.`,
+    ).join("\n\n");
+    const imported = {
+      ...TICKET,
+      externalKey: "FT-18787",
+      provider: "jira",
+      description: long,
+    } as unknown as WorkTicket;
+    const bridge = { ticketShow: vi.fn(() => new Promise(() => {})) };
+    render(
+      <TooltipProvider>
+        <WorkTicketPanel
+          ticket={imported}
+          board={BOARD}
+          state={{ run: vi.fn() } as never}
+          bridge={bridge as unknown as WorkBridge}
+          workspaces={[]}
+          listLinkCandidates={async () => []}
+          syncHandlers={{} as never}
+          onOpenSession={vi.fn()}
+          onOpenExternal={vi.fn()}
+          onClose={vi.fn()}
+          onNotice={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+    const description = screen.getByTestId("work-panel-description");
+    expect(description.className).toContain("max-h-32");
+    expect(description.className).toContain("overflow-hidden");
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(description.className).toContain("overflow-y-auto");
+    expect(description.className).toMatch(/max-h-\[45vh\]/);
+    expect(screen.getByRole("tab", { name: "details" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+    expect(description.className).toContain("max-h-32");
+  });
+});

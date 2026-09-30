@@ -421,7 +421,8 @@ fn two_concurrent_engine_open_calls_against_the_same_data_dir_both_succeed_consi
             ("orchestration_attempts".to_string(), 1),
             ("orchestration_mail".to_string(), 1),
             ("projects".to_string(), 6),
-            ("work".to_string(), 5),
+            // v6: the workspace made for a ticket (work_ticket_workspaces).
+            ("work".to_string(), 6),
             ("worker_resource_retention".to_string(), 1),
         ]
     );

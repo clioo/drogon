@@ -45,8 +45,9 @@ pub(crate) const SCHEMA_COMPONENT: &str = "work";
 /// mapping, sprints, sync state and the ticket activity log. v3: the
 /// sources the owner allows and their connections (Linear, GitHub). v4: a
 /// board can keep importing new issues assigned to the owner. v5: columns
-/// can be collapsed.
-pub(crate) const SCHEMA_VERSION: i64 = 5;
+/// can be collapsed. v6: the workspace made for a ticket, where its New
+/// session starts.
+pub(crate) const SCHEMA_VERSION: i64 = 6;
 
 /// How often a watched pull request is re-read (`gh pr view`).
 pub(crate) const PR_POLL_MS: i64 = 5 * 60_000;
@@ -143,6 +144,14 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             "work_columns",
             "collapsed",
             "INTEGER NOT NULL DEFAULT 0",
+        )?;
+    }
+    if existing.unwrap_or(0) < 6 {
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS work_ticket_workspaces (
+                ticket_id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL
+            );",
         )?;
     }
     tx.execute(
@@ -2412,6 +2421,54 @@ fn pr_fingerprint(pull: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_v5_database_gains_the_ticket_workspaces_table() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let has_table = |conn: &Connection| -> bool {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'work_ticket_workspaces'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+                == 1
+        };
+        // A database made by an earlier build: everything up to v5, marked v5.
+        {
+            let tx = conn.transaction().unwrap();
+            apply_pending_steps_in_tx(&tx).unwrap();
+            tx.execute_batch("DROP TABLE work_ticket_workspaces;")
+                .unwrap();
+            tx.execute(
+                "UPDATE schema_versions SET version = 5 WHERE component = ?1",
+                params![SCHEMA_COMPONENT],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        assert!(!has_table(&conn));
+        let tx = conn.transaction().unwrap();
+        apply_pending_steps_in_tx(&tx).unwrap();
+        tx.commit().unwrap();
+        assert!(
+            has_table(&conn),
+            "the v6 step adds it to an existing database"
+        );
+        let version: i64 = conn
+            .query_row(
+                "SELECT version FROM schema_versions WHERE component = ?1",
+                params![SCHEMA_COMPONENT],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, 6);
+        conn.execute(
+            "INSERT INTO work_ticket_workspaces (ticket_id, workspace_id) VALUES ('t', 'w')",
+            [],
+        )
+        .unwrap();
+    }
 
     #[test]
     fn key_prefixes_follow_the_project_name() {

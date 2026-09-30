@@ -20,7 +20,7 @@ import type {
   WorkTicket,
   WorkView,
 } from "../../../../shared/work-contract";
-import { resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
+import { resetWorkViewMemoryForTests, WORK_BOARD_KEY, WorkPage } from "./WorkPage";
 import { defaultChosen, groupIssues } from "./WorkImportDialog";
 import { initials, priorityLevel, sprintDates, syncHeadline } from "./work-sources";
 
@@ -398,6 +398,37 @@ async function openPlatform(bridge = fakeBridge(), onOpenSession = vi.fn()) {
   await screen.findByText("Improve error messages");
   return mounted;
 }
+
+describe("the chosen board survives a restart", () => {
+  test("picking a board remembers it; a new launch opens on it", async () => {
+    const first = await openPlatform();
+    expect(localStorage.getItem(WORK_BOARD_KEY)).toBe("b7");
+    first.view.unmount();
+    // A new launch: this renderer's memory is gone, the storage is not.
+    resetWorkViewMemoryForTests();
+    localStorage.setItem(WORK_BOARD_KEY, "b7");
+    const { bridge } = await mount();
+    await screen.findByText("Improve error messages");
+    expect(bridge.board).toHaveBeenCalledWith(expect.objectContaining({ boardId: "b7" }));
+    // Back to My work: forgotten.
+    openMenu(screen.getByRole("button", { name: "Board" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /My work/ }));
+    await waitFor(() => expect(localStorage.getItem(WORK_BOARD_KEY)).toBeNull());
+  });
+
+  test("a remembered board that is gone falls back to My work and is forgotten", async () => {
+    resetWorkViewMemoryForTests();
+    localStorage.setItem(WORK_BOARD_KEY, "gone");
+    const bridge = fakeBridge();
+    const original = bridge.board.getMockImplementation()!;
+    bridge.board.mockImplementation((input?: { boardId?: string; sprintId?: string }) =>
+      input?.boardId === "gone" ? fail("work board gone not found") : original(input),
+    );
+    await mount(bridge);
+    await waitFor(() => expect(bridge.board).toHaveBeenCalledWith(expect.not.objectContaining({ boardId: "gone" })));
+    await waitFor(() => expect(localStorage.getItem(WORK_BOARD_KEY)).toBeNull());
+  });
+});
 
 describe("Jira boards on the Work page", () => {
   test("an empty My work offers the allowed sources; the dialog picks a board, then its issues", async () => {
