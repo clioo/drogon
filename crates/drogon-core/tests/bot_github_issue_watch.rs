@@ -79,6 +79,9 @@ struct GithubFixture {
     pub base: String,
     data_path: PathBuf,
     log_path: PathBuf,
+    /// Whether this fixture answers with GitHub's `Link` header at all.
+    /// Sticky across dataset writes, so a test sets the world's shape once.
+    link_header: std::cell::Cell<bool>,
 }
 
 impl Drop for GithubFixture {
@@ -125,6 +128,7 @@ impl GithubFixture {
             base: format!("http://127.0.0.1:{port}"),
             data_path,
             log_path,
+            link_header: std::cell::Cell::new(true),
         }
     }
 
@@ -135,13 +139,26 @@ impl GithubFixture {
     fn set_world(&self, issues: &[Value], pulls: &[Value]) {
         fs::write(
             &self.data_path,
-            serde_json::to_vec(&json!({ "issues": issues, "pulls": pulls })).unwrap(),
+            serde_json::to_vec(&json!({
+                "issues": issues,
+                "pulls": pulls,
+                "linkHeader": self.link_header.get(),
+            }))
+            .unwrap(),
         )
         .unwrap();
     }
 
     fn set_issues(&self, issues: &[Value]) {
         self.set_world(issues, &[]);
+    }
+
+    /// Serve every page with NO `Link` header, like a proxy that strips it:
+    /// the client must then decide from the page itself whether the list
+    /// can have continued.
+    fn suppress_link_header(&self) {
+        self.link_header.set(false);
+        self.set_world(&[], &[]);
     }
 
     fn requests(&self) -> Vec<Value> {
@@ -776,6 +793,44 @@ fn a_pull_request_in_the_issue_list_is_never_released_as_an_issue() {
 }
 
 // --- the owner's scenario: the released triage session ---------------------
+
+/// Issue #696 for the ISSUE kind: the page limit was shared by both
+/// watches, so the fix is asserted on both. 101 open issues, the newest
+/// alone on page two.
+///
+/// This fixture serves the issue list with NO `Link` header at all (the
+/// harder world): a full page is then the only hint another page exists,
+/// and treating one as the end of the list is what hid the newest issue.
+#[test]
+fn an_issue_past_the_first_page_is_still_released() {
+    let fx = Fixture::new(false);
+    let t0 = (Fixture::now_ms() / 60_000.0).floor() * 60_000.0;
+    fx.github.suppress_link_header();
+
+    let full_page: Vec<Value> = (1..=100u64).map(|n| issue(n, &[])).collect();
+    fx.github.set_issues(&full_page);
+    fx.tick(t0);
+    assert!(fx.events().is_empty(), "the first check seeds");
+    assert_eq!(fx.seen_issues().len(), 100);
+    // With no Link header, a FULL page is continued: the watch asks for one
+    // more page and learns the list ended, instead of assuming it.
+    let first_look = fx.github.requests();
+    assert_eq!(first_look.len(), 2, "{first_look:?}");
+    assert_eq!(first_look[1]["query"]["page"], "2");
+
+    let mut past_the_page = full_page.clone();
+    past_the_page.push(issue(101, &[]));
+    fx.github.set_issues(&past_the_page);
+    let before = fx.github.requests().len();
+    fx.tick(t0 + 61_000.0);
+    let pages: Vec<Value> = fx.github.requests().into_iter().skip(before).collect();
+    assert!(pages.len() >= 2, "page two is read: {pages:?}");
+    assert_eq!(pages[1]["query"]["page"], "2");
+    let events = fx.events();
+    assert_eq!(events.len(), 1, "the newest issue fires once: {events:?}");
+    assert_eq!(events[0]["resource"], "issue/101");
+    assert!(fx.seen_issues().contains(&101), "{:?}", fx.seen_issues());
+}
 
 #[test]
 fn a_new_issue_releases_a_triage_session_in_the_project() {

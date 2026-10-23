@@ -27,6 +27,14 @@
 //!   cannot be READ (a locked or corrupt database, a row that is not a
 //!   number) fails the tick as [`MonitorErrorKind::IoError`]; only a table
 //!   that does not exist reads as "this watch has never released anything".
+//! - **The whole open list is read, or the poll says so.** One poll walks
+//!   the pages of the open list (oldest first) until a short page or a
+//!   `Link` header without `rel="next"` ends it, bounded by
+//!   [`GITHUB_MAX_PAGES`]. A list longer than that bound is an honest
+//!   `Oversized` error: a truncated prefix is never committed as "the open
+//!   set", because treating one page as the whole list is exactly how a
+//!   repository with more than 100 open items never sees its newest pull
+//!   request.
 //! - **An outage is never a catch-up storm.** A watch that was not
 //!   watching (first ever check, or a gap wider than the greater of
 //!   [`GITHUB_CATCH_UP_GRACE_MS`] and twice its cron interval) SEEDS: it
@@ -52,7 +60,8 @@ use serde::Deserialize;
 
 use super::result::{MonitorCheckResult, MonitorErrorKind};
 use super::rule::{
-    GITHUB_PULLS_PER_PAGE, GithubIssueFilter, GithubIssueRule, GithubPrFilter, GithubPrRule,
+    GITHUB_MAX_PAGES, GITHUB_PULLS_PER_PAGE, GithubIssueFilter, GithubIssueRule, GithubPrFilter,
+    GithubPrRule,
 };
 
 /// A watch whose last successful check is older than this seeds forward
@@ -63,17 +72,29 @@ pub const GITHUB_CATCH_UP_GRACE_MS: f64 = 30.0 * 60.0 * 1000.0;
 /// Longest persisted error text (chars) — the check-in message bound.
 const MAX_ERROR_CHARS: usize = 512;
 
+/// Longest response header block a poll reads, in bytes. GitHub's own block
+/// is a couple of kilobytes; this is the ceiling that keeps the paging
+/// signal from becoming a second unbounded read.
+const MAX_HEADER_BYTES: usize = 16 * 1024;
+
 /// How many numbers a monitor's seen set retains (newest kept). The
 /// oldest numbers fall out of the set, so one that leaves and re-enters
 /// the open list may be released again — bounded, honest, and never
 /// unbounded growth.
 ///
-/// This bounds the DEDUPE SET, not the watch's reach: one poll reads a
-/// single page of [`GITHUB_PULLS_PER_PAGE`] oldest-first, so a repository
-/// with more than that many open items does not see the newest ones until
-/// older ones close. That page limit is pre-existing and shared by both
-/// kinds; paginating is a separate change.
-pub const MAX_SEEN_PULLS: usize = 512;
+/// This bounds the DEDUPE SET, not the watch's reach: a poll walks every
+/// page of the open list (see [`read_open_items`]), so the newest item is
+/// seen even while older ones stay open. What this bound costs is memory of
+/// the OLDEST releases, never anything the watch can no longer see.
+///
+/// It is deliberately AS LARGE AS one poll's reach. A baseline seed records
+/// every number it read, so a bound smaller than the reach would drop the
+/// oldest of them right back out of the set and leave them permanently
+/// unseen — a watch on a 600-item repository would then churn on its oldest
+/// item instead of waiting for a new one. (A seen set that overflows across
+/// TIME, as numbers open and close, still releases a long-closed number
+/// that reopens; that is the pre-existing bound above, not this equality.)
+pub const MAX_SEEN_PULLS: usize = GITHUB_MAX_PAGES as usize * GITHUB_PULLS_PER_PAGE as usize;
 
 /// Which GitHub collection a watch reads. A monitor has exactly one kind,
 /// so this is fixed for the life of a rule and rides inside its approval
@@ -446,26 +467,122 @@ pub fn parse_items(body: &str) -> Result<Vec<GithubItemView>, String> {
     Ok(items.into_iter().map(GithubItemView::from_wire).collect())
 }
 
-/// The exact URL one poll reads:
-/// `{apiBase}/repos/{owner}/{name}/{pulls|issues}`.
-pub fn list_url(target: GithubTarget, api_base: &str, repo: &str) -> Result<String, String> {
+/// The exact URL one poll reads for ONE page (1-based):
+/// `{apiBase}/repos/{owner}/{name}/{pulls|issues}?...&page={page}`.
+///
+/// The page number is minted here rather than taken from the response's
+/// `Link` header on purpose: the header is a SIGNAL that another page
+/// exists ([`link_has_next`]), never a URL this transport will follow. The
+/// `Authorization` header only ever rides to the base the rule named, so a
+/// rewritten `Link` cannot walk the token to another host — the same reason
+/// the transport refuses redirects.
+pub fn list_url(
+    target: GithubTarget,
+    api_base: &str,
+    repo: &str,
+    page: u32,
+) -> Result<String, String> {
     let base = api_base.trim_end_matches('/');
     let segments: Vec<&str> = repo.split('/').collect();
     if segments.len() != 2 || segments.iter().any(|segment| segment.is_empty()) {
         return Err("repo must be 'owner/name'".to_string());
     }
     Ok(format!(
-        "{base}/repos/{}/{}/{}?state=open&sort=created&direction=asc&per_page={GITHUB_PULLS_PER_PAGE}",
+        "{base}/repos/{}/{}/{}?state=open&sort=created&direction=asc&per_page={GITHUB_PULLS_PER_PAGE}&page={page}",
         segments[0],
         segments[1],
         target.path_segment(),
     ))
 }
 
+/// Does this `Link` header advertise another page? GitHub sends
+/// `<...>; rel="next", <...>; rel="last"` while paging and omits the header
+/// entirely when the page in hand is the only one.
+pub fn link_has_next(link: &str) -> bool {
+    link.split(',').any(|entry| {
+        entry.split(';').skip(1).any(|param| {
+            param.split_once('=').is_some_and(|(key, value)| {
+                key.trim().eq_ignore_ascii_case("rel")
+                    && value.trim().trim_matches('"').eq_ignore_ascii_case("next")
+            })
+        })
+    })
+}
+
+/// Why reading a watch's full open list failed. Each variant maps to one
+/// honest monitor error; none of them is "here is a prefix, call it the
+/// open set".
+#[derive(Debug, Clone, PartialEq)]
+pub enum GithubListError {
+    /// The transport failed on some page.
+    Fetch(GithubFetchError),
+    /// GitHub answered a non-200 on some page.
+    Status(u16),
+    /// A page's body was not the expected JSON (or the repo is not
+    /// `owner/name`).
+    Malformed(String),
+    /// The open list is longer than `pages` pages of
+    /// [`GITHUB_PULLS_PER_PAGE`]. The poll holds a prefix and refuses to
+    /// commit it: the newest items are exactly what a prefix hides.
+    Truncated { pages: u32 },
+}
+
+/// Read every page of a watch's open list through `get`, oldest first.
+///
+/// `get` receives the 1-based page number and the URL to read, so a caller
+/// can spend one shared deadline across the walk (and so a test can drive
+/// it with no network at all). The rule's body bound stays a PER-RESPONSE
+/// bound; what the walk accumulates is the projection ([`GithubItemView`]),
+/// never the raw bodies, and the page cap bounds that. The walk stops on the first page that is
+/// SHORT, or whose `Link` header does not advertise a next page; a full page
+/// with no `Link` header at all is never assumed to be the last one. At
+/// [`GITHUB_MAX_PAGES`] with more still to read it returns
+/// [`GithubListError::Truncated`] rather than a silent prefix.
+pub fn read_open_items<F>(
+    target: GithubTarget,
+    api_base: &str,
+    repo: &str,
+    mut get: F,
+) -> Result<Vec<GithubItemView>, GithubListError>
+where
+    F: FnMut(u32, &str) -> Result<GithubFetch, GithubFetchError>,
+{
+    let per_page = GITHUB_PULLS_PER_PAGE as usize;
+    let mut items: Vec<GithubItemView> = Vec::new();
+    for page in 1..=GITHUB_MAX_PAGES {
+        let url = list_url(target, api_base, repo, page).map_err(GithubListError::Malformed)?;
+        let fetched = get(page, &url).map_err(GithubListError::Fetch)?;
+        if fetched.status != 200 {
+            return Err(GithubListError::Status(fetched.status));
+        }
+        let parsed = parse_items(&fetched.body).map_err(GithubListError::Malformed)?;
+        let full_page = parsed.len() >= per_page;
+        items.extend(parsed);
+        let more = match fetched.link.as_deref() {
+            // GitHub told us where the list ends; believe it while it speaks.
+            Some(link) => link_has_next(link),
+            // No header at all: a FULL page may still be hiding the newest
+            // items, and a short page cannot. Asking for one more page is the
+            // only answer that never invents an end to the list.
+            None => full_page,
+        };
+        if !more {
+            return Ok(items);
+        }
+    }
+    Err(GithubListError::Truncated {
+        pages: GITHUB_MAX_PAGES,
+    })
+}
+
 /// The bounded HTTP read result, reduced to what a watch needs.
 pub struct GithubFetch {
     pub status: u16,
     pub body: String,
+    /// The response's `Link` header, when it sent one: GitHub's own answer
+    /// to "is there another page?". `None` means the header was absent,
+    /// which is NOT the same as "this is the last page".
+    pub link: Option<String>,
 }
 
 /// Why a bounded `curl` read failed. Never carries a token value.
@@ -505,6 +622,7 @@ pub fn fetch(
     let dir = std::env::temp_dir();
     let unique = format!("drogon-gh-{}-{}", std::process::id(), next_temp_counter());
     let body_path = dir.join(format!("{unique}.body"));
+    let headers_path = dir.join(format!("{unique}.headers"));
     let mut argv: Vec<String> = vec![
         "-sS".into(),
         "--connect-timeout".into(),
@@ -515,6 +633,8 @@ pub fn fetch(
         max_body_bytes.to_string(),
         "-o".into(),
         body_path.to_string_lossy().into_owned(),
+        "-D".into(),
+        headers_path.to_string_lossy().into_owned(),
         "-w".into(),
         "%{http_code}".into(),
         "-H".into(),
@@ -553,6 +673,7 @@ pub fn fetch(
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = std::fs::remove_file(&body_path);
+                let _ = std::fs::remove_file(&headers_path);
                 return Err(GithubFetchError::Transport(format!(
                     "curl wait failed: {e}"
                 )));
@@ -569,6 +690,14 @@ pub fn fetch(
     }
     let body_bytes = std::fs::read(&body_path).unwrap_or_default();
     let _ = std::fs::remove_file(&body_path);
+    // The header block is read under its own ceiling: `--max-filesize`
+    // bounds the BODY, and a watch must never trade one unbounded read for
+    // another just to learn whether a next page exists.
+    let header_bytes = std::fs::read(&headers_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&headers_path);
+    let link = link_header(&String::from_utf8_lossy(
+        &header_bytes[..header_bytes.len().min(MAX_HEADER_BYTES)],
+    ));
     if timed_out {
         return Err(GithubFetchError::Timeout);
     }
@@ -589,7 +718,23 @@ pub fn fetch(
     Ok(GithubFetch {
         status: status as u16,
         body: String::from_utf8_lossy(&body_bytes).into_owned(),
+        link,
     })
+}
+
+/// The `Link` header value out of a raw response header block, if one is
+/// there. Case-insensitive on the field name, and the LAST block wins so a
+/// proxy's `100 Continue` preamble cannot shadow the real answer.
+fn link_header(headers: &str) -> Option<String> {
+    headers
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            let value = value.trim();
+            (name.trim().eq_ignore_ascii_case("link") && !value.is_empty())
+                .then(|| value.to_string())
+        })
+        .next_back()
 }
 
 fn next_temp_counter() -> u64 {
@@ -767,61 +912,21 @@ pub fn evaluate_with_token(
     let api_base = watch
         .api_base
         .unwrap_or(super::rule::DEFAULT_GITHUB_API_BASE);
-    let url = match list_url(watch.target, api_base, watch.repo) {
-        Ok(url) => url,
-        Err(message) => {
-            return GithubPollOutcome::Error {
-                error_kind: MonitorErrorKind::Malformed,
-                message: truncate(&message),
-            };
-        }
-    };
     let auth = token.map(|token| format!("Authorization: Bearer {token}"));
-    let fetched = match fetch(
-        &url,
-        auth.as_deref(),
-        watch.timeout_ms,
-        watch.max_body_bytes,
-    ) {
-        Ok(fetched) => fetched,
-        Err(error) => {
-            let detail = match &error {
-                GithubFetchError::Timeout => "the GitHub read timed out".to_string(),
-                GithubFetchError::Oversized => {
-                    "the GitHub response exceeded the rule's body bound".to_string()
-                }
-                GithubFetchError::Transport(detail) => {
-                    format!("the GitHub read failed: {}", scrub(detail, token))
-                }
-            };
-            return GithubPollOutcome::Error {
-                error_kind: error.error_kind(),
-                message: truncate(&detail),
-            };
-        }
-    };
-    if fetched.status != 200 {
-        return GithubPollOutcome::Error {
-            error_kind: error_kind_for_status(fetched.status),
-            message: truncate(&scrub(
-                &format!(
-                    "GitHub answered HTTP {} for {}/{}",
-                    fetched.status,
-                    watch.repo,
-                    watch.target.path_segment()
-                ),
-                token,
-            )),
+    // `timeout_ms` bounds the whole list read, not each page of it: paging
+    // must not multiply the time one scheduler tick can spend on one watch.
+    // The FIRST page always gets its read (otherwise a 1 ms rule could never
+    // poll at all); every later page spends what is left of the budget.
+    let deadline = Instant::now() + Duration::from_millis(watch.timeout_ms);
+    let views = match read_open_items(watch.target, api_base, watch.repo, |page, url| {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let Some(budget_ms) = page_budget_ms(page, watch.timeout_ms, remaining) else {
+            return Err(GithubFetchError::Timeout);
         };
-    }
-    let views = match parse_items(&fetched.body) {
+        fetch(url, auth.as_deref(), budget_ms, watch.max_body_bytes)
+    }) {
         Ok(views) => views,
-        Err(message) => {
-            return GithubPollOutcome::Error {
-                error_kind: MonitorErrorKind::Malformed,
-                message: truncate(&scrub(&message, token)),
-            };
-        }
+        Err(error) => return list_error_outcome(watch, token, &error),
     };
     let numbers = filter_items(watch, &views);
     let seed_baseline = match persisted.last_success_at_ms {
@@ -852,6 +957,71 @@ pub fn evaluate_with_token(
         },
         &decision,
     )
+}
+
+/// How many milliseconds one page of the walk may spend, given the rule's
+/// whole-poll budget and what is left of it. `None` means the budget is
+/// gone: the walk then stops with a `Timeout`, because a read cut short is
+/// never the end of the list.
+///
+/// Page one always gets the rule's full `timeout_ms`. A watch whose budget
+/// is a millisecond must still make the request it made before paging
+/// existed; only the pages AFTER the first share what is left.
+fn page_budget_ms(page: u32, timeout_ms: u64, remaining: Duration) -> Option<u64> {
+    if page == 1 {
+        return Some(timeout_ms);
+    }
+    let left = remaining.as_millis() as u64;
+    (left > 0).then_some(left)
+}
+
+/// The honest check-in for a list read that did not finish. Never a
+/// partial list: a caller that cannot read every page reports WHY instead
+/// of committing a prefix.
+fn list_error_outcome(
+    watch: &GithubWatch<'_>,
+    token: Option<&str>,
+    error: &GithubListError,
+) -> GithubPollOutcome {
+    let (error_kind, detail) = match error {
+        GithubListError::Fetch(fetch_error) => (
+            fetch_error.error_kind(),
+            match fetch_error {
+                GithubFetchError::Timeout => "the GitHub read timed out".to_string(),
+                GithubFetchError::Oversized => {
+                    "the GitHub response exceeded the rule's body bound".to_string()
+                }
+                GithubFetchError::Transport(detail) => {
+                    format!("the GitHub read failed: {}", scrub(detail, token))
+                }
+            },
+        ),
+        GithubListError::Status(status) => (
+            error_kind_for_status(*status),
+            format!(
+                "GitHub answered HTTP {} for {}/{}",
+                status,
+                watch.repo,
+                watch.target.path_segment()
+            ),
+        ),
+        GithubListError::Malformed(message) => (MonitorErrorKind::Malformed, message.clone()),
+        GithubListError::Truncated { pages } => (
+            MonitorErrorKind::Oversized,
+            format!(
+                "{}/{} has more than {} open {} ({pages} pages of {GITHUB_PULLS_PER_PAGE}); \
+                 refusing to treat the oldest page as the open list",
+                watch.repo,
+                watch.target.path_segment(),
+                *pages as u64 * GITHUB_PULLS_PER_PAGE as u64,
+                watch.target.path_segment(),
+            ),
+        ),
+    };
+    GithubPollOutcome::Error {
+        error_kind,
+        message: truncate(&scrub(&detail, token)),
+    }
 }
 
 /// Scrub a resolved token out of text that may be persisted.
@@ -1427,15 +1597,16 @@ mod tests {
     }
 
     #[test]
-    fn url_carries_the_repo_the_collection_and_the_paging_bound() {
+    fn url_carries_the_repo_the_collection_and_the_page() {
         assert_eq!(
             list_url(
                 GithubTarget::Pulls,
                 "https://api.github.com",
-                "clioo/drogon"
+                "clioo/drogon",
+                1
             )
             .unwrap(),
-            "https://api.github.com/repos/clioo/drogon/pulls?state=open&sort=created&direction=asc&per_page=100"
+            "https://api.github.com/repos/clioo/drogon/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"
         );
         // The issue watch reads the ISSUES collection of the same repo —
         // the only difference in the request it sends.
@@ -1443,19 +1614,399 @@ mod tests {
             list_url(
                 GithubTarget::Issues,
                 "https://api.github.com",
-                "clioo/drogon"
+                "clioo/drogon",
+                1
             )
             .unwrap(),
-            "https://api.github.com/repos/clioo/drogon/issues?state=open&sort=created&direction=asc&per_page=100"
+            "https://api.github.com/repos/clioo/drogon/issues?state=open&sort=created&direction=asc&per_page=100&page=1"
+        );
+        // The page is the only thing a later page changes: the page bound,
+        // the sort and the state are the same request every time, so page 2
+        // is the continuation of page 1 and not a different question.
+        assert_eq!(
+            list_url(
+                GithubTarget::Pulls,
+                "https://api.github.com",
+                "clioo/drogon",
+                7
+            )
+            .unwrap(),
+            "https://api.github.com/repos/clioo/drogon/pulls?state=open&sort=created&direction=asc&per_page=100&page=7"
         );
         // A trailing slash never doubles.
         assert!(
-            list_url(GithubTarget::Pulls, "http://127.0.0.1:9/", "a/b")
+            list_url(GithubTarget::Pulls, "http://127.0.0.1:9/", "a/b", 1)
                 .unwrap()
                 .starts_with("http://127.0.0.1:9/repos/a/b")
         );
-        assert!(list_url(GithubTarget::Issues, "https://api.github.com", "drogon").is_err());
-        assert!(list_url(GithubTarget::Issues, "https://api.github.com", "a/").is_err());
+        assert!(list_url(GithubTarget::Issues, "https://api.github.com", "drogon", 1).is_err());
+        assert!(list_url(GithubTarget::Issues, "https://api.github.com", "a/", 1).is_err());
+    }
+
+    // --- paging: the whole open list, or an honest refusal -----------------
+
+    /// A canned page of `count` items numbered from `first`, optionally with
+    /// a `Link` header.
+    fn page_of(first: u64, count: usize, link: Option<&str>) -> GithubFetch {
+        let items: Vec<String> = (0..count as u64)
+            .map(|offset| format!(r#"{{"number":{}}}"#, first + offset))
+            .collect();
+        GithubFetch {
+            status: 200,
+            body: format!("[{}]", items.join(",")),
+            link: link.map(str::to_string),
+        }
+    }
+
+    const NEXT_LINK: &str = r#"<https://api.github.com/repositories/1/pulls?page=2>; rel="next", <https://api.github.com/repositories/1/pulls?page=9>; rel="last""#;
+    const LAST_LINK: &str = r#"<https://api.github.com/repositories/1/pulls?page=1>; rel="first", <https://api.github.com/repositories/1/pulls?page=1>; rel="prev""#;
+
+    /// Walk a canned sequence of pages, recording the URLs that were asked
+    /// for. Panics if the reader asks for more pages than were canned —
+    /// a reader that keeps paging forever is itself a bug.
+    fn walk(
+        target: GithubTarget,
+        pages: Vec<GithubFetch>,
+    ) -> (Result<Vec<GithubItemView>, GithubListError>, Vec<String>) {
+        let mut asked: Vec<String> = Vec::new();
+        let mut queue = pages.into_iter();
+        let read = {
+            let asked = &mut asked;
+            read_open_items(
+                target,
+                "https://api.github.com",
+                "clioo/drogon",
+                |_page, url| {
+                    asked.push(url.to_string());
+                    Ok(queue.next().expect("the reader asked for an uncanned page"))
+                },
+            )
+        };
+        (read, asked)
+    }
+
+    /// The issue's own counterexample: 101 open pull requests, the newest
+    /// opened last. One page of 100 is NOT the open list, and the newest
+    /// number must reach the dedupe decision.
+    #[test]
+    fn a_second_page_is_read_so_the_newest_item_is_never_invisible() {
+        let (read, asked) = walk(
+            GithubTarget::Pulls,
+            vec![
+                page_of(1, 100, Some(NEXT_LINK)),
+                page_of(101, 1, Some(LAST_LINK)),
+            ],
+        );
+        let items = read.expect("both pages read");
+        assert_eq!(items.len(), 101);
+        assert_eq!(items.last().expect("an item").number, 101);
+        assert!(asked[0].ends_with("&page=1"), "first ask: {}", asked[0]);
+        assert!(asked[1].ends_with("&page=2"), "second ask: {}", asked[1]);
+        assert_eq!(asked.len(), 2, "no page is read twice: {asked:?}");
+
+        // And the watch releases it: with 1..=100 already seen, the only
+        // unseen number is the one that lives on page two.
+        let seen: BTreeSet<u64> = (1..=100).collect();
+        let numbers = filter_items(&(&rule(GithubPrFilter::Opened, None)).into(), &items);
+        assert_eq!(
+            decide("mon-1", &numbers, &seen, false),
+            GithubDedupeDecision::Release {
+                number: 101,
+                cursor: cursor_for_seen(&(1..=101).collect()),
+            }
+        );
+    }
+
+    /// Issues have the same hole and the same fix: one code path, asserted
+    /// on the issue collection too.
+    #[test]
+    fn an_issue_watch_pages_the_same_way() {
+        let (read, asked) = walk(
+            GithubTarget::Issues,
+            vec![
+                page_of(1, 100, Some(NEXT_LINK)),
+                page_of(101, 1, Some(LAST_LINK)),
+            ],
+        );
+        assert_eq!(read.expect("both pages read").len(), 101);
+        assert!(
+            asked.iter().all(|url| url.contains("/issues?")),
+            "{asked:?}"
+        );
+        assert!(asked[1].ends_with("&page=2"), "second ask: {}", asked[1]);
+    }
+
+    /// A FULL page with `rel="next"` is not the end of the list, and a full
+    /// page with NO `Link` header at all is not either: the reader asks for
+    /// one more page rather than inventing an end.
+    #[test]
+    fn a_full_page_is_never_assumed_to_be_the_last_one() {
+        let (with_link, asked) = walk(
+            GithubTarget::Pulls,
+            vec![page_of(1, 100, Some(NEXT_LINK)), page_of(101, 0, None)],
+        );
+        assert_eq!(with_link.expect("read").len(), 100);
+        assert_eq!(asked.len(), 2, "rel=next must be followed: {asked:?}");
+
+        let (no_header, asked) = walk(
+            GithubTarget::Pulls,
+            vec![page_of(1, 100, None), page_of(101, 5, None)],
+        );
+        assert_eq!(
+            no_header.expect("read").len(),
+            105,
+            "a full page without a Link header must still be continued"
+        );
+        assert_eq!(asked.len(), 2, "{asked:?}");
+    }
+
+    /// Stopping: a short page ends the walk, and so does a `Link` header
+    /// that advertises no next page — even on a full page, because GitHub's
+    /// own header is the authority while it is present (believing it is
+    /// what keeps a 1000-item repository from being called truncated).
+    #[test]
+    fn the_walk_stops_on_a_short_page_or_a_link_without_a_next() {
+        let (short, asked) = walk(GithubTarget::Pulls, vec![page_of(1, 7, None)]);
+        assert_eq!(short.expect("read").len(), 7);
+        assert_eq!(asked.len(), 1, "a short page is the end: {asked:?}");
+
+        let (ended, asked) = walk(GithubTarget::Pulls, vec![page_of(1, 100, Some(LAST_LINK))]);
+        assert_eq!(ended.expect("read").len(), 100);
+        assert_eq!(
+            asked.len(),
+            1,
+            "rel=last without rel=next ends it: {asked:?}"
+        );
+
+        let (empty, asked) = walk(GithubTarget::Pulls, vec![page_of(1, 0, None)]);
+        assert!(empty.expect("read").is_empty());
+        assert_eq!(asked.len(), 1, "{asked:?}");
+    }
+
+    /// The cap is a refusal, never a prefix: a list still going at
+    /// [`GITHUB_MAX_PAGES`] is an honest `Oversized` check-in, so nobody
+    /// commits the oldest page as "the open set".
+    #[test]
+    fn a_list_longer_than_the_page_cap_is_an_error_not_a_prefix() {
+        let pages: Vec<GithubFetch> = (0..GITHUB_MAX_PAGES)
+            .map(|page| page_of(1 + page as u64 * 100, 100, Some(NEXT_LINK)))
+            .collect();
+        let (read, asked) = walk(GithubTarget::Pulls, pages);
+        assert_eq!(
+            read,
+            Err(GithubListError::Truncated {
+                pages: GITHUB_MAX_PAGES
+            })
+        );
+        assert_eq!(asked.len(), GITHUB_MAX_PAGES as usize, "{}", asked.len());
+
+        // The check-in says Oversized and names the repository and the
+        // bound — never a number of items that was "seen".
+        let outcome = list_error_outcome(
+            &(&rule(GithubPrFilter::Opened, None)).into(),
+            None,
+            &GithubListError::Truncated {
+                pages: GITHUB_MAX_PAGES,
+            },
+        );
+        let GithubPollOutcome::Error {
+            error_kind,
+            message,
+        } = outcome
+        else {
+            panic!("expected an error outcome");
+        };
+        assert_eq!(error_kind, MonitorErrorKind::Oversized);
+        assert!(message.contains("clioo/drogon"), "{message}");
+        assert!(message.contains("1000 open pulls"), "{message}");
+
+        // A list that ends exactly ON the cap is complete, not truncated.
+        let mut exact: Vec<GithubFetch> = (0..GITHUB_MAX_PAGES - 1)
+            .map(|page| page_of(1 + page as u64 * 100, 100, Some(NEXT_LINK)))
+            .collect();
+        exact.push(page_of(
+            1 + (GITHUB_MAX_PAGES as u64 - 1) * 100,
+            100,
+            Some(LAST_LINK),
+        ));
+        let (read, _) = walk(GithubTarget::Pulls, exact);
+        assert_eq!(
+            read.expect("a list that ends on the cap is read in full")
+                .len(),
+            GITHUB_MAX_PAGES as usize * 100
+        );
+    }
+
+    /// A failure on a LATER page is the whole poll's failure. Half a list
+    /// is the same silent prefix the cap refuses, so it never reaches the
+    /// dedupe decision.
+    #[test]
+    fn a_failure_on_a_later_page_fails_the_whole_read() {
+        let mut queue = vec![
+            page_of(1, 100, Some(NEXT_LINK)),
+            GithubFetch {
+                status: 502,
+                body: String::new(),
+                link: None,
+            },
+        ]
+        .into_iter();
+        let read = read_open_items(
+            GithubTarget::Pulls,
+            "https://api.github.com",
+            "clioo/drogon",
+            |_page, _url| Ok(queue.next().expect("page")),
+        );
+        assert_eq!(read, Err(GithubListError::Status(502)));
+
+        let mut queue = vec![
+            page_of(1, 100, Some(NEXT_LINK)),
+            GithubFetch {
+                status: 200,
+                body: "not json".into(),
+                link: None,
+            },
+        ]
+        .into_iter();
+        let read = read_open_items(
+            GithubTarget::Pulls,
+            "https://api.github.com",
+            "clioo/drogon",
+            |_page, _url| Ok(queue.next().expect("page")),
+        );
+        assert!(
+            matches!(read, Err(GithubListError::Malformed(_))),
+            "{read:?}"
+        );
+
+        // A transport failure on page two is a transport failure, with the
+        // kind the transport named.
+        let read = read_open_items(
+            GithubTarget::Pulls,
+            "https://api.github.com",
+            "clioo/drogon",
+            |page, _url| {
+                if page == 1 {
+                    Ok(page_of(1, 100, Some(NEXT_LINK)))
+                } else {
+                    Err(GithubFetchError::Timeout)
+                }
+            },
+        );
+        assert_eq!(read, Err(GithubListError::Fetch(GithubFetchError::Timeout)));
+        assert_eq!(
+            GithubFetchError::Timeout.error_kind(),
+            MonitorErrorKind::Timeout
+        );
+    }
+
+    /// A bad repo is still refused before any request is sent.
+    #[test]
+    fn a_malformed_repo_is_refused_without_a_request() {
+        let mut asked = 0;
+        let read = read_open_items(
+            GithubTarget::Pulls,
+            "https://api.github.com",
+            "drogon",
+            |_, _| {
+                asked += 1;
+                Ok(page_of(1, 0, None))
+            },
+        );
+        assert!(
+            matches!(read, Err(GithubListError::Malformed(_))),
+            "{read:?}"
+        );
+        assert_eq!(asked, 0);
+    }
+
+    /// A `Link` header is a SIGNAL, never an itinerary: whatever host it
+    /// names, the next request goes to the base the rule configured. The
+    /// `Authorization` header rides in that request, so following a
+    /// rewritten `Link` would be handing the token to another host.
+    #[test]
+    fn a_link_header_never_redirects_the_walk_to_another_host() {
+        let hostile = r#"<https://evil.example/steal?page=2>; rel="next""#;
+        let mut queue = vec![page_of(1, 100, Some(hostile)), page_of(101, 1, None)].into_iter();
+        let mut asked: Vec<String> = Vec::new();
+        let read = read_open_items(
+            GithubTarget::Pulls,
+            "https://api.github.com",
+            "clioo/drogon",
+            |_page, url| {
+                asked.push(url.to_string());
+                Ok(queue.next().expect("page"))
+            },
+        );
+        assert_eq!(read.expect("read").len(), 101);
+        assert!(
+            asked
+                .iter()
+                .all(|url| url.starts_with("https://api.github.com/repos/clioo/drogon/pulls?")),
+            "every request goes to the configured base: {asked:?}"
+        );
+        assert!(asked.iter().all(|url| !url.contains("evil.example")));
+    }
+
+    /// The whole poll shares one budget, and an exhausted budget is a
+    /// `Timeout`, never a short list quietly accepted as complete.
+    #[test]
+    fn the_page_budget_is_the_polls_budget_and_running_out_is_a_timeout() {
+        // Page one always gets the rule's full budget, even if the clock is
+        // already past the deadline: paging must not stop a watch from
+        // making the one request it always made.
+        assert_eq!(page_budget_ms(1, 30_000, Duration::ZERO), Some(30_000));
+        assert_eq!(page_budget_ms(1, 1, Duration::ZERO), Some(1));
+        // Later pages spend what is left...
+        assert_eq!(
+            page_budget_ms(2, 30_000, Duration::from_millis(4_500)),
+            Some(4_500)
+        );
+        // ...and nothing left is a refusal to read, which the walk reports
+        // as a timeout instead of returning the pages it already has.
+        assert_eq!(page_budget_ms(2, 30_000, Duration::ZERO), None);
+        assert_eq!(page_budget_ms(9, 30_000, Duration::from_micros(10)), None);
+
+        let read = read_open_items(
+            GithubTarget::Pulls,
+            "https://api.github.com",
+            "clioo/drogon",
+            |page, _url| match page_budget_ms(page, 30_000, Duration::ZERO) {
+                Some(_) => Ok(page_of(1, 100, Some(NEXT_LINK))),
+                None => Err(GithubFetchError::Timeout),
+            },
+        );
+        assert_eq!(
+            read,
+            Err(GithubListError::Fetch(GithubFetchError::Timeout)),
+            "a budget that ran out mid-walk is a timeout, not a 100-item list"
+        );
+    }
+
+    #[test]
+    fn the_next_relation_is_read_out_of_a_link_header() {
+        assert!(link_has_next(NEXT_LINK));
+        assert!(!link_has_next(LAST_LINK));
+        assert!(!link_has_next(""));
+        // Unquoted and oddly spaced forms are still the next relation.
+        assert!(link_has_next("<https://x/y?page=2>; rel=next"));
+        assert!(link_has_next("<https://x/y?page=2> ; REL = \"NEXT\""));
+        // A URL that happens to contain the word is not a relation.
+        assert!(!link_has_next("<https://x/next?page=2>; rel=\"prev\""));
+        // ...and neither is a `next` that is not a `rel`.
+        assert!(!link_has_next("<https://x/y>; type=\"next\""));
+        // The header block parser finds the field whatever its case, and
+        // ignores every other header around it.
+        assert_eq!(
+            link_header(
+                "HTTP/2 200\r\nServer: github.com\r\nLINK: <https://x/y>; rel=\"next\"\r\n\r\n"
+            )
+            .as_deref(),
+            Some("<https://x/y>; rel=\"next\"")
+        );
+        assert_eq!(link_header("HTTP/2 200\r\nServer: github.com\r\n"), None);
+        // An empty value is no answer at all, not "the list ended".
+        assert_eq!(link_header("HTTP/2 200\r\nLink:\r\n"), None);
     }
 
     #[test]
@@ -1480,6 +2031,29 @@ mod tests {
         );
         assert!(!text.contains(canary));
         assert!(text.contains(crate::integrations::resolve::REDACTED));
+    }
+
+    /// The dedupe set must hold everything one poll can read. Otherwise a
+    /// baseline seed on a repository with more open items than the set
+    /// retains drops its oldest numbers, which then look unseen forever and
+    /// are released one per tick — a backlog replay dressed as new work.
+    #[test]
+    fn a_baseline_seed_of_the_widest_readable_list_keeps_every_number() {
+        let widest = GITHUB_MAX_PAGES as usize * GITHUB_PULLS_PER_PAGE as usize;
+        assert!(
+            MAX_SEEN_PULLS >= widest,
+            "the dedupe set ({MAX_SEEN_PULLS}) must hold a whole readable list ({widest})"
+        );
+        let numbers: Vec<u64> = (1..=widest as u64).collect();
+        let decision = decide("mon-1", &numbers, &BTreeSet::new(), true);
+        let seeded = seen_after(&decision, &numbers, &BTreeSet::new());
+        assert_eq!(seeded.len(), widest, "every number read is seeded");
+        // ...so the next poll of the same world has nothing unseen to
+        // release, instead of handing back the oldest item it just dropped.
+        assert_eq!(
+            decide("mon-1", &numbers, &seeded, false),
+            GithubDedupeDecision::Nothing
+        );
     }
 
     #[test]

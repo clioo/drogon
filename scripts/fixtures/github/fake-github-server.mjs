@@ -45,15 +45,20 @@ function logRequest(record) {
   appendFileSync(values.log, `${JSON.stringify(record)}\n`)
 }
 
-function readCollection(key) {
+function readDataset() {
   try {
     const parsed = JSON.parse(readFileSync(values.data, 'utf8'))
-    return Array.isArray(parsed[key]) ? parsed[key] : []
+    return parsed && typeof parsed === 'object' ? parsed : {}
   } catch {
     // A dataset the test is mid-write is an honest empty list, never a crash
     // that would take the whole fixture down between poll ticks.
-    return []
+    return {}
   }
+}
+
+function readCollection(key) {
+  const listed = readDataset()[key]
+  return Array.isArray(listed) ? listed : []
 }
 
 function send(res, status, body, headers = {}) {
@@ -64,6 +69,19 @@ function send(res, status, body, headers = {}) {
     ...headers,
   })
   res.end(text)
+}
+
+// Paging is real: a request is answered with its own `page`/`per_page`
+// window, plus GitHub's `Link: <...>; rel="next"` header while more rows
+// remain, so a watch that reads only the first page fails its test instead
+// of passing against a one-page world. A dataset carrying
+// `"linkHeader": false` serves the same windows with NO `Link` header at
+// all, which is the harder case a client must still get right: a full page
+// is not proof of the end of the list.
+function pageUrl(url, page) {
+  const next = new URL(url)
+  next.searchParams.set('page', String(page))
+  return `http://127.0.0.1${next.pathname}${next.search}`
 }
 
 const server = createServer((req, res) => {
@@ -98,8 +116,21 @@ const server = createServer((req, res) => {
             })),
           ].sort((a, b) => Number(a.number) - Number(b.number))
         : readCollection('pulls')
-    const page = Number(url.searchParams.get('per_page') ?? '30') || 30
-    send(res, 200, listed.slice(0, page))
+    const perPage = Number(url.searchParams.get('per_page') ?? '30') || 30
+    const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1)
+    const start = (page - 1) * perPage
+    const rows = listed.slice(start, start + perPage)
+    const headers = {}
+    if (readDataset().linkHeader !== false) {
+      const relations = []
+      if (start + perPage < listed.length) {
+        relations.push(`<${pageUrl(url, page + 1)}>; rel="next"`)
+        relations.push(`<${pageUrl(url, Math.ceil(listed.length / perPage))}>; rel="last"`)
+      }
+      if (page > 1) relations.push(`<${pageUrl(url, 1)}>; rel="first"`)
+      if (relations.length > 0) headers.link = relations.join(', ')
+    }
+    send(res, 200, rows, headers)
     return
   }
 
