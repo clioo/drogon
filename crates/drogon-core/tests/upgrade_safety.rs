@@ -765,25 +765,17 @@ fn fresh_install_backfill_is_a_no_op_with_no_pre_existing_workspaces() {
 fn work_v6_and_v7_upgrade_once_preserving_moves_and_delivery_history() {
     for version in [6, 7] {
         let dir = temp_dir(&format!("work-v{version}"));
-        let engine = Engine::open(dir.path()).unwrap();
-        let ticket = engine.dispatch(Request {
-            protocol: PROTOCOL_VERSION,
-            request_id: "migration-ticket".into(),
-            auth: None,
-            method: "work.ticket_create".into(),
-            params: json!({"title": "Keep this move"}),
-        });
-        assert!(ticket.ok);
-        drop(engine);
+        seed(&dir, "work-v5");
         let conn = read_db(&dir);
-        conn.execute_batch("INSERT INTO work_sends (column_id, ticket_id, trigger, message, results, at) SELECT column_id, id, 'manual', 'Keep history', '[{\"action\":\"sent\",\"sessionId\":\"old\"}]', 10 FROM work_tickets;
-            UPDATE work_tickets SET pending_status_id = 'next', status_revision = 17;
-            DROP INDEX work_sends_event;
-            ALTER TABLE work_sends DROP COLUMN event_id;
-            ALTER TABLE work_sends DROP COLUMN delivery_pending;").unwrap();
-        if version == 6 {
-            conn.execute_batch("ALTER TABLE work_tickets DROP COLUMN status_revision;")
-                .unwrap();
+        conn.execute_batch("CREATE TABLE work_ticket_workspaces (ticket_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL);
+            UPDATE work_tickets SET pending_status_id = 'next' WHERE id = 'tkt-jira';
+            UPDATE work_sends SET results = '[{\"action\":\"sent\",\"sessionId\":\"old\"}]';").unwrap();
+        if version == 7 {
+            conn.execute_batch(
+                "ALTER TABLE work_tickets ADD COLUMN status_revision INTEGER NOT NULL DEFAULT 0;
+                UPDATE work_tickets SET status_revision = 17 WHERE id = 'tkt-jira';",
+            )
+            .unwrap();
         }
         conn.execute(
             "UPDATE schema_versions SET version = ?1 WHERE component = 'work'",
@@ -797,7 +789,7 @@ fn work_v6_and_v7_upgrade_once_preserving_moves_and_delivery_history() {
             assert_eq!(version_of(&conn, "work"), 8);
             let moved: (String, i64) = conn
                 .query_row(
-                    "SELECT pending_status_id, status_revision FROM work_tickets",
+                    "SELECT pending_status_id, status_revision FROM work_tickets WHERE id = 'tkt-jira'",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
