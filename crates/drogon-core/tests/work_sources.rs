@@ -1276,3 +1276,82 @@ fn github_creates_issues_in_a_repository_board_and_a_project() {
     assert_eq!(issue["externalKey"], "clioo/drogon#17");
     assert_eq!(issue["externalStatus"]["name"], "Open");
 }
+
+#[test]
+fn a_failed_github_project_attachment_keeps_the_confirmed_issue() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "github", "apiKey": "ghp_fixture", "apiUrl": fx.url("github")}),
+    );
+    let imported = ctx.ok("work.board_import", json!({"provider": "github", "externalBoardId": "project:PVT_roadmap", "issueKeys": ["clioo/drogon#10"]}));
+    let board = imported["board"]["id"].as_str().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("curl");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    @*)
+      if /usr/bin/grep -q DrogonGhAddItem "${{arg#@}}"; then
+        touch '{root}/waiting'
+        n=0
+        while [ ! -f '{root}/release' ] && [ $n -lt 500 ]; do sleep 0.01; n=$((n + 1)); done
+        exit 7
+      fi
+      ;;
+  esac
+done
+exec /usr/bin/curl "$@"
+"#,
+            root = dir.path().display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    struct ResetCurl;
+    impl Drop for ResetCurl {
+        fn drop(&mut self) {
+            drogon_core::jira::client::set_curl_bin_override(None);
+        }
+    }
+    let _reset = ResetCurl;
+    drogon_core::jira::client::set_curl_bin_override(Some(script));
+    let (persisted_before_attachment, response) = std::thread::scope(|scope| {
+        let create = scope.spawn(|| ctx.call("work.ticket_create", json!({"boardId": board, "columnId": "In Progress", "title": "Keep my remote identity", "repo": "clioo/drogon"})));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
+        while !dir.path().join("waiting").exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let persisted = ctx
+            .call("work.ticket_show", json!({"ticketId": "clioo/drogon#16"}))
+            .ok;
+        std::fs::write(dir.path().join("release"), "").unwrap();
+        (persisted, create.join().unwrap())
+    });
+    assert!(
+        persisted_before_attachment,
+        "confirmed issue must be durable before project attachment"
+    );
+    assert!(response.ok, "{:?}", response.error);
+    let created = response.result.unwrap();
+    assert_eq!(created["externalKey"], "clioo/drogon#16");
+    assert!(
+        created["externalUrl"]
+            .as_str()
+            .unwrap()
+            .ends_with("/issues/16")
+    );
+    assert!(
+        !created["warnings"].as_array().unwrap().is_empty(),
+        "{created}"
+    );
+    drop(_reset);
+    ctx.ok("work.board_sync", json!({"boardId": board}));
+    let kept = ctx.ok("work.ticket_show", json!({"ticketId": created["id"]}));
+    assert_eq!(kept["removed"], false, "{kept}");
+}

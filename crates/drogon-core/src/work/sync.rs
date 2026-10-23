@@ -1904,8 +1904,30 @@ impl Engine {
             (board, column, sprint)
         };
         let provider = self.board_provider(&board)?;
+        let mut confirmed_ticket: Option<String> = None;
+        let mut persist_confirmation = |issue: &ExtIssue| {
+            let persist = || -> Result<String, RpcError> {
+                let mut conn = self.db.lock().unwrap();
+                let tx = conn.transaction().map_err(error::from_sqlite)?;
+                let mut board = get_board(&tx, &board.id)?;
+                let columns = list_columns(&tx, Some(&board.id))?;
+                let id = if let Some(id) = &confirmed_ticket {
+                    let ticket = get_ticket(&tx, id)?;
+                    apply_issue(&tx, &mut board, &columns, &ticket, issue)?;
+                    id.clone()
+                } else {
+                    insert_issue(&tx, &mut board, &columns, issue)?
+                };
+                tx.commit().map_err(error::from_sqlite)?;
+                Ok(id)
+            };
+            confirmed_ticket = Some(persist().map_err(|e| super::provider::ProviderError::new(
+                "creation_unverifiable", format!("Created {} at {}, but could not save its local record: {}. Do not create it again.", issue.key, issue.url, e.message)
+            ))?);
+            Ok(())
+        };
         let (issue, warnings) = provider
-            .create_issue(
+            .create_issue_confirmed(
                 &board.external_id,
                 &NewIssue {
                     title: &title,
@@ -1916,6 +1938,7 @@ impl Engine {
                     issue_type: str_field(params, "issueType")?.filter(|s| !s.trim().is_empty()),
                     repo: str_field(params, "repo")?.filter(|s| !s.trim().is_empty()),
                 },
+                &mut persist_confirmation,
             )
             .map_err(provider_error)?;
         let label = provider_label(&board.provider);
@@ -1927,7 +1950,13 @@ impl Engine {
             if let Some(sprint) = &issue.sprint {
                 ensure_sprint(&tx, &board.id, sprint)?;
             }
-            let id = insert_issue(&tx, &mut board, &columns, &issue)?;
+            let id = if let Some(id) = confirmed_ticket {
+                let ticket = get_ticket(&tx, &id)?;
+                apply_issue(&tx, &mut board, &columns, &ticket, &issue)?;
+                id
+            } else {
+                insert_issue(&tx, &mut board, &columns, &issue)?
+            };
             // A Drogon-only column keeps the card it was created in.
             if column.statuses.is_empty() {
                 let ticket = get_ticket(&tx, &id)?;
