@@ -172,6 +172,24 @@ binary changed instead of silently attaching to the old one.
 
 Remote SSH targets, Linear/Jira/GitLab integrations, voice,
 computer use, emulator, mobile, AI Vault, plugins and cloud are outside the
-MVP. Every shipped journey is covered by automated acceptance, plus a rendered oracle
-that diffs named UI surfaces against their recorded baselines. Feature history
-is in [CHANGELOG.md](../CHANGELOG.md), one line per merged PR.
+MVP. The twelve MVP journeys are covered by automated acceptance, plus a rendered
+oracle that diffs named UI surfaces against their recorded baselines.
+
+The extra journey scripts beyond those twelve do not all run in CI, and this
+is where that is stated rather than assumed: the manifest
+([`scripts/journeys.manifest.json`](../scripts/journeys.manifest.json)) holds
+25 journeys, of which CI runs 15. The held-out ten and their reasons are:
+`desktop-files`, `bot-session-honesty`, `session-resume-by-id`,
+`workspace-session-restart` and `orchestrator` (the headless compositor stalls
+`page.screenshot` on the Linux leg), `durable-orchestrator` (same stall, still
+present with software rendering), `meetings` (the runner has no notes corpus),
+`repro-demo` and `mentu-run-delegation` (the pinned mentu-recipes runtime is
+gitignored and absent from a fresh checkout), and `bot-session-restart`. That
+last one is a **behavioural finding, not an environment excuse**: text pasted
+through the real paste chord must reach the PTY, and on the Linux CI leg it
+does not. Re-running it on macOS (2026-10-23) stops earlier — after the Bot
+session is reopened, the pane reports `Terminal exited` with exit code 1, so
+the paste assertion is never reached and the CI failure is not yet explained.
+A held-out journey is not a pass: it runs in no gate, and its checks appear in
+no green run. Feature history is in [CHANGELOG.md](../CHANGELOG.md), one line
+per merged PR.
