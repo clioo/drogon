@@ -602,6 +602,22 @@ describe("Meetings page tracked work", () => {
     expect(screen.queryByText("DRG-41")).toBeNull();
   });
 
+  it("says the service is older than the page instead of quoting the wire", async () => {
+    const track = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: "method_not_found",
+        message: "Unknown method: meeting.commitment_track",
+        retryable: false,
+      },
+    }));
+    renderPage({ bridge: fixturesBridge({ track }) });
+    await openActionsTab();
+    fireEvent.click(await screen.findByRole("button", { name: /Track as a Drogon task/ }));
+    expect(await screen.findByText(/This Drogon service predates tracked meeting work/)).toBeTruthy();
+    expect(screen.queryByText(/Unknown method/)).toBeNull();
+  });
+
   it("shows the same ticket when the action was already tracked", async () => {
     const commitments = vi.fn(async () => ({
       ok: true as const,

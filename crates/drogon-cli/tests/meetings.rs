@@ -1310,6 +1310,36 @@ fn an_accepted_commitment_becomes_real_tracked_work() {
     assert_eq!(placed["created"], true);
     assert_eq!(placed["ticket"]["columnId"], review.as_str());
 
+    // A ticket deleted from the board must not strand the promise: tracking
+    // again replaces the dead link instead of refusing forever.
+    fixture.cli_ok(&["work", "ticket", "delete", "--ticket", &ticket_id, "--json"]);
+    let repaired = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "track",
+        "--id",
+        &commitment_id,
+        "--json",
+    ]);
+    assert_eq!(repaired["created"], true);
+    assert_ne!(repaired["ticket"]["id"], ticket_id.as_str());
+    assert_eq!(
+        repaired["commitment"]["ticketId"],
+        repaired["ticket"]["id"].clone()
+    );
+    assert_eq!(
+        repaired["commitment"]["ticketKey"],
+        repaired["ticket"]["key"].clone()
+    );
+    assert_eq!(
+        fixture.cli_ok(&["work", "board", "--json"])["tickets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2,
+        "the replacement is a real ticket beside the other action's work"
+    );
+
     // Nothing in this leg wrote to the notes: acceptance and tracking are
     // Drogon state plus Work tickets, never an edit of the owner's files.
     assert_eq!(tree_snapshot(&fixture.notes), before);

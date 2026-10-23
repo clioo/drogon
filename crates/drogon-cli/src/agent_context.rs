@@ -1819,7 +1819,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
             &[
                 "Requires meetings.work.v1 (additive on top of meetings.actions.v1). The ticket is created through the Work board's own path: it gets a DRG key, lands in a column (the board's first by default) and takes that column's on-enter delivery like any other ticket.",
                 "The daemon re-reads the note and re-verifies the commitment's quote first; if the transcript no longer contains it, nothing is created and the verb fails with commitment_quote_missing.",
-                "One commitment is one ticket: running it again reports the same ticket (created:false) instead of making a duplicate. The ticket's body carries the meeting, the verbatim line and its number, so the board shows the evidence and a column prompt using {ticket.description} types it into the session.",
+                "One commitment is one ticket: running it again reports the same ticket (created:false) instead of making a duplicate, and a ticket deleted from the board is replaced rather than stranding the action. The ticket's body carries the meeting, the verbatim line and its number, so the board shows the evidence and a column prompt using {ticket.description} types it into the session.",
             ],
         ),
         entry(

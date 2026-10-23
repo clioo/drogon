@@ -735,7 +735,9 @@ takes that column's on-enter delivery like any other ticket. The daemon
 re-reads the note and re-verifies the commitment's `quote` first: if the
 transcript no longer contains it, nothing is created and the verb fails with
 `commitment_quote_missing`. One commitment is one ticket — running the verb
-again reports the same ticket with `created: false`, never a duplicate.
+again reports the same ticket with `created: false`, never a duplicate. A ticket
+you deleted from the board does not strand the action: the next track replaces
+the dead link with a live ticket.
 
 The ticket's body is the meeting brief: the meeting title and date, the
 transcript line number, the verbatim quote, and how the action was accepted

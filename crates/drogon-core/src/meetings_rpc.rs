@@ -316,12 +316,24 @@ impl crate::Engine {
             .get(&params.id)
             .map_err(commitment_error)?;
         if let Some(ticket_id) = commitment.ticket_id.clone() {
-            let ticket = self.work_ticket_show(&json!({ "ticketId": ticket_id }))?;
-            return Ok(json!({
-                "commitment": commitment,
-                "ticket": tracked_ticket(&ticket),
-                "created": false,
-            }));
+            match self.work_ticket_show(&json!({ "ticketId": ticket_id })) {
+                Ok(ticket) => {
+                    return Ok(json!({
+                        "commitment": commitment,
+                        "ticket": tracked_ticket(&ticket),
+                        "created": false,
+                    }));
+                }
+                // The ticket this action became was deleted from the board.
+                // Forget the stale link and make a live one below: a promise
+                // must not be stranded on work that no longer exists.
+                Err(failure) if failure.code == "not_found" => {
+                    self.meeting_commitments
+                        .clear_ticket(&commitment.id)
+                        .map_err(commitment_error)?;
+                }
+                Err(failure) => return Err(failure),
+            }
         }
         let file_system = RealMeetingFileSystem;
         let root = self.notes_root(&file_system);

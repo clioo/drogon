@@ -362,7 +362,8 @@ pub enum CommitmentAction {
     /// ({ticket.description}) hand a session the meeting's own evidence. The
     /// note is re-read and the quote re-verified first: if the transcript no
     /// longer contains it, nothing is created. Tracking again reports the same
-    /// ticket instead of making a duplicate.
+    /// ticket instead of making a duplicate; a ticket deleted from the board is
+    /// replaced rather than stranding the action.
     #[command(
         args_override_self = true,
         override_usage = "drogon-cli meeting actions track --id <ID> [--column <ID>] [--project <ID>] [--workspace <ID>]\nValid flags: --column, --data-dir, --help, --id, --json, --project, --request-id, --retry-request, --workspace"

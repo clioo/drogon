@@ -481,6 +481,27 @@ impl CommitmentStore {
         Ok(updated)
     }
 
+    /// Forgets the ticket a commitment was linked to, so the promise can be
+    /// tracked again. Used when the linked ticket no longer exists on the
+    /// board: a deleted ticket must not strand the action forever.
+    pub fn clear_ticket(&self, id: &str) -> Result<Commitment, CommitmentError> {
+        let _guard = self.lock.lock().map_err(|_| CommitmentError::Storage)?;
+        let mut ledger = self.read()?;
+        let Some(commitment) = ledger
+            .commitments
+            .iter_mut()
+            .find(|commitment| commitment.id == id)
+        else {
+            return Err(CommitmentError::UnknownId);
+        };
+        commitment.ticket_id = None;
+        commitment.ticket_key = None;
+        commitment.updated_at = crate::now_rfc3339();
+        let updated = commitment.clone();
+        self.write(&ledger)?;
+        Ok(updated)
+    }
+
     pub fn set_status(
         &self,
         id: &str,
@@ -845,6 +866,16 @@ mod tests {
             store.link_ticket("commitment-nope", "ticket-3", "DRG-43"),
             Err(CommitmentError::UnknownId)
         );
+
+        // A deleted ticket must not strand the promise: clearing the link
+        // lets the same commitment be tracked again.
+        let cleared = store.clear_ticket(&stored.id).unwrap();
+        assert_eq!(cleared.ticket_id, None);
+        assert_eq!(cleared.ticket_key, None);
+        let retracked = store
+            .link_ticket(&stored.id, "ticket-4", "DRG-44")
+            .expect("a cleared commitment can be tracked again");
+        assert_eq!(retracked.ticket_key.as_deref(), Some("DRG-44"));
     }
 
     #[test]

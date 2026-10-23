@@ -12,6 +12,7 @@ import type {
   MeetingCommitmentTracked,
   MeetingsBridge,
 } from "../../../../shared/meetings-contract";
+import { meetingsTrackFailureCopy } from "./meetings-page-copy";
 
 export const MEETINGS_ACTIONS_DEBOUNCE_MS = 250;
 
@@ -212,7 +213,7 @@ export function useMeetingCommitments({
         .track({ id: commitment.id })
         .then((result) => {
           if (!result.ok) {
-            setTrackError(result.error.message);
+            setTrackError(meetingsTrackFailureCopy(result.error.code, result.error.message));
             return;
           }
           setTrackNotice(trackedNotice(result.result));
