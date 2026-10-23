@@ -1355,3 +1355,77 @@ exec /usr/bin/curl "$@"
     let kept = ctx.ok("work.ticket_show", json!({"ticketId": created["id"]}));
     assert_eq!(kept["removed"], false, "{kept}");
 }
+
+#[test]
+fn incomplete_provider_collections_are_errors_in_preview_and_import() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let jira = support::FixtureServer::with_data("agile-site.json");
+    let ctx = TestContext::open();
+    ctx.connect(&jira);
+    for (provider, token) in [("linear", "lin_api_fixture"), ("github", "ghp_fixture")] {
+        ctx.ok(
+            "work.source_connect",
+            json!({"provider": provider, "apiKey": token, "apiUrl": fx.url(provider)}),
+        );
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let js = dir.path().join("curl.mjs");
+    std::fs::write(&js, r#"
+import { readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+const args = process.argv.slice(2);
+const value = (flag) => args[args.indexOf(flag) + 1];
+const url = args.at(-1);
+const input = args.includes('--data-binary') ? JSON.parse(readFileSync(value('--data-binary').slice(1), 'utf8')) : {};
+let body;
+if (url.includes('/board/7/issue')) body = { issues: [{ id: '30001', key: 'APP-142', fields: { summary: 'More pages', status: { id: '1', name: 'To Do', statusCategory: { key: 'new' } } } }], total: 100000, isLast: false };
+if (url.includes('/repos/clioo/drogon/issues?')) body = Array.from({length: 100}, () => ({ number: 10, id: 10, title: 'More pages', state: 'open', html_url: 'https://github.com/clioo/drogon/issues/10', body: '', labels: [], assignees: [] }));
+if (input.query?.includes('DrogonLinearIssues')) body = { data: { team: { issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'repeated' } } } } };
+if (input.query?.includes('DrogonGhItems')) body = { data: { node: { items: { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'repeated' } } } } };
+if (!body) { const result = spawnSync('/usr/bin/curl', args, { stdio: 'inherit' }); process.exit(result.status ?? 1); }
+writeFileSync(value('-o'), JSON.stringify(body));
+writeFileSync(value('-D'), 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n');
+process.stdout.write('200');
+"#).unwrap();
+    let script = dir.path().join("curl");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nexec \"${{DROGON_TEST_NODE:-node}}\" '{}' \"$@\"\n",
+            js.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    struct ResetCurl;
+    impl Drop for ResetCurl {
+        fn drop(&mut self) {
+            drogon_core::jira::client::set_curl_bin_override(None);
+        }
+    }
+    let _reset = ResetCurl;
+    drogon_core::jira::client::set_curl_bin_override(Some(script));
+    let mut observed = Vec::new();
+    for (provider, external) in [
+        ("jira", "7"),
+        ("linear", "team-ops"),
+        ("github", "repo:clioo/drogon"),
+        ("github", "project:PVT_roadmap"),
+    ] {
+        for method in ["work.import_preview", "work.board_import"] {
+            let mut params = json!({"provider": provider, "externalBoardId": external});
+            if method == "work.board_import" {
+                params["all"] = json!(true);
+            }
+            observed.push((provider, method, ctx.call(method, params)));
+        }
+    }
+    for (provider, method, response) in observed {
+        assert!(
+            !response.ok,
+            "{provider} {method} accepted an incomplete collection"
+        );
+        assert_eq!(response.error.unwrap().code, "incomplete_collection");
+    }
+}

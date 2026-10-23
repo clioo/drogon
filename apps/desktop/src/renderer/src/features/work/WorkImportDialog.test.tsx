@@ -87,6 +87,13 @@ const chooseNames = (region: HTMLElement) =>
     .map((b) => b.getAttribute("aria-label"));
 
 describe("board picker", () => {
+  test("reports an incomplete preview and does not offer partial issues to import", async () => {
+    const bridge = mount([team("ops", "Operations", "OPS")]);
+    bridge.importPreview.mockResolvedValue({ ok: false, error: { code: "incomplete_collection", message: "Linear returned an incomplete issues collection. No partial import was applied." } } as never);
+    fireEvent.click(await screen.findByRole("button", { name: "Choose Operations" }));
+    expect(await screen.findByText(/Linear returned an incomplete issues collection/)).toBeTruthy();
+    expect(screen.queryByTestId("work-import-issues")).toBeNull();
+  });
   test("recommends the teams holding your open issues, most first, above the rest", async () => {
     mount([
       team("team-web", "Web Platform", "WEB", 0),

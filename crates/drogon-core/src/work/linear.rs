@@ -6,13 +6,14 @@
 //! Issues are keyed by their identifier (`ENG-12`); a status push is an
 //! `issueUpdate` of `stateId`, a sprint move one of `cycleId`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
 
 use super::provider::{
     AssignedOpen, ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope,
-    NewIssue, ProviderError, ProviderResult, WorkProvider,
+    NewIssue, ProviderError, ProviderResult, WorkProvider, complete_connection,
+    incomplete_collection, page_cursor,
 };
 use crate::jira::client::{HttpRequest, JiraRequestError, REQUEST_TIMEOUT, http_json};
 
@@ -110,13 +111,19 @@ impl LinearProvider {
         let data = self.gql(
             "query DrogonLinearTeam($id: String!) { team(id: $id) {
                id key name cyclesEnabled
-               states(first: 100) { nodes { id name type position } }
-               cycles(first: 100) { nodes { id number name startsAt endsAt completedAt isActive } }
+               states(first: 100) { nodes { id name type position } pageInfo { hasNextPage } }
+               cycles(first: 100) { nodes { id number name startsAt endsAt completedAt isActive } pageInfo { hasNextPage } }
              } }",
             json!({ "id": id }),
         )?;
         match data.get("team") {
-            Some(team) if !team.is_null() => Ok(team.clone()),
+            Some(team) if !team.is_null() => {
+                complete_connection(&team["states"], 100, "Linear", "states")?;
+                if team["cyclesEnabled"] == true {
+                    complete_connection(&team["cycles"], 100, "Linear", "cycles")?;
+                }
+                Ok(team.clone())
+            }
             _ => Err(ProviderError::new(
                 "not_found",
                 format!("Linear team {id} not found"),
@@ -256,9 +263,10 @@ impl WorkProvider for LinearProvider {
 
     fn list_boards(&self) -> ProviderResult<Vec<ExtBoard>> {
         let data = self.gql(
-            "query DrogonLinearTeams { teams(first: 100) { nodes { id key name cyclesEnabled } } }",
+            "query DrogonLinearTeams { teams(first: 100) { nodes { id key name cyclesEnabled } pageInfo { hasNextPage } } }",
             json!({}),
         )?;
+        complete_connection(&data["teams"], 100, "Linear", "teams")?;
         Ok(data["teams"]["nodes"]
             .as_array()
             .cloned()
@@ -363,7 +371,8 @@ impl WorkProvider for LinearProvider {
         );
         let mut out = Vec::new();
         let mut after: Option<String> = None;
-        for _ in 0..100 {
+        let mut seen = HashSet::new();
+        for page_number in 0..100 {
             let data = self.gql(&query, json!({ "id": board_id, "after": after }))?;
             let page = &data["team"]["issues"];
             if data["team"].is_null() {
@@ -375,10 +384,13 @@ impl WorkProvider for LinearProvider {
             for raw in page["nodes"].as_array().cloned().unwrap_or_default() {
                 out.push(self.map_issue(&raw));
             }
-            if page["pageInfo"]["hasNextPage"] != true {
+            after = page_cursor(page, &mut seen, "Linear", "issues")?;
+            if after.is_none() {
                 break;
             }
-            after = page["pageInfo"]["endCursor"].as_str().map(str::to_owned);
+            if page_number == 99 {
+                return Err(incomplete_collection("Linear", "issues"));
+            }
         }
         Ok(match scope {
             // Its listing cannot be narrowed: a sync reads the whole board.

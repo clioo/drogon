@@ -10,7 +10,7 @@
 //! `sources.rs` and one match arm in `Engine::work_provider`; the board,
 //! sync and UI code only ever see [`ExtIssue`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -165,6 +165,57 @@ impl From<ProviderError> for RpcError {
 
 pub(crate) type ProviderResult<T> = Result<T, ProviderError>;
 
+pub(crate) fn incomplete_collection(source: &str, collection: &str) -> ProviderError {
+    ProviderError::new(
+        "incomplete_collection",
+        format!(
+            "{source} returned an incomplete {collection} collection. No partial import was applied; narrow the scope or try again."
+        ),
+    )
+}
+
+/// An unpaged connection must prove it fits in the requested window.
+pub(crate) fn complete_connection(
+    connection: &Value,
+    limit: usize,
+    source: &str,
+    collection: &str,
+) -> ProviderResult<()> {
+    let nodes = connection["nodes"]
+        .as_array()
+        .ok_or_else(|| incomplete_collection(source, collection))?;
+    let more = connection["pageInfo"]["hasNextPage"].as_bool();
+    if more == Some(true) || (nodes.len() >= limit && more != Some(false)) {
+        return Err(incomplete_collection(source, collection));
+    }
+    Ok(())
+}
+
+pub(crate) fn page_cursor(
+    connection: &Value,
+    seen: &mut HashSet<String>,
+    source: &str,
+    collection: &str,
+) -> ProviderResult<Option<String>> {
+    if !connection["nodes"].is_array() {
+        return Err(incomplete_collection(source, collection));
+    }
+    match connection["pageInfo"]["hasNextPage"].as_bool() {
+        Some(false) => Ok(None),
+        Some(true) => {
+            let cursor = connection["pageInfo"]["endCursor"]
+                .as_str()
+                .filter(|c| !c.is_empty())
+                .ok_or_else(|| incomplete_collection(source, collection))?;
+            if !seen.insert(cursor.to_owned()) {
+                return Err(incomplete_collection(source, collection));
+            }
+            Ok(Some(cursor.to_owned()))
+        }
+        None => Err(incomplete_collection(source, collection)),
+    }
+}
+
 pub(crate) trait WorkProvider {
     fn kind(&self) -> &'static str;
     /// The account/site boards are imported from: an id (stable across
@@ -312,16 +363,20 @@ impl<'a> JiraProvider<'a> {
                 .get(key)
                 .and_then(Value::as_array)
                 .cloned()
-                .unwrap_or_default();
+                .ok_or_else(|| incomplete_collection("Jira", key))?;
             let got = items.len();
             out.extend(items);
             let total = page.get("total").and_then(Value::as_u64);
             let last = page.get("isLast").and_then(Value::as_bool).unwrap_or(false);
-            if got == 0 || last || total.is_some_and(|t| out.len() as u64 >= t) {
-                break;
+            if last || total.is_some_and(|t| out.len() as u64 >= t) || (got == 0 && total.is_none())
+            {
+                return Ok(out);
+            }
+            if got == 0 {
+                return Err(incomplete_collection("Jira", key));
             }
         }
-        Ok(out)
+        Err(incomplete_collection("Jira", key))
     }
 
     /// The site's Sprint custom field (`customfield_10020` on most Cloud
@@ -1055,5 +1110,57 @@ mod tests {
         let jira = JiraState::new(dir.path());
         let error = JiraProvider::new(&jira, None).err().unwrap();
         assert_eq!(error.code, "jira_not_connected");
+    }
+    #[test]
+    fn connection_limits_and_cursors_require_a_complete_result() {
+        assert!(
+            complete_connection(
+                &json!({"nodes": [1], "pageInfo": {"hasNextPage": true}}),
+                100,
+                "Linear",
+                "cycles"
+            )
+            .is_err()
+        );
+        assert!(
+            complete_connection(&json!({"nodes": vec![0; 100]}), 100, "Linear", "teams").is_err()
+        );
+        assert!(
+            complete_connection(
+                &json!({"nodes": vec![0; 100], "pageInfo": {"hasNextPage": false}}),
+                100,
+                "Linear",
+                "teams"
+            )
+            .is_ok()
+        );
+        let mut seen = HashSet::new();
+        let page = json!({"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "same"}});
+        assert_eq!(
+            page_cursor(&page, &mut seen, "GitHub", "items")
+                .unwrap()
+                .as_deref(),
+            Some("same")
+        );
+        assert!(page_cursor(&page, &mut seen, "GitHub", "items").is_err());
+        assert!(
+            page_cursor(
+                &json!({"nodes": [], "pageInfo": {"hasNextPage": true}}),
+                &mut seen,
+                "GitHub",
+                "items"
+            )
+            .is_err()
+        );
+        assert_eq!(
+            page_cursor(
+                &json!({"nodes": [], "pageInfo": {"hasNextPage": false}}),
+                &mut seen,
+                "GitHub",
+                "items"
+            )
+            .unwrap(),
+            None
+        );
     }
 }

@@ -14,10 +14,12 @@
 
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDate};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 
 use super::provider::{
     CreateOptions, ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope,
-    NewIssue, ProviderError, ProviderResult, WorkProvider,
+    NewIssue, ProviderError, ProviderResult, WorkProvider, complete_connection,
+    incomplete_collection, page_cursor,
 };
 use crate::jira::client::{HttpRequest, JiraRequestError, REQUEST_TIMEOUT, http_json};
 
@@ -244,7 +246,7 @@ impl GithubProvider {
                  ... on ProjectV2IterationField { id name configuration {
                    iterations { id title startDate duration }
                    completedIterations { id title startDate duration } } }
-               } } } } }",
+               } pageInfo { hasNextPage } } } } }",
             json!({ "id": id }),
         )?;
         let node = &data["node"];
@@ -254,6 +256,7 @@ impl GithubProvider {
                 format!("GitHub project {id} not found"),
             ));
         }
+        complete_connection(&node["fields"], 50, "GitHub", "project fields")?;
         let fields = node["fields"]["nodes"]
             .as_array()
             .cloned()
@@ -412,7 +415,7 @@ impl GithubProvider {
           assignees(first: 5) { nodes { login name } } } }
       fieldValues(first: 30) { nodes { __typename
         ... on ProjectV2ItemFieldSingleSelectValue { optionId name field { ... on ProjectV2SingleSelectField { id } } }
-        ... on ProjectV2ItemFieldIterationValue { iterationId title startDate duration field { ... on ProjectV2IterationField { id } } } } }";
+        ... on ProjectV2ItemFieldIterationValue { iterationId title startDate duration field { ... on ProjectV2IterationField { id } } } } pageInfo { hasNextPage } }";
 
     fn project_items(&self, id: &str, fields: &ProjectFields) -> ProviderResult<Vec<ExtIssue>> {
         let query = format!(
@@ -422,21 +425,26 @@ impl GithubProvider {
         );
         let mut out = Vec::new();
         let mut after: Option<String> = None;
-        for _ in 0..100 {
+        let mut seen = HashSet::new();
+        for page_number in 0..100 {
             let data = self.gql(&query, json!({ "id": id, "after": after }))?;
             let page = &data["node"]["items"];
             for raw in page["nodes"].as_array().cloned().unwrap_or_default() {
                 if raw["isArchived"] == true {
                     continue;
                 }
+                complete_connection(&raw["fieldValues"], 30, "GitHub", "item fields")?;
                 if let Some(issue) = self.map_item(&raw, fields) {
                     out.push(issue);
                 }
             }
-            if page["pageInfo"]["hasNextPage"] != true {
+            after = page_cursor(page, &mut seen, "GitHub", "project items")?;
+            if after.is_none() {
                 break;
             }
-            after = page["pageInfo"]["endCursor"].as_str().map(str::to_owned);
+            if page_number == 99 {
+                return Err(incomplete_collection("GitHub", "project items"));
+            }
         }
         Ok(out)
     }
@@ -586,10 +594,10 @@ impl WorkProvider for GithubProvider {
         let projects = self.gql(
             "query DrogonGhProjects { viewer { login
                projectsV2(first: 50) { nodes { id number title closed owner { ... on User { login } ... on Organization { login } }
-                 fields(first: 30) { nodes { __typename } } } }
+                 fields(first: 30) { nodes { __typename } pageInfo { hasNextPage } } } pageInfo { hasNextPage } }
                organizations(first: 50) { nodes { login
                  projectsV2(first: 50) { nodes { id number title closed owner { ... on User { login } ... on Organization { login } }
-                   fields(first: 30) { nodes { __typename } } } } } } } }",
+                   fields(first: 30) { nodes { __typename } pageInfo { hasNextPage } } } pageInfo { hasNextPage } } } pageInfo { hasNextPage } } } }",
             json!({}),
         );
         let data = match projects {
@@ -602,6 +610,12 @@ impl WorkProvider for GithubProvider {
             }
         };
         let viewer = &data["viewer"];
+        if viewer.get("projectsV2").is_some() {
+            complete_connection(&viewer["projectsV2"], 50, "GitHub", "projects")?;
+        }
+        if viewer.get("organizations").is_some() {
+            complete_connection(&viewer["organizations"], 50, "GitHub", "organizations")?;
+        }
         let mut projects: Vec<Value> = viewer["projectsV2"]["nodes"]
             .as_array()
             .cloned()
@@ -611,12 +625,16 @@ impl WorkProvider for GithubProvider {
             .cloned()
             .unwrap_or_default()
         {
+            complete_connection(&org["projectsV2"], 50, "GitHub", "organization projects")?;
             projects.extend(
                 org["projectsV2"]["nodes"]
                     .as_array()
                     .cloned()
                     .unwrap_or_default(),
             );
+        }
+        for project in &projects {
+            complete_connection(&project["fields"], 30, "GitHub", "project fields")?;
         }
         let mut boards: Vec<ExtBoard> = projects
             .iter()
@@ -657,6 +675,9 @@ impl WorkProvider for GithubProvider {
             }));
             if repos.len() < 100 {
                 break;
+            }
+            if page == 5 {
+                return Err(incomplete_collection("GitHub", "repositories"));
             }
         }
         Ok(boards)
@@ -757,6 +778,9 @@ impl WorkProvider for GithubProvider {
                     if items.len() < 100 {
                         break;
                     }
+                    if page == 20 {
+                        return Err(incomplete_collection("GitHub", "repository issues"));
+                    }
                 }
                 out
             }
@@ -789,7 +813,7 @@ impl WorkProvider for GithubProvider {
                     }
                     let (repo, number) = split_key(issue.key)?;
                     return match self.rest("GET", &format!("/repos/{repo}/issues/{number}"), None) {
-                        Ok(raw) => Ok(Some(self.unattached_issue(&repo, &raw))),
+                        Ok(raw) => Ok(Some(self.unattached_issue(repo, &raw))),
                         Err(e) if e.code == "not_found" => Ok(None),
                         Err(e) => Err(e),
                     };
@@ -806,7 +830,15 @@ impl WorkProvider for GithubProvider {
                 );
                 match self.gql(&query, json!({ "id": item })) {
                     Ok(data) if data["node"].is_null() => Ok(None),
-                    Ok(data) => Ok(self.map_item(&data["node"], &fields)),
+                    Ok(data) => {
+                        complete_connection(
+                            &data["node"]["fieldValues"],
+                            30,
+                            "GitHub",
+                            "item fields",
+                        )?;
+                        Ok(self.map_item(&data["node"], &fields))
+                    }
                     Err(e) if e.code == "not_found" => Ok(None),
                     Err(e) => Err(e),
                 }
