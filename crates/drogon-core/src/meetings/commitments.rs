@@ -138,6 +138,10 @@ pub enum CommitmentError {
     UnknownId,
     Full,
     Storage,
+    /// The ledger on disk was written by a newer Drogon. Refusing is the only
+    /// safe answer: this build's schema cannot carry the newer fields, so
+    /// reading and rewriting it would silently drop them.
+    NewerSchema(u32),
 }
 
 impl CommitmentError {
@@ -153,6 +157,7 @@ impl CommitmentError {
             CommitmentError::UnknownId => "commitment_unknown_id",
             CommitmentError::Full => "commitment_ledger_full",
             CommitmentError::Storage => "commitment_storage_failed",
+            CommitmentError::NewerSchema(_) => "commitment_newer_schema",
         }
     }
 
@@ -187,6 +192,11 @@ impl CommitmentError {
             CommitmentError::Storage => {
                 "The commitment ledger could not be written. Nothing was changed.".to_string()
             }
+            CommitmentError::NewerSchema(found) => format!(
+                "This ledger was written by a newer Drogon (version {found}; this build reads \
+                 version {COMMITMENTS_VERSION}). Nothing was changed — use the newer build so \
+                 no recorded action is lost."
+            ),
         }
     }
 }
@@ -283,6 +293,14 @@ impl CommitmentStore {
         let bytes = std::fs::read(&self.path).map_err(|_| CommitmentError::Storage)?;
         let parsed: LedgerFile =
             serde_json::from_slice(&bytes).map_err(|_| CommitmentError::Storage)?;
+        if parsed.version > COMMITMENTS_VERSION {
+            return Err(CommitmentError::NewerSchema(parsed.version));
+        }
+        // A newer ledger is refused, never re-read into this build's shape:
+        // `write` stamps `COMMITMENTS_VERSION`, so proceeding would drop every
+        // field this build does not know about. The rest of the product
+        // (`work`, `automations`, `backups`) refuses newer schemas the same
+        // way rather than downgrading the owner's file.
         Ok(parsed)
     }
 
@@ -719,6 +737,44 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o600, "the ledger is the owner's own state");
         }
+    }
+
+    #[test]
+    fn a_ledger_written_by_a_newer_build_is_refused_not_downgraded() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = CommitmentStore::new(dir.path());
+        let path = dir.path().join(COMMITMENTS_FILE);
+        // A ledger a future build could write: the fields both versions share,
+        // plus one this build does not know (a ticket link). The version is the
+        // only signal that reading it would lose data.
+        let future = "{\"version\":2,\"commitments\":[{\"id\":\"commitment-1\",\
+            \"meetingId\":\"write-that-down:/notes/2026-09-10/08-00_30min.md\",\
+            \"relativePath\":\"2026-09-10/08-00_30min.md\",\"meetingTitle\":\"Sync\",\
+            \"meetingDate\":\"2026-09-10\",\"text\":\"Ship it\",\"owner\":null,\
+            \"quote\":\"[00:00] we ship on friday\",\"line\":7,\"source\":\"owner\",\
+            \"confidence\":\"high\",\"status\":\"open\",\
+            \"createdAt\":\"2026-09-10T08:00:00Z\",\"updatedAt\":\"2026-09-10T08:00:00Z\",\
+            \"resolvedAt\":null,\"ticketKey\":\"DRG-9\"}]}";
+        std::fs::write(&path, future.as_bytes()).expect("future ledger");
+        let before = std::fs::read(&path).expect("read the future ledger");
+
+        assert_eq!(
+            store.list(&CommitmentFilter::default(), 50, 0).unwrap_err(),
+            CommitmentError::NewerSchema(2)
+        );
+        // The write paths refuse too: `set_status` would otherwise rewrite the
+        // file with this build's version and drop `ticketKey`.
+        assert_eq!(
+            store
+                .set_status("commitment-1", CommitmentStatus::Done)
+                .unwrap_err(),
+            CommitmentError::NewerSchema(2)
+        );
+        assert_eq!(
+            std::fs::read(&path).expect("read it back"),
+            before,
+            "a newer ledger must be left exactly as it was found"
+        );
     }
 
     #[test]
