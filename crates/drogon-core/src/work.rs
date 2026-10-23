@@ -2130,7 +2130,18 @@ impl Engine {
             let delivered = results
                 .iter()
                 .any(|r| matches!(r["action"].as_str(), Some("sent" | "resumed" | "started")));
-            if !delivered {
+            // A recipient that was written to and failed keeps its place
+            // (issue #679). `session::write_failure` exists because the
+            // Return is a write of its own: the body can already be sitting
+            // in that composer unsubmitted, and a replacement session would
+            // submit the whole prompt a second time. A session that is gone
+            // never reaches here as a failure -- it reports `unverifiable`
+            // and falls through to resume -- so the fresh-start branch below
+            // still covers the only case it is for: nothing to resume.
+            let unreached = results
+                .iter()
+                .any(|r| matches!(r["action"].as_str(), Some("failed" | "unverifiable")));
+            if !delivered && !unreached {
                 results.push(self.start_ticket_session(column, &ticket, &message));
             }
         }
@@ -2421,6 +2432,191 @@ fn pr_fingerprint(pull: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A live recipient whose PTY write fails, so delivery runs through the
+    /// real `session::write_parts` and its body/Return split rather than a
+    /// stand-in for `deliver`. `accept_body` lets the body land and fails the
+    /// Return after it, which is the half-delivered state the split created.
+    #[cfg(unix)]
+    struct FailingPtyWriter {
+        accept_body: bool,
+        written: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    }
+
+    #[cfg(unix)]
+    impl std::io::Write for FailingPtyWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if self.accept_body {
+                self.accept_body = false;
+                self.written.lock().unwrap().extend_from_slice(bytes);
+                return Ok(bytes.len());
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "fixture pty write failure",
+            ))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A child that never exits: the recipient is live, so the write failure
+    /// is the only thing under test (an exited one reports `unverifiable`
+    /// and takes the resume path instead).
+    #[cfg(unix)]
+    #[derive(Debug)]
+    struct LivePtyChild;
+
+    #[cfg(unix)]
+    impl portable_pty::ChildKiller for LivePtyChild {
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+            Box::new(Self)
+        }
+    }
+
+    #[cfg(unix)]
+    impl portable_pty::Child for LivePtyChild {
+        fn try_wait(&mut self) -> std::io::Result<Option<portable_pty::ExitStatus>> {
+            Ok(None)
+        }
+        fn wait(&mut self) -> std::io::Result<portable_pty::ExitStatus> {
+            Ok(portable_pty::ExitStatus::with_exit_code(0))
+        }
+        fn process_id(&self) -> Option<u32> {
+            None
+        }
+    }
+
+    /// Issue #679: a prompt the daemon could not type into a live session is
+    /// never a reason to start a second one that submits the whole prompt
+    /// again. Both halves of the split write are covered: a body that never
+    /// lands, and a body that lands whose Return does not.
+    #[cfg(unix)]
+    #[test]
+    fn failed_or_partial_pty_delivery_never_starts_a_replacement() {
+        for partial in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let engine = Engine::open(dir.path()).unwrap();
+            engine
+                .do_work_column_update(&json!({
+                    "columnId": "Review",
+                    "message": "Review {ticket.id}",
+                    "sendOnEnter": true,
+                }))
+                .unwrap();
+            let ticket = engine
+                .do_work_ticket_create(&json!({"title": "Write failure", "columnId": "To do"}))
+                .unwrap();
+            let ticket_id = ticket["id"].as_str().unwrap().to_string();
+            let prompt = format!("Review {}", ticket["key"].as_str().unwrap());
+            {
+                let conn = engine.db.lock().unwrap();
+                link_session_in(&conn, &ticket_id, "live-recipient").unwrap();
+            }
+            let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let pair = portable_pty::native_pty_system()
+                .openpty(portable_pty::PtySize::default())
+                .unwrap();
+            engine.sessions.lock().unwrap().insert(
+                "live-recipient".into(),
+                crate::session::SessionHandle::from_spawned(
+                    "live-recipient".into(),
+                    "inc-1".into(),
+                    "ws-1".into(),
+                    dir.path().display().to_string(),
+                    "local".into(),
+                    "fixture".into(),
+                    vec![],
+                    None,
+                    None,
+                    None,
+                    "now".into(),
+                    80,
+                    24,
+                    pair.master,
+                    Box::new(FailingPtyWriter {
+                        accept_body: partial,
+                        written: written.clone(),
+                    }),
+                    Box::new(LivePtyChild),
+                    engine.db.clone(),
+                ),
+            );
+
+            // The drag the bug was reported from: the column's on-enter prompt.
+            let moved = engine
+                .do_work_ticket_move(&json!({"ticketId": ticket_id, "columnId": "Review"}))
+                .unwrap();
+            let results = moved["delivery"]["results"].as_array().unwrap();
+            assert_eq!(results.len(), 1, "no second session is added: {moved}");
+            assert_eq!(results[0]["action"], "failed", "{moved}");
+            assert_eq!(results[0]["sessionId"], "live-recipient", "{moved}");
+            assert!(
+                results[0]["newSessionId"].is_null(),
+                "a failed write starts nothing: {moved}"
+            );
+            let error = results[0]["error"].as_str().unwrap().to_string();
+            assert_eq!(
+                error.contains("composer unsubmitted") && error.contains("send a lone Return"),
+                partial,
+                "a half-delivered prompt says what is already typed: {error}"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&written.lock().unwrap()).to_string(),
+                if partial { prompt.as_str() } else { "" },
+                "the partial case is partial: the body landed and the Return did not"
+            );
+
+            // And the same for Send now, which delivers through the same path.
+            let sent = engine
+                .do_work_column_send(&json!({"columnId": "Review"}))
+                .unwrap();
+            let results = sent["sends"][0]["results"].as_array().unwrap();
+            assert_eq!(results.len(), 1, "{sent}");
+            assert_eq!(results[0]["action"], "failed", "{sent}");
+            {
+                let conn = engine.db.lock().unwrap();
+                assert_eq!(
+                    linked_session_ids(&conn, &ticket_id).unwrap(),
+                    ["live-recipient"],
+                    "the ticket keeps the session it had, and gains none"
+                );
+            }
+
+            // The legitimate fresh branch is untouched: with nothing linked,
+            // delivery still reaches `start_ticket_session`. This engine has
+            // no project to start one in, which is exactly what it reports;
+            // `with_nothing_to_resume_a_fresh_session_is_started_and_linked`
+            // covers the launch itself against a shell fixture.
+            engine.sessions.lock().unwrap().remove("live-recipient");
+            engine
+                .db
+                .lock()
+                .unwrap()
+                .execute(
+                    "DELETE FROM work_ticket_sessions WHERE ticket_id = ?1",
+                    [&ticket_id],
+                )
+                .unwrap();
+            let fresh = engine
+                .do_work_column_send(&json!({"columnId": "Review"}))
+                .unwrap();
+            let results = fresh["sends"][0]["results"].as_array().unwrap();
+            assert_eq!(results.len(), 1, "{fresh}");
+            assert_eq!(results[0]["action"], "skipped", "{fresh}");
+            assert!(
+                results[0]["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("no workspace or project"),
+                "{fresh}"
+            );
+        }
+    }
 
     #[test]
     fn a_v5_database_gains_the_ticket_workspaces_table() {

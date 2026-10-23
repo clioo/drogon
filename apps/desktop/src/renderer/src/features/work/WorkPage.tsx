@@ -73,7 +73,7 @@ import {
 import { useWorkBoard } from "./use-work-board";
 import {
   columnTriggerLabel,
-  deliverySummary,
+  deliveryNotice,
   formatClock,
   isLiveSession,
   matchesFilter,
@@ -440,8 +440,10 @@ export function WorkPage({
       bridge.ticketMove({ ticketId, columnId, index, ...(sprintId ? { sprintId } : {}) }),
     );
     if (!result.ok) notice(result.error, "error");
-    else if (result.value.delivery)
-      notice(`${ticketDisplayKey(result.value)}: ${deliverySummary(result.value.delivery.results)}`);
+    else if (result.value.delivery) {
+      const sent = deliveryNotice(ticketDisplayKey(result.value), result.value.delivery.results);
+      notice(sent.text, sent.kind);
+    }
   };
 
   const panelColumn = panel?.kind === "column" ? board?.columns.find((c) => c.id === panel.id) : undefined;

@@ -40,7 +40,7 @@ import {
 } from "../../../../shared/work-contract";
 import type { WorkBoardState } from "./use-work-board";
 import { JiraMarkdown } from "../tasks/jira/jira-markdown";
-import { deliverySummary, formatClock } from "./work-format";
+import { deliveryNotice, deliverySummary, formatClock } from "./work-format";
 import { WorkColumnIcon, WorkSessionGlyph, WorkSessionState, workSessionLabel } from "./work-icons";
 import {
   Avatar,
@@ -312,7 +312,7 @@ export function WorkTicketPanel({
     ...sends.map((s) => ({
       at: s.at,
       key: `s${s.id}`,
-      text: `${board.columns.find((c) => c.id === s.columnId)?.name ?? "Column"} sent (${s.trigger}): ${deliverySummary(s.results)}`,
+      text: `${board.columns.find((c) => c.id === s.columnId)?.name ?? "Column"} delivery (${s.trigger}): ${deliverySummary(s.results)}`,
       detail: s.message,
     })),
   ].sort((a, b) => b.at - a.at);
@@ -465,8 +465,10 @@ export function WorkTicketPanel({
                         bridge.ticketMove({ ticketId: ticket.id, columnId: event.target.value }),
                       );
                       if (!result.ok) onNotice(result.error, "error");
-                      else if (result.value.delivery)
-                        onNotice(`Sent to ${ticket.key}: ${deliverySummary(result.value.delivery.results)}`, "success");
+                      else if (result.value.delivery) {
+                        const sent = deliveryNotice(ticket.key, result.value.delivery.results);
+                        onNotice(sent.text, sent.kind);
+                      }
                     }}
                   >
                     {board.columns.map((c) => (

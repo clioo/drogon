@@ -16,6 +16,7 @@ import type {
 } from "../../../../shared/work-contract";
 import { columnDropIndex, resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
 import { TooltipProvider } from "../../components/ui/tooltip";
+import { toast } from "sonner";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
@@ -461,6 +462,54 @@ describe("Work board", () => {
     expect((message as HTMLTextAreaElement).value).toBe("Check {ticket.id} now");
     fireEvent.click(within(review).getByRole("button", { name: "Send now" }));
     await waitFor(() => expect(bridge.columnSend).toHaveBeenCalledWith({ columnId: "review" }));
+  });
+
+  // Issue #679: the RPC succeeding only means the send was recorded. A
+  // recipient the daemon could not type into is bad news, and the half
+  // -delivered case has to reach the user with what to do about it.
+  async function sendNow(results: unknown[]) {
+    const bridge = fakeBridge();
+    bridge.columnSend = vi.fn(() =>
+      ok({
+        columnId: "review",
+        sends: [
+          { ticketId: "t2", ticketKey: "DRG-42", columnId: "review", trigger: "manual", message: "m", results, at: 1 },
+        ],
+      }),
+    ) as never;
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
+    await mount(bridge);
+    openMenu(screen.getByRole("button", { name: "Review column actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Configure prompt…" }));
+    const panel = await screen.findByRole("complementary", { name: "Review prompt" });
+    fireEvent.click(within(panel).getByRole("button", { name: "Send now" }));
+  }
+
+  test("a half-delivered prompt is an error toast that says to send a lone Return", async () => {
+    await sendNow([
+      {
+        sessionId: "live-1",
+        action: "failed",
+        error:
+          "pty write failed after the body was already delivered, so the message is in the " +
+          "composer unsubmitted; send a lone Return rather than the whole message again: Broken pipe",
+      },
+    ]);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("send a lone Return")));
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  test("an unverifiable prompt delivery is surfaced as an error", async () => {
+    await sendNow([{ sessionId: null, action: "unverifiable", error: "Interrupted delivery" }]);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("unverifiable")));
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  test("a delivery that reached its sessions stays a success toast", async () => {
+    await sendNow([{ sessionId: "live-1", action: "sent" }]);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Delivery to Review: 1 sent"));
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   test("a live session on a ticket opens directly in its workspace", async () => {
