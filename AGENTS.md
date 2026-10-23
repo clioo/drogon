@@ -44,6 +44,17 @@ scope any more — the shipped behaviour, its tests, and the packaged acceptance
 - Workers with a live Orca dispatch preamble send `worker_done` exactly once
   after the PR exists; if the send fails, the PR is still the deliverable.
 
+## TypeSafe
+
+When `TYPESAFE_API_KEY` is set, run `node scripts/typesafe-validate.mjs` once
+before finishing and report passed, skipped, or failed. A missing or blank key
+skips and sends nothing. Do not print the key or a response body. The CI
+advisor (`scripts/ci-jev-advisor.mjs`) may call attention to a desktop flow or
+a daemon guarantee. It never skips foundation, journeys, cargo test, or
+packaged acceptance. Contract and refresh steps: `docs/agents/typesafe.md`.
+Use the TypeSafe skill only when the task is about TypeSafe, Jev, or
+`TYPESAFE_API_KEY`.
+
 ## Build fresh main
 
 - Run `./scripts/build-main.sh` to package fresh `origin/main` in an isolated
