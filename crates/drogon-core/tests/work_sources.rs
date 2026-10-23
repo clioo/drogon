@@ -598,6 +598,77 @@ fn plane_creates_real_work_items_and_auto_imports_new_assignments() {
 }
 
 #[test]
+fn plane_creation_keeps_its_confirmed_identity_when_read_back_fails() {
+    assert_plane_creation_survives_read_back(503, "Read-back unavailable");
+}
+
+#[test]
+fn plane_creation_keeps_its_confirmed_identity_when_read_back_returns_garbage() {
+    assert_plane_creation_survives_read_back(200, "Malformed successful reply");
+}
+
+fn assert_plane_creation_survives_read_back(status: u16, message: &str) {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok("work.source_connect", json!({"provider": "plane", "apiKey": "plane_fixture", "apiUrl": fx.url("plane"), "workspaceSlug": "drogon"}));
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"provider": "plane", "externalBoardId": "plane-app", "issueKeys": ["APP-128"]}),
+    );
+    let board = imported["board"]["id"].clone();
+    fx.control(
+        "plane/config",
+        json!({"failure": {"path": "/work-items/pi-6/", "status": status, "message": message}}),
+    );
+    let response = ctx.call("work.ticket_create", json!({"boardId": board, "columnId": "In Progress", "title": "Retain confirmed creation", "description": "Do not create twice"}));
+    assert!(
+        response.ok,
+        "creation succeeded remotely: {:?}",
+        response.error
+    );
+    let created = response.result.unwrap();
+    assert_eq!(created["externalId"], "pi-6");
+    assert_eq!(created["externalKey"], "APP-133");
+    assert_eq!(
+        created["externalUrl"],
+        "https://app.plane.so/drogon/projects/plane-app/issues/pi-6/"
+    );
+    assert_eq!(created["sprintName"], "Current cycle");
+    assert!(
+        created["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("could not read it back")),
+        "{created}"
+    );
+    let saved = ctx.ok("work.ticket_show", json!({"ticketId": created["id"]}));
+    assert_eq!(saved["externalId"], "pi-6");
+    fx.control("plane/config", json!({}));
+    ctx.ok("work.board_sync", json!({"boardId": board}));
+    let saved = ctx.ok("work.ticket_show", json!({"ticketId": created["id"]}));
+    assert_eq!(saved["removed"], false);
+    assert_eq!(saved["title"], "Retain confirmed creation");
+    let log = std::fs::read_to_string(fx._dir.path().join("requests.jsonl")).unwrap();
+    let posts = log
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .filter(|r| {
+            r["service"] == "plane"
+                && r["method"] == "POST"
+                && r["path"]
+                    .as_str()
+                    .is_some_and(|p| p.ends_with("/work-items/"))
+        })
+        .count();
+    assert_eq!(
+        posts, 1,
+        "recovery must read the existing work item, not create another"
+    );
+}
+
+#[test]
 fn linear_connects_with_an_api_key_and_round_trips_a_team() {
     let _gh = Gh::set(false);
     let fx = FakeSources::start();

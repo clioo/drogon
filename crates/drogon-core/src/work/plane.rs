@@ -566,12 +566,27 @@ impl WorkProvider for PlaneProvider {
         board_id: &str,
         new: &NewIssue,
     ) -> ProviderResult<(ExtIssue, Vec<String>)> {
+        self.create_issue_confirmed(board_id, new, &mut |_| Ok(()))
+    }
+
+    fn create_issue_confirmed(
+        &self,
+        board_id: &str,
+        new: &NewIssue,
+        confirmed: &mut dyn FnMut(&ExtIssue) -> ProviderResult<()>,
+    ) -> ProviderResult<(ExtIssue, Vec<String>)> {
+        // Read mapping metadata before creation so it cannot hide a confirmed
+        // POST if the service becomes unavailable during follow-up requests.
+        let board = self.board(board_id)?;
+        let states = self.states(board_id)?;
+        let cycles = self.list_sprints(board_id)?;
+        let me = self.me()?;
         let mut input = json!({"name": new.title, "description_html": format!("<p>{}</p>", new.description.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('\n', "<br>"))});
         if let Some(state) = new.status_id {
             input["state"] = json!(state)
         }
         if new.assign_to_me
-            && let Some(me) = self.me()?
+            && let Some(me) = &me
         {
             input["assignees"] = json!([me])
         }
@@ -587,15 +602,35 @@ impl WorkProvider for PlaneProvider {
             key: "",
             id: Some(id),
         };
-        let mut warnings = Vec::new();
-        if let Some(cycle) = new.sprint_id
-            && let Err(e) = self.move_to_sprint(board_id, issue_ref, Some(cycle))
-        {
-            warnings.push(format!("Created without a cycle: {}", e.message));
+        let mut receipt = self.map_issue(&raw, &board, &states, &[], me.as_deref())?;
+        if raw["description_stripped"].is_null() {
+            receipt.description = new.description.into();
         }
-        let issue = self
-            .get_issue(board_id, issue_ref)?
-            .ok_or_else(|| invalid_response("a created work item that cannot be read"))?;
+        confirmed(&receipt)?;
+        let mut warnings = Vec::new();
+        if let Some(cycle) = new.sprint_id {
+            match self.move_to_sprint(board_id, issue_ref, Some(cycle)) {
+                Ok(()) => {
+                    receipt.sprint = cycles.iter().find(|c| c.id == cycle).cloned();
+                    confirmed(&receipt)?;
+                }
+                Err(e) => warnings.push(format!("Created without a cycle: {}", e.message)),
+            }
+        }
+        let issue = match self.get_issue(board_id, issue_ref) {
+            Ok(Some(issue)) => issue,
+            other => {
+                warnings.push(format!(
+                    "Created {}, but could not read it back: {}. Do not create it again.",
+                    receipt.url,
+                    other
+                        .err()
+                        .map(|e| e.message)
+                        .unwrap_or_else(|| "not visible".into())
+                ));
+                receipt
+            }
+        };
         Ok((issue, warnings))
     }
 }
