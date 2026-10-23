@@ -789,7 +789,7 @@ impl WorkProvider for GithubProvider {
                     }
                     let (repo, number) = split_key(issue.key)?;
                     return match self.rest("GET", &format!("/repos/{repo}/issues/{number}"), None) {
-                        Ok(raw) => Ok(Some(self.unattached_issue(&repo, &raw))),
+                        Ok(raw) => Ok(Some(self.unattached_issue(repo, &raw))),
                         Err(e) if e.code == "not_found" => Ok(None),
                         Err(e) => Err(e),
                     };
