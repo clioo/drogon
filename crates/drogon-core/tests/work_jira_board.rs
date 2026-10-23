@@ -226,6 +226,7 @@ case " $* " in
       sleep 0.01
       n=$((n + 1))
     done
+    [ -f '{root}/release' ] || exit 124
     ;;
 esac
 cat '{root}/response-'$$
@@ -278,6 +279,7 @@ fn push_acknowledges_only_the_status_and_sprint_that_were_sent() {
     std::thread::scope(|scope| {
         let push = scope.spawn(|| b.ctx.ok("work.ticket_push", json!({"ticketId": id})));
         pause.wait();
+        assert!(!push.is_finished(), "push must remain held until release");
         b.move_to("APP-142", "Done");
         // Even returning to the same target is a newer local decision (ABA).
         b.move_to("APP-142", "QA");
@@ -296,6 +298,7 @@ fn push_acknowledges_only_the_status_and_sprint_that_were_sent() {
     std::thread::scope(|scope| {
         let push = scope.spawn(|| b.ctx.ok("work.ticket_push", json!({"ticketId": id})));
         pause.wait();
+        assert!(!push.is_finished(), "push must remain held until release");
         // Cancelling against the cached remote QA must remain a QA move
         // after the older request changes the actual remote to In Progress.
         b.move_to("APP-142", "QA");
@@ -314,6 +317,7 @@ fn push_acknowledges_only_the_status_and_sprint_that_were_sent() {
     std::thread::scope(|scope| {
         let push = scope.spawn(|| b.ctx.ok("work.ticket_push", json!({"ticketId": id})));
         pause.wait();
+        assert!(!push.is_finished(), "push must remain held until release");
         b.ctx.ok(
             "work.ticket_sprint",
             json!({"ticketId": id, "to": "active"}),
@@ -351,6 +355,26 @@ fn board_push_refuses_known_conflicts_until_explicit_resolution() {
     );
     assert_eq!(resolved["push"]["pushed"], true, "{resolved}");
     assert_eq!(b.jira_issue("APP-142")["status"]["name"], "QA");
+}
+
+#[test]
+fn board_push_does_not_count_a_cancelled_move_as_a_failure() {
+    let b = Board::imported();
+    b.move_to("APP-142", "QA");
+    b.move_to("APP-128", "QA");
+    let pause = PausedPush::new();
+    let pushed = std::thread::scope(|scope| {
+        let push = scope.spawn(|| b.ctx.ok("work.board_push", json!({"boardId": b.board_id})));
+        pause.wait();
+        assert!(!push.is_finished());
+        b.move_to("APP-128", "Review");
+        pause.release();
+        push.join().unwrap()
+    });
+    assert_eq!(pushed["results"].as_array().unwrap().len(), 2, "{pushed}");
+    assert_eq!(pushed["results"][1]["nothing"], true, "{pushed}");
+    assert_eq!(pushed["failed"], 0, "{pushed}");
+    assert_eq!(pushed["pushed"], 1, "{pushed}");
 }
 
 #[test]

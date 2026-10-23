@@ -1327,6 +1327,14 @@ exec /usr/bin/curl "$@"
         while !dir.path().join("waiting").exists() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        assert!(
+            dir.path().join("waiting").exists(),
+            "attachment must reach the response barrier"
+        );
+        assert!(
+            !create.is_finished(),
+            "creation must still be waiting for attachment"
+        );
         let persisted = ctx
             .call("work.ticket_show", json!({"ticketId": "clioo/drogon#16"}))
             .ok;
@@ -1354,6 +1362,102 @@ exec /usr/bin/curl "$@"
     ctx.ok("work.board_sync", json!({"boardId": board}));
     let kept = ctx.ok("work.ticket_show", json!({"ticketId": created["id"]}));
     assert_eq!(kept["removed"], false, "{kept}");
+}
+
+#[test]
+fn overlapping_pushes_are_refused_until_the_first_acknowledgement_finishes() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "linear", "apiKey": "lin_api_fixture", "apiUrl": fx.url("linear")}),
+    );
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"provider": "linear", "externalBoardId": "team-eng", "issueKeys": ["ENG-2"]}),
+    );
+    let id = ctx.ok("work.ticket_show", json!({"ticketId": "ENG-2"}))["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let view = ctx.ok("work.board", json!({"boardId": imported["board"]["id"]}));
+    ctx.ok(
+        "work.ticket_move",
+        json!({"ticketId": id, "columnId": column_id(&view, "In Progress")}),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("curl");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+mutation=0
+for arg in "$@"; do
+  case "$arg" in @*) /usr/bin/grep -q DrogonLinearUpdate "${{arg#@}}" && mutation=1 ;; esac
+done
+if [ "$mutation" = 1 ] && mkdir '{root}/first' 2>/dev/null; then
+  /usr/bin/curl "$@" > '{root}/response'
+  status=$?
+  touch '{root}/waiting'
+  n=0
+  while [ ! -f '{root}/release' ] && [ $n -lt 1000 ]; do sleep 0.01; n=$((n + 1)); done
+  [ -f '{root}/release' ] || exit 124
+  cat '{root}/response'
+  exit $status
+fi
+exec /usr/bin/curl "$@"
+"#,
+            root = dir.path().display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            drogon_core::jira::client::set_curl_bin_override(None);
+        }
+    }
+    let _reset = Reset;
+    drogon_core::jira::client::set_curl_bin_override(Some(script));
+    let second = std::thread::scope(|scope| {
+        let first = scope.spawn(|| ctx.ok("work.ticket_push", json!({"ticketId": id})));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        while !dir.path().join("waiting").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "first push never reached the barrier"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!first.is_finished());
+        ctx.ok(
+            "work.ticket_move",
+            json!({"ticketId": id, "columnId": column_id(&view, "Done")}),
+        );
+        let second = ctx.ok("work.ticket_push", json!({"ticketId": id}));
+        std::fs::write(dir.path().join("release"), "").unwrap();
+        assert_eq!(first.join().unwrap()["pushed"], true);
+        second
+    });
+    assert_eq!(second["pushed"], false, "{second}");
+    assert!(second["error"].as_str().unwrap().contains("in progress"));
+    assert_eq!(
+        ctx.ok("work.ticket_show", json!({"ticketId": id}))["pendingStatus"]["name"],
+        "Done"
+    );
+    assert_eq!(
+        ctx.ok("work.ticket_push", json!({"ticketId": id}))["pushed"],
+        true
+    );
+    ctx.ok(
+        "work.board_sync",
+        json!({"boardId": imported["board"]["id"]}),
+    );
+    let final_ticket = ctx.ok("work.ticket_show", json!({"ticketId": id}));
+    assert_eq!(final_ticket["externalStatus"]["name"], "Done");
+    assert_eq!(final_ticket["pendingStatus"], Value::Null);
 }
 
 #[test]
@@ -1421,6 +1525,15 @@ process.stdout.write('200');
             observed.push((provider, method, ctx.call(method, params)));
         }
     }
+    let accepted: Vec<_> = observed
+        .iter()
+        .filter(|(_, _, response)| response.ok)
+        .map(|(provider, method, _)| format!("{provider} {method}"))
+        .collect();
+    assert!(
+        accepted.is_empty(),
+        "accepted incomplete collections: {accepted:?}"
+    );
     for (provider, method, response) in observed {
         assert!(
             !response.ok,

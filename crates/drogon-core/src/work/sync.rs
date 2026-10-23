@@ -27,6 +27,7 @@
 //! that, like a status move, waits to be pushed.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use super::provider::{
     ExtBoard, ExtIssue, ExtSprint, IssueRef, IssueScope, NewIssue, WorkProvider,
@@ -37,6 +38,24 @@ pub(super) const LOCAL_BOARD: &str = "local";
 pub(crate) const SYNC_INTERVAL_MS: i64 = 5 * 60_000;
 /// What the import picker's issue rows may take of the 1 MB reply.
 pub(super) const PREVIEW_BUDGET_BYTES: usize = 700 * 1024;
+
+struct ActivePush(&'static Mutex<HashSet<String>>, String);
+
+impl Drop for ActivePush {
+    fn drop(&mut self) {
+        self.0.lock().unwrap().remove(&self.1);
+    }
+}
+
+fn claim_push(ticket_id: &str) -> Option<ActivePush> {
+    static PUSHES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let active = PUSHES.get_or_init(|| Mutex::new(HashSet::new()));
+    active
+        .lock()
+        .unwrap()
+        .insert(ticket_id.to_owned())
+        .then(|| ActivePush(active, ticket_id.to_owned()))
+}
 
 #[derive(Clone, Debug)]
 pub(super) struct Board {
@@ -2074,6 +2093,13 @@ impl Engine {
         ticket_id: &str,
         resolve_conflict: bool,
     ) -> Result<Value, RpcError> {
+        let Some(_push) = claim_push(ticket_id) else {
+            let conn = self.db.lock().unwrap();
+            let ticket = get_ticket(&conn, ticket_id)?;
+            return Ok(
+                json!({"ticketId": ticket.id, "key": ticket.ext.key, "pushed": false, "error": "A push for this ticket is already in progress; wait for its result before retrying"}),
+            );
+        };
         let (ticket, board, columns) = {
             let conn = self.db.lock().unwrap();
             let ticket = get_ticket(&conn, ticket_id)?;
@@ -2248,8 +2274,12 @@ impl Engine {
         for id in ids {
             results.push(self.push_ticket(&id)?);
         }
-        let failed = results.iter().filter(|r| r["pushed"] == false).count();
-        Ok(json!({ "results": results, "pushed": results.len() - failed, "failed": failed }))
+        let failed = results
+            .iter()
+            .filter(|r| r["pushed"] == false && r["nothing"] != true)
+            .count();
+        let pushed = results.iter().filter(|r| r["pushed"] == true).count();
+        Ok(json!({ "results": results, "pushed": pushed, "failed": failed }))
     }
 
     /// `work.ticket_resolve`: settles a status conflict — keep the
