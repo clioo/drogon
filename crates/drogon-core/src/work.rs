@@ -2383,6 +2383,8 @@ impl Engine {
         let fresh = get_ticket(&tx, &ticket.id)?;
         if fresh.pr_fingerprint != ticket.pr_fingerprint
             || fresh.pr_checked_at != ticket.pr_checked_at
+            || fresh.pr_url != ticket.pr_url
+            || fresh.pr_number != ticket.pr_number
         {
             return Ok(None);
         }
@@ -2579,6 +2581,40 @@ fn pr_fingerprint(pull: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pr_poll_cannot_record_a_baseline_after_the_link_changes() {
+        for (old_link, new_link) in [
+            (
+                "https://github.com/clioo/drogon/pull/1",
+                "https://github.com/clioo/another/pull/1",
+            ),
+            ("1", "2"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let engine = Engine::open(dir.path()).unwrap();
+            let created = engine
+                .do_work_ticket_create(
+                    &json!({"title": "Changed PR", "columnId": "Review", "prUrl": old_link}),
+                )
+                .unwrap();
+            let id = created["id"].as_str().unwrap();
+            let column = get_column(&engine.db.lock().unwrap(), "Review").unwrap();
+            let old = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
+            engine
+                .do_work_ticket_update(&json!({"ticketId": id, "prUrl": new_link}))
+                .unwrap();
+            engine
+                .pr_change_intent(&column, &old, "old PR response", 1)
+                .unwrap();
+            let fresh = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
+            assert_eq!(
+                fresh.pr_fingerprint, None,
+                "an old PR response must not seed the new link's baseline"
+            );
+            assert_eq!(fresh.pr_checked_at, None);
+        }
+    }
 
     #[test]
     fn recurring_pr_transitions_get_distinct_intents_and_stale_polls_cannot_replay() {
