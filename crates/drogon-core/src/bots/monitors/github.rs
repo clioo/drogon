@@ -23,7 +23,10 @@
 //! - **The same PR (or issue) never fires twice.** Dedupe is a per-monitor
 //!   table of the numbers that have already been released
 //!   (`bot_monitor_github_seen`), never a digest of the response bytes: an
-//!   unrelated comment on PR #41 cannot re-release it.
+//!   unrelated comment on PR #41 cannot re-release it. A seen set that
+//!   cannot be READ (a locked or corrupt database, a row that is not a
+//!   number) fails the tick as [`MonitorErrorKind::IoError`]; only a table
+//!   that does not exist reads as "this watch has never released anything".
 //! - **An outage is never a catch-up storm.** A watch that was not
 //!   watching (first ever check, or a gap wider than the greater of
 //!   [`GITHUB_CATCH_UP_GRACE_MS`] and twice its cron interval) SEEDS: it
@@ -608,32 +611,101 @@ fn truncate(text: &str) -> String {
     text.chars().take(MAX_ERROR_CHARS).collect()
 }
 
-/// Read the seen set for one monitor. Absent / unreadable tables read as an
-/// empty set (a watch that never released anything — never an error).
-pub fn seen_for_monitor(conn: &Connection, monitor_id: &str) -> BTreeSet<u64> {
+/// The dedupe table's name. The read below swallows exactly one failure —
+/// this table not existing — so the name is matched, never a table some
+/// view or trigger happens to reach through.
+const SEEN_TABLE: &str = "bot_monitor_github_seen";
+
+/// A seen set that could not be read: the rows may well exist and simply
+/// were not returned. It is NOT an empty set, because the commit path
+/// rewrites the table wholesale ([`record_seen_in_tx`] deletes every row
+/// for the monitor first), so one empty read plus one release is how a
+/// watch forgets everything it ever released and replays the backlog.
+///
+/// A tick that gets this must fail: no [`decide`], no commit, cursor and
+/// rows untouched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenReadError {
+    message: String,
+}
+
+impl SeenReadError {
+    /// The honest taxonomy for "the watch's own state was unreadable".
+    pub fn error_kind(&self) -> MonitorErrorKind {
+        MonitorErrorKind::IoError
+    }
+
+    /// The persisted-safe reason (sqlite's own text; never watched content
+    /// and never a token, which this path never holds).
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for SeenReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// Whether a failed read means the dedupe table has never been created —
+/// the only failure that honestly reads as "this watch has never released
+/// anything". `SQLITE_BUSY`, `SQLITE_LOCKED`, `SQLITE_CORRUPT`, a missing
+/// column or an unreadable row are all rows that exist and were not read.
+pub fn seen_table_missing(error: &rusqlite::Error) -> bool {
+    match error {
+        rusqlite::Error::SqliteFailure(failure, Some(message)) => {
+            failure.code == rusqlite::ErrorCode::Unknown
+                && message.contains("no such table")
+                && message.contains(SEEN_TABLE)
+        }
+        _ => false,
+    }
+}
+
+/// Read the seen set for one monitor. An absent table reads as an empty set
+/// (a watch that has never persisted a row); every other failure is an
+/// error the caller must not evaluate past.
+pub fn seen_for_monitor(
+    conn: &Connection,
+    monitor_id: &str,
+) -> Result<BTreeSet<u64>, SeenReadError> {
     // `pull_number` is the column's historical name; the table is keyed by
     // (monitor_id, number) and a monitor has exactly ONE kind, so an issue
     // watch's numbers live here too without a migration or any chance of
     // collision with a pull-request watch's.
-    let read = || -> Result<Vec<u64>, rusqlite::Error> {
+    let read = || -> Result<BTreeSet<u64>, rusqlite::Error> {
         let mut stmt = conn.prepare(
             "SELECT pull_number FROM bot_monitor_github_seen WHERE monitor_id = ?1 ORDER BY pull_number",
         )?;
         let rows = stmt.query_map([monitor_id], |r| r.get::<_, i64>(0))?;
-        Ok(rows.filter_map(|r| r.ok()).map(|n| n as u64).collect())
+        // Every row or none: a row that fails mid-iteration (a lock taken
+        // after `prepare`, a value that is not an integer) would otherwise
+        // shrink the set silently, which the rewrite then makes permanent.
+        let mut numbers = BTreeSet::new();
+        for row in rows {
+            numbers.insert(row? as u64);
+        }
+        Ok(numbers)
     };
     match read() {
-        Ok(numbers) => numbers.into_iter().collect(),
-        Err(e) => {
-            eprintln!("[github-monitor] seen-set read failed: {e}");
-            BTreeSet::new()
-        }
+        Ok(numbers) => Ok(numbers),
+        Err(e) if seen_table_missing(&e) => Ok(BTreeSet::new()),
+        Err(e) => Err(SeenReadError {
+            message: format!("the watch's seen set could not be read: {e}"),
+        }),
     }
 }
 
 /// Write the seen set for one monitor inside the caller's transaction
 /// (the same transaction as the cursor CAS, so a cursor can never advance
 /// past a pull request whose "seen" row was lost).
+///
+/// This REPLACES the monitor's rows, so `seen` must be the set that a
+/// successful [`seen_for_monitor`] returned, carried through [`decide`].
+/// A caller that reaches here after a failed read deletes the rows it
+/// could not read; that is why the read returns an error the caller has
+/// to handle rather than an empty set.
 pub fn record_seen_in_tx(
     tx: &rusqlite::Transaction<'_>,
     monitor_id: &str,
@@ -812,6 +884,177 @@ mod tests {
     use crate::bots::monitors::rule::{
         GithubIssueFilter, GithubIssueRule, GithubPrFilter, GithubPrRule,
     };
+
+    // --- the dedupe table's read, which the commit path trusts ------------
+    //
+    // `record_seen_in_tx` DELETEs every row for the monitor and writes back
+    // the set it was handed. So a read that answers "empty" when the rows
+    // are merely unreadable is not a small inaccuracy: it is how a watch
+    // forgets PRs 10..40, re-releases 10, and replays 11, 12, ... on the
+    // ticks after that. Only a table that does not exist may read as empty.
+
+    fn seen_schema(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE bot_monitor_github_seen (
+                monitor_id TEXT NOT NULL,
+                pull_number INTEGER NOT NULL,
+                seen_at_ms REAL NOT NULL,
+                PRIMARY KEY (monitor_id, pull_number)
+            );",
+        )
+        .unwrap();
+    }
+
+    fn insert_seen(conn: &Connection, monitor_id: &str, numbers: &[u64]) {
+        for number in numbers {
+            conn.execute(
+                "INSERT INTO bot_monitor_github_seen (monitor_id, pull_number, seen_at_ms)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![monitor_id, *number as i64, 1.0f64],
+            )
+            .unwrap();
+        }
+    }
+
+    /// A watch whose table was never created has honestly never released
+    /// anything: an empty set, not a hard error, so a fresh install still
+    /// seeds instead of refusing forever.
+    #[test]
+    fn a_missing_seen_table_reads_as_a_watch_that_never_released_anything() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert_eq!(seen_for_monitor(&conn, "mon_1"), Ok(BTreeSet::new()));
+    }
+
+    /// The ordinary path: what the commit wrote is what the next tick reads.
+    #[test]
+    fn a_written_seen_set_reads_back_whole() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        seen_schema(&conn);
+        let seen: BTreeSet<u64> = (10..=40).collect();
+        let tx = conn.transaction().unwrap();
+        record_seen_in_tx(&tx, "mon_1", &seen, 7.0).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(seen_for_monitor(&conn, "mon_1"), Ok(seen));
+        // Another monitor's rows are not this watch's set.
+        assert_eq!(seen_for_monitor(&conn, "mon_2"), Ok(BTreeSet::new()));
+    }
+
+    /// The reported failure: `SQLITE_BUSY`. The rows are there and locked.
+    /// Reading them as `{}` is what lets the next commit delete them.
+    #[test]
+    fn a_locked_database_fails_the_read_instead_of_reading_as_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("monitors.sqlite3");
+        let writer = Connection::open(&path).unwrap();
+        seen_schema(&writer);
+        insert_seen(&writer, "mon_1", &[10, 11, 40]);
+
+        let reader = Connection::open(&path).unwrap();
+        // No grace: this test is about the answer when the lock does not
+        // clear, not about how long the daemon waits for it.
+        reader
+            .busy_timeout(std::time::Duration::from_millis(0))
+            .unwrap();
+        assert_eq!(
+            seen_for_monitor(&reader, "mon_1"),
+            Ok(BTreeSet::from([10, 11, 40])),
+            "the set is readable while nothing holds the database"
+        );
+
+        writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let locked = seen_for_monitor(&reader, "mon_1");
+        writer.execute_batch("ROLLBACK").unwrap();
+        let error = locked.expect_err("a locked database is an error, never an empty set");
+        assert_eq!(error.error_kind(), MonitorErrorKind::IoError);
+        assert!(error.message().contains("could not be read"), "{error}");
+
+        // And the rows are still there for the tick that follows.
+        assert_eq!(
+            seen_for_monitor(&reader, "mon_1"),
+            Ok(BTreeSet::from([10, 11, 40]))
+        );
+    }
+
+    /// A row that cannot be decoded fails the whole read. Dropping it would
+    /// hand the commit a SHORTER set, and the rewrite makes that permanent.
+    #[test]
+    fn a_row_that_is_not_a_number_fails_the_read_instead_of_shrinking_the_set() {
+        let conn = Connection::open_in_memory().unwrap();
+        seen_schema(&conn);
+        insert_seen(&conn, "mon_1", &[10, 11]);
+        conn.execute(
+            "INSERT INTO bot_monitor_github_seen (monitor_id, pull_number, seen_at_ms)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params!["mon_1", "not-a-number", 1.0f64],
+        )
+        .unwrap();
+        let error = seen_for_monitor(&conn, "mon_1")
+            .expect_err("an undecodable row is a failed read, not a smaller set");
+        assert_eq!(error.error_kind(), MonitorErrorKind::IoError);
+    }
+
+    /// "The table is gone" is the ONLY swallowed failure. A table that
+    /// exists but does not answer this query is unreadable state.
+    #[test]
+    fn an_unreadable_table_is_not_mistaken_for_a_missing_one() {
+        let conn = Connection::open_in_memory().unwrap();
+        seen_schema(&conn);
+        insert_seen(&conn, "mon_1", &[10]);
+        conn.execute_batch(
+            "ALTER TABLE bot_monitor_github_seen RENAME COLUMN pull_number TO released_number",
+        )
+        .unwrap();
+        assert!(
+            seen_for_monitor(&conn, "mon_1").is_err(),
+            "a column this build cannot read is an error, never an empty set"
+        );
+
+        // A view standing in for the table, over a table that is itself
+        // gone: sqlite says "no such table" about the INNER name, which is
+        // not this table and not evidence that this watch released nothing.
+        let other = Connection::open_in_memory().unwrap();
+        other
+            .execute_batch(
+                "CREATE TABLE rows_that_vanish (monitor_id TEXT, pull_number INTEGER, seen_at_ms REAL);
+                 CREATE VIEW bot_monitor_github_seen AS SELECT * FROM rows_that_vanish;
+                 DROP TABLE rows_that_vanish;",
+            )
+            .unwrap();
+        assert!(
+            seen_for_monitor(&other, "mon_1").is_err(),
+            "another table's absence is not this table's absence"
+        );
+    }
+
+    /// The first-run path end to end: a table that was never created reads
+    /// as empty AND still seeds. The fix must never turn a new watch (or a
+    /// database from before the dedupe table existed) into a hard error.
+    #[test]
+    fn a_watch_with_no_seen_table_still_seeds_its_baseline() {
+        let conn = Connection::open_in_memory().unwrap();
+        let seen = seen_for_monitor(&conn, "mon_1").expect("never an error");
+        assert!(seen.is_empty());
+        let decision = decide("mon_1", &[41, 42], &seen, true);
+        assert!(
+            matches!(decision, GithubDedupeDecision::Seed { .. }),
+            "{decision:?}"
+        );
+    }
+
+    /// The classifier itself, on the two shapes that decide the answer.
+    #[test]
+    fn only_this_tables_absence_reads_as_never_released() {
+        let conn = Connection::open_in_memory().unwrap();
+        let missing = conn
+            .prepare("SELECT pull_number FROM bot_monitor_github_seen")
+            .expect_err("the table is not there");
+        assert!(seen_table_missing(&missing), "{missing}");
+
+        let elsewhere = conn
+            .prepare("SELECT 1 FROM some_other_table")
+            .expect_err("that table is not there either");
+        assert!(!seen_table_missing(&elsewhere), "{elsewhere}");
+    }
 
     fn rule(filter: GithubPrFilter, login: Option<&str>) -> GithubPrRule {
         GithubPrRule {
