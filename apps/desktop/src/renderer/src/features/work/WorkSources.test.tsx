@@ -57,6 +57,7 @@ function initialSources(): WorkSource[] {
     source({ id: "jira", name: "Jira" }),
     source({ id: "linear", name: "Linear", boardTerm: "team", sprintTerm: "cycle", connect: "api_key", helpUrl: "https://linear.app/settings/account/security" }),
     source({ id: "github", name: "GitHub", boardTerm: "project or repository", boardsTerm: "projects and repositories", sprintTerm: "iteration", connect: "gh_or_token", helpUrl: "https://github.com/settings/tokens/new" }),
+    source({ id: "plane", name: "Plane", boardTerm: "project", boardsTerm: "projects", sprintTerm: "cycle", connect: "api_key", helpUrl: "https://app.plane.so/profile/api-tokens" }),
   ];
 }
 
@@ -167,11 +168,16 @@ function fakeBridge(options: { withLinearBoard?: boolean } = {}) {
     ticketResolve: vi.fn(),
     sources: vi.fn(() => ok({ sources })),
     sourceUpdate: vi.fn((input: { provider: string; enabled: boolean }) => ok(update(input.provider, { enabled: input.enabled }))),
-    sourceConnect: vi.fn((input: { provider: string; apiKey?: string; apiUrl?: string }) => {
+    sourceConnect: vi.fn((input: { provider: string; apiKey?: string; apiUrl?: string; workspaceSlug?: string }) => {
       if (input.provider === "linear") {
         if (input.apiKey !== "lin_api_good") return fail("Authentication required, not authenticated", "linear_auth_required");
         linearConnected = true;
         return ok(update("linear", { connected: true, account: "Jon Doe · Drogon", via: "token" }));
+      }
+      if (input.provider === "plane") {
+        if (input.apiKey !== "plane_good") return fail("Invalid API key.", "plane_auth_required");
+        if (input.workspaceSlug !== "drogon") return fail("Workspace not found.", "not_found");
+        return ok(update("plane", { connected: true, account: "Jon Doe · drogon", via: "token", workspaceSlug: "drogon" }));
       }
       return ok(update("github", { connected: true, account: "octo", via: input.apiKey ? "token" : "gh", apiUrl: input.apiUrl ?? null }));
     }),
@@ -242,12 +248,13 @@ async function importMenuItems(): Promise<string[]> {
 }
 
 describe("Work sources", () => {
-  test("every source starts allowed: the import menu and the card offer all three", async () => {
+  test("every source starts allowed: the import menu and the card offer all four", async () => {
     await mount();
     expect(await importMenuItems()).toEqual([
       "Import a Jira board…",
       "Import a Linear team…",
       "Import a GitHub project or repository…",
+      "Import a Plane project…",
       "Manage sources…",
     ]);
     const card = await screen.findByTestId("work-sync-card");
@@ -255,6 +262,7 @@ describe("Work sources", () => {
     expect(within(card).getByText(/Optional/)).toBeTruthy();
     expect(within(card).getByRole("button", { name: /Import a Linear team/ })).toBeTruthy();
     expect(within(card).getByRole("button", { name: /Import a GitHub project or repository/ })).toBeTruthy();
+    expect(within(card).getByRole("button", { name: /Import a Plane project/ })).toBeTruthy();
   });
 
   test("the card is dismissible, stays dismissed, and can come back from Sources", async () => {
@@ -292,13 +300,14 @@ describe("Work sources", () => {
     expect(await importMenuItems()).toEqual([
       "Import a Linear team…",
       "Import a GitHub project or repository…",
+      "Import a Plane project…",
       "Manage sources…",
     ]);
     expect(within(screen.getByTestId("work-sync-card")).queryByRole("button", { name: /Jira/ })).toBeNull();
 
     // Everything off: no import menu, no card.
     fireEvent.click(screen.getByRole("tab", { name: "sources" }));
-    for (const name of ["Linear", "GitHub"]) {
+    for (const name of ["Linear", "GitHub", "Plane"]) {
       fireEvent.click(within(await screen.findByTestId("work-sync-sources")).getByRole("switch", { name: `Allow ${name}` }));
       await waitFor(() => expect(bridge.sourceUpdate).toHaveBeenCalledWith({ provider: name.toLowerCase(), enabled: false }));
     }
@@ -332,6 +341,39 @@ describe("Work sources", () => {
     );
     fireEvent.click(within(within(screen.getByTestId("work-sync-sources")).getByRole("listitem", { name: "Linear" })).getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(bridge.sourceDisconnect).toHaveBeenCalledWith({ provider: "linear" }));
+  });
+
+  test("Plane requires a workspace slug and key, shows errors, connects and disconnects", async () => {
+    const onOpenExternal = vi.fn();
+    const bridge = await mount(fakeBridge(), { onOpenExternal });
+    fireEvent.click(screen.getByRole("tab", { name: "sources" }));
+    const plane = within(await screen.findByTestId("work-sync-sources")).getByRole("listitem", { name: "Plane" });
+    expect(within(plane).getByText(/Projects, cycles/)).toBeTruthy();
+    fireEvent.click(within(plane).getByRole("button", { name: "Connect" }));
+    const form = within(plane).getByRole("form", { name: "Connect Plane" });
+    const key = within(form).getByLabelText("Plane API key");
+    const slug = within(form).getByLabelText("Plane workspace slug");
+    const connect = within(form).getByRole("button", { name: "Connect" });
+    expect(key.getAttribute("type")).toBe("password");
+    expect(connect.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(key, { target: { value: "wrong" } });
+    expect(connect.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(slug, { target: { value: " drogon " } });
+    fireEvent.click(within(form).getByRole("button", { name: "Get a Plane API key" }));
+    expect(onOpenExternal).toHaveBeenCalledWith("https://app.plane.so/profile/api-tokens");
+    fireEvent.submit(form);
+    expect(await within(form).findByRole("alert")).toHaveProperty("textContent", "Invalid API key.");
+    fireEvent.change(key, { target: { value: "plane_good" } });
+    fireEvent.change(slug, { target: { value: "missing" } });
+    fireEvent.submit(form);
+    await waitFor(() => expect(within(form).getByRole("alert").textContent).toBe("Workspace not found."));
+    fireEvent.change(slug, { target: { value: " drogon " } });
+    fireEvent.submit(form);
+    await waitFor(() => expect(bridge.sourceConnect).toHaveBeenLastCalledWith({ provider: "plane", apiKey: "plane_good", workspaceSlug: "drogon" }));
+    expect(await within(plane).findByText("Connected as Jon Doe · drogon")).toBeTruthy();
+    expect(within(plane).queryByLabelText("Plane API key")).toBeNull();
+    fireEvent.click(within(plane).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(bridge.sourceDisconnect).toHaveBeenCalledWith({ provider: "plane" }));
   });
 
   test("a gh login with no account yet reads as connected through gh", async () => {
@@ -528,9 +570,11 @@ describe("source vocabulary", () => {
   test("names, sprint words, keys and import labels per source", () => {
     expect(providerLabel("linear")).toBe("Linear");
     expect(providerLabel("github")).toBe("GitHub");
+    expect(providerLabel("plane")).toBe("Plane");
     expect(providerLabel("gitlab")).toBe("gitlab");
     expect(sprintTerm("linear")).toBe("cycle");
     expect(sprintTerm("github")).toBe("iteration");
+    expect(sprintTerm("plane")).toBe("cycle");
     expect(sprintTerm(null)).toBe("sprint");
     expect(ticketDisplayKey({ ...linearTicket(), provider: "github", externalKey: "clioo/drogon#12" })).toBe("drogon#12");
     expect(ticketDisplayKey(linearTicket())).toBe("ENG-1");

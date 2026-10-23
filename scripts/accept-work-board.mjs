@@ -50,7 +50,10 @@ import {
   startAcceptanceProcess,
   stopAcceptanceProcess,
   runAcceptanceProcess,
+  captureDescendants,
+  settleOwnedProcesses,
 } from "./acceptance-process.mjs";
+import { startForegroundObservation, verifyForegroundObservation } from "./acceptance-foreground.mjs";
 import { emulatePageFocus } from "./acceptance-page-focus.mjs";
 import { selectSettingsTheme } from "./acceptance-theme.mjs";
 
@@ -196,6 +199,8 @@ let page = null;
 let desktop = null;
 let daemon = null;
 const ownedPids = new Set();
+const ownedProcesses = new Map();
+let foreground = null;
 
 async function cli(argv, { allowFailure = false } = {}) {
   try {
@@ -253,6 +258,7 @@ async function activeSessionTab() {
 }
 
 async function launch() {
+  if (process.env.DROGON_VERIFY_OS_FOCUS === "1") foreground = await startForegroundObservation(output);
   daemon = startAcceptanceProcess(daemonBin, ["--data-dir", dataDir], { stdio: "ignore", env });
   ownedPids.add(daemon.pid);
   await waitFor("daemon", async () => (await cli(["status"], { allowFailure: true }))?.capabilities?.includes("work.v1"));
@@ -328,6 +334,7 @@ try {
     "Import a Jira board…",
     "Import a Linear team…",
     "Import a GitHub project or repository…",
+    "Import a Plane project…",
     "Manage sources…",
   ]);
   await page.getByRole("tab", { name: "sources" }).click();
@@ -593,7 +600,7 @@ try {
   await row("Jira").getByTestId("work-source-status").getByText("Off: not imported, synced or pushed").waitFor();
   assert.equal((await cli(["work", "sources"])).sources.find((s) => s.id === "jira").enabled, false);
   await page.getByRole("tab", { name: "board" }).click();
-  assert.deepEqual(await importMenu(), ["Import a Linear team…", "Import a GitHub project or repository…", "Manage sources…"]);
+  assert.deepEqual(await importMenu(), ["Import a Linear team…", "Import a GitHub project or repository…", "Import a Plane project…", "Manage sources…"]);
   await page.getByRole("tab", { name: "sources" }).click();
   await row("Jira").getByRole("switch", { name: "Allow Jira" }).click();
   await row("Jira").getByTestId("work-source-status").getByText(/Connected as/).waitFor();
@@ -701,6 +708,54 @@ try {
   assert.ok(createdTicket.activity.some((a) => a.text === `Created ${inLinear.issues[0].key} in Linear from Drogon`));
   check("plus-on-a-column-creates-the-issue-in-linear-in-that-status");
 
+  // Plane's real connection form against the isolated REST fixture. Simulate
+  // a missing sealed key while retaining the fixture API URL and workspace.
+  await cli(["rpc", "work.source_connect", "--params", JSON.stringify({ provider: "plane", apiKey: "plane_fixture", apiUrl: `${sourcesUrl}/plane`, workspaceSlug: "drogon" })]);
+  await rm(path.join(dataDir, "integrations", "work", "plane.token"));
+  await page.reload();
+  await page.getByRole("button", { name: "Work", exact: true }).click();
+  await page.getByRole("tab", { name: "sources" }).click();
+  const planeRow = page.getByTestId("work-sync-sources").getByRole("listitem", { name: "Plane", exact: true });
+  await planeRow.getByRole("button", { name: "Connect", exact: true }).click();
+  const planeForm = planeRow.getByRole("form", { name: "Connect Plane" });
+  await planeForm.getByLabel("Plane workspace slug").fill("drogon");
+  await planeForm.getByLabel("Plane API key").fill("wrong");
+  await planeForm.getByRole("button", { name: "Connect", exact: true }).click();
+  await planeForm.getByRole("alert").getByText(/Invalid API key/).waitFor();
+  await planeForm.getByLabel("Plane API key").fill("plane_fixture");
+  await planeForm.getByLabel("Plane workspace slug").fill("missing");
+  await planeForm.getByRole("button", { name: "Connect", exact: true }).click();
+  await planeForm.getByRole("alert").getByText(/Workspace not found/).waitFor();
+  await planeForm.getByLabel("Plane workspace slug").fill("drogon");
+  await planeForm.getByRole("button", { name: "Connect", exact: true }).click();
+  await planeRow.getByText("Connected as Jon Doe · drogon").waitFor();
+  await shot("plane-connected");
+  check("plane-connect-form-validates-key-and-workspace-against-rest");
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Import a Plane project…", exact: true }).click();
+  const planeDialog = page.getByTestId("work-import-dialog");
+  await planeDialog.getByRole("textbox", { name: "Filter projects" }).fill("APP");
+  await planeDialog.getByRole("button", { name: "Choose Application" }).click();
+  await planeDialog.getByRole("region", { name: "Current cycle · Active" }).waitFor();
+  await planeDialog.getByRole("button", { name: /^Import \d+ issues?$/ }).click();
+  await planeDialog.waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Cycle", exact: true }).getByText("Current cycle · Active").waitFor();
+  await page.getByRole("article", { name: /APP-129/ }).waitFor();
+  const planeBoard = (await cli(["work", "boards"])).boards.find((b) => b.provider === "plane");
+  await cli(["work", "ticket", "move", "--ticket", "APP-129", "--column", "In Progress"]);
+  const planePending = page.getByRole("article", { name: /APP-129/ });
+  await planePending.getByRole("button", { name: "Push to Plane" }).click();
+  await waitFor("Plane state PATCH", async () => {
+    const preview = await cli(["work", "import", "preview", "--provider", "plane", "--board", "plane-app"]);
+    return preview.issues.find((i) => i.key === "APP-129")?.status.name === "In Progress";
+  });
+  await sourcesControl("plane/issue/APP-129", { state: "ps-done" });
+  await page.getByRole("button", { name: "Sync Application" }).click();
+  await page.getByRole("region", { name: "Done column" }).getByRole("article", { name: /APP-129/ }).waitFor();
+  assert.equal((await cli(["work", "board", "--board", planeBoard.id])).board.provider, "plane");
+  await shot("plane-board");
+  check("plane-project-imports-states-and-cycles-and-round-trips-push-and-sync");
+
   // Light theme, chosen through the real Settings pane (the app's theme does
   // not follow an emulated color scheme): the board and both panels.
   await selectSettingsTheme(page, "light");
@@ -742,6 +797,7 @@ try {
   }
 } finally {
   try {
+    await captureDescendants([...ownedPids], ownedProcesses);
     // Close every session this run owns, then the desktop and the daemon.
     const listed = await cli(["terminal", "list"], { allowFailure: true });
     for (const s of listed?.sessions ?? []) {
@@ -764,6 +820,13 @@ try {
       await stopAcceptanceProcess(sources).catch(() => {});
       report.processes.sources = "exited";
     }
+    report.processes.owned = await settleOwnedProcesses(ownedProcesses);
+    assert.ok(report.processes.owned.every((p) => p.verdict === "exited"), "test-owned processes must exit");
+    if (foreground) {
+      report.foreground = await foreground.stop();
+      foreground = null;
+      verifyForegroundObservation(report.foreground, [desktop.pid]);
+    }
     await delay(500);
     const { stdout } = await runAcceptanceProcess("/bin/ps", ["-axo", "pid=,command="], { timeout: 5000 });
     report.processes.survivors = stdout.split("\n").filter((line) => line.includes(fixture));
@@ -776,6 +839,8 @@ try {
   } catch (cleanupError) {
     process.exitCode = 1;
     report.cleanupError = String(cleanupError);
+  } finally {
+    if (foreground) await foreground.stop().catch(() => {});
   }
   await writeFile(path.join(output, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify({ status: report.status, checks: report.checks, error: report.error, output, survivors: report.processes.survivors }, null, 2)}\n`);

@@ -6,6 +6,13 @@ import { describe, expect, it } from "vitest";
 import { WORK_OPS, workCreateOptionsSchema } from "./work-contract";
 
 describe("work.create_options contract", () => {
+  it("accepts Plane connection metadata additively and rejects a malformed workspace slug", () => {
+    const reply = { id: "plane", name: "Plane", enabled: true, connected: true, account: "Jon · drogon", boardTerm: "project", sprintTerm: "cycle", connect: "api_key", boards: 0, workspaceSlug: "drogon" };
+    expect(WORK_OPS.sourceConnect.schema.parse(reply)).toEqual(reply);
+    expect(WORK_OPS.sourceConnect.schema.safeParse({ ...reply, workspaceSlug: 1 }).success).toBe(false);
+    const { workspaceSlug: _, ...older } = reply;
+    expect(WORK_OPS.sourceConnect.schema.safeParse(older).success).toBe(true);
+  });
   it("is a bridge op whose reply is validated by its schema", () => {
     expect(WORK_OPS.createOptions.method).toBe("work.create_options");
     expect(WORK_OPS.createOptions.schema).toBe(workCreateOptionsSchema);
