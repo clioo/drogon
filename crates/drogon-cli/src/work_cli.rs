@@ -765,7 +765,19 @@ pub async fn run(
         let text = render_ticket_list(&result, column.as_deref());
         return crate::commands::emit_call(call, json_mode, move || text);
     }
-    crate::commands::emit_call(call, json_mode, move || human(&result))
+    let failed = match method {
+        "work.ticket_push" => result["pushed"] == false && result["nothing"] != true,
+        "work.board_push" => result["failed"].as_u64().unwrap_or(0) > 0,
+        "work.ticket_resolve" => {
+            result["push"]["pushed"] == false && result["push"]["nothing"] != true
+        }
+        _ => false,
+    };
+    let mut outcome = crate::commands::emit_call(call, json_mode, move || human(&result))?;
+    if failed {
+        outcome.exit_code = 1;
+    }
+    Ok(outcome)
 }
 
 /// Verbs that only exist with Linear/GitHub sources (`work.sources.v1`).

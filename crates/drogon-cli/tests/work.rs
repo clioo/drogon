@@ -712,6 +712,28 @@ fn a_jira_board_is_imported_synced_and_pushed_from_the_cli() {
     assert_eq!(folded["collapsed"], true);
 
     fx.text(&[
+        "work", "ticket", "move", "--ticket", "APP-128", "--column", "Blocked",
+    ]);
+    let refused = fx.command(&["work", "push", "--ticket", "APP-128"]);
+    assert_eq!(refused.status.code(), Some(1), "{}", stdout(&refused));
+    assert!(stdout(&refused).contains("provider refused"));
+    let refused = fx.command(&["--json", "work", "push", "--board", "7"]);
+    assert_eq!(refused.status.code(), Some(1), "{}", stdout(&refused));
+    let envelope: Value = serde_json::from_str(&stdout(&refused)).unwrap();
+    assert_eq!(envelope["result"]["failed"], 1);
+    let refused = fx.command(&[
+        "--json", "work", "ticket", "resolve", "--ticket", "APP-128", "--keep", "ours",
+    ]);
+    assert_eq!(refused.status.code(), Some(1), "{}", stdout(&refused));
+    let envelope: Value = serde_json::from_str(&stdout(&refused)).unwrap();
+    assert_eq!(envelope["result"]["push"]["pushed"], false);
+    assert!(
+        fx.command(&["work", "push", "--ticket", "APP-142"])
+            .status
+            .success()
+    );
+
+    fx.text(&[
         "work", "ticket", "move", "--ticket", "APP-128", "--column", "QA",
     ]);
     jira.control("issue/APP-128", "{\"status\":\"Done\"}");
