@@ -2596,6 +2596,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        let at_first_a = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
         for (at, fingerprint) in [(2, "B"), (3, "A"), (4, "B")] {
             let ticket = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
             assert!(
@@ -2612,6 +2613,15 @@ mod tests {
                     .is_none(),
                 "same poll is stale"
             );
+            if at == 3 {
+                assert!(
+                    engine
+                        .pr_change_intent(&column, &at_first_a, "stale observation", at)
+                        .unwrap()
+                        .is_none(),
+                    "a poll from the first A must not overwrite the second A"
+                );
+            }
         }
         assert!(
             engine

@@ -6,10 +6,6 @@ import { describe, expect, it } from "vitest";
 import { WORK_OPS, workCreateOptionsSchema } from "./work-contract";
 
 describe("work.create_options contract", () => {
-  it("accepts an interrupted delivery as unverifiable with its stable event identity", () => {
-    const reply = { sends: [{ id: 1, columnId: "review", ticketId: "ticket", ticketKey: "DRG-1", trigger: "schedule", message: "Check DRG-1", at: 1, eventId: "schedule:review:1:ticket", results: [{ sessionId: null, action: "unverifiable", error: "Interrupted; inspect the session before sending again" }] }] };
-    expect(WORK_OPS.sends.schema.parse(reply)).toEqual(reply);
-  });
   it("is a bridge op whose reply is validated by its schema", () => {
     expect(WORK_OPS.createOptions.method).toBe("work.create_options");
     expect(WORK_OPS.createOptions.schema).toBe(workCreateOptionsSchema);
@@ -31,4 +27,9 @@ describe("work.create_options contract", () => {
     expect(parse({ provider: "github", boardId: "b", issueTypes: [], repos: "owner/repo" })).toBe(false);
     expect(parse({ provider: "linear", issueTypes: [], repos: [] })).toBe(false);
   });
+  it("accepts an interrupted delivery as unverifiable with its stable event identity", () => {
+    const reply = { sends: [{ id: 1, columnId: "review", ticketId: "ticket", ticketKey: "DRG-1", trigger: "schedule", message: "Check DRG-1", at: 1, eventId: "schedule:review:1:ticket", results: [{ sessionId: null, action: "unverifiable", error: "Interrupted; inspect the session before sending again" }] }] };
+    expect(WORK_OPS.sends.schema.parse(reply)).toEqual(reply);
+  });
+
 });
