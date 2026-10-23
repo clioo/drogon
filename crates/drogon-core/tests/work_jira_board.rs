@@ -291,7 +291,7 @@ fn push_acknowledges_only_the_status_and_sprint_that_were_sent() {
 
     b.sync();
     assert_eq!(b.ticket("APP-142")["pendingStatus"], Value::Null);
-    b.move_to("APP-142", "In progress");
+    b.move_to("APP-142", "In Progress");
     let pause = PausedPush::new();
     std::thread::scope(|scope| {
         let push = scope.spawn(|| b.ctx.ok("work.ticket_push", json!({"ticketId": id})));
