@@ -297,10 +297,6 @@ pub(super) fn map_column_statuses(
             mapped.push(status);
         }
     }
-    let was_mapped: HashSet<String> = columns
-        .iter()
-        .flat_map(|c| c.statuses.iter().map(|s| s.id.clone()))
-        .collect();
     for other in columns.iter().filter(|c| c.id != column.id) {
         let kept: Vec<&BoardStatus> = other
             .statuses
@@ -324,9 +320,9 @@ pub(super) fn map_column_statuses(
         ],
     )
     .map_err(error::from_sqlite)?;
-    // Unmapped cards with a newly mapped status and no pending move go home.
+    // Reconcile every changed home; explicit pending local moves stay put.
     let mut adopted = Vec::new();
-    for status in mapped.iter().filter(|s| !was_mapped.contains(&s.id)) {
+    for status in &mapped {
         let mut stmt = conn
             .prepare(&format!(
                 "{TICKET_SELECT} WHERE board_id = ?1 AND ext_status_id = ?2 AND pending_status_id IS NULL"

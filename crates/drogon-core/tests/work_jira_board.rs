@@ -1105,6 +1105,10 @@ fn jira_changes_move_cards_fire_prompts_and_flag_conflicts_unmapped_and_removed(
     assert_eq!(t["sync"], "synced");
     assert_eq!(b.column_name_of(&t), "Blocked");
     // Mapping moves a status between columns (one home per status).
+    b.server
+        .control("issue/APP-130", json!({"status": "Blocked"}));
+    b.sync();
+    b.move_to("APP-130", "QA");
     let review = b.column("Review");
     b.ctx.ok(
         "work.column_update",
@@ -1112,6 +1116,12 @@ fn jira_changes_move_cards_fire_prompts_and_flag_conflicts_unmapped_and_removed(
     );
     assert_eq!(b.column("Blocked")["statuses"], json!([]));
     assert_eq!(b.column("Review")["statuses"].as_array().unwrap().len(), 2);
+    assert_eq!(b.column_name_of(&b.ticket("APP-128")), "Review");
+    assert_eq!(b.column_name_of(&b.ticket("APP-130")), "QA");
+    assert_eq!(b.ticket("APP-130")["pendingStatus"]["name"], "QA");
+    b.sync();
+    assert_eq!(b.column_name_of(&b.ticket("APP-128")), "Review");
+    assert_eq!(b.ticket("APP-128")["sync"], "synced");
 
     // Jira wins for the fields it owns.
     b.server.control(
