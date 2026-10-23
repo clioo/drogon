@@ -54,11 +54,12 @@ pub use query::{
 };
 pub use search::{MAX_SEARCH_BYTES, SearchOutcome};
 pub use transcripts::{
-    DEFAULT_PAGE_SIZE, Discovery, HEADER_WINDOW_BYTES, MAX_DATE_FOLDERS_SCANNED, MAX_EXCERPT_CHARS,
-    MAX_PAGE_SIZE, MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPTS_SCANNED, MeetingReadError, MeetingStatus,
-    MeetingTranscript, ParsedTranscript, ScanEntry, TranscriptFailureReason, TranscriptFilename,
-    Walk, discover, is_date_folder_name, parse_transcript_filename, parse_transcript_markdown,
-    read_by_id, row_for, transcript_excerpt, transcript_id, truncate_chars, walk,
+    DEFAULT_PAGE_SIZE, DateRange, Discovery, HEADER_WINDOW_BYTES, MAX_DATE_FOLDERS_SCANNED,
+    MAX_EXCERPT_CHARS, MAX_PAGE_SIZE, MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPTS_SCANNED,
+    MeetingReadError, MeetingStatus, MeetingTranscript, ParsedTranscript, ScanEntry,
+    TranscriptFailureReason, TranscriptFilename, Walk, discover, is_date_folder_name,
+    parse_transcript_filename, parse_transcript_markdown, read_by_id, row_for, transcript_excerpt,
+    transcript_id, truncate_chars, walk,
 };
 
 /// Service capability advertised by `status`. The desktop surface and the
@@ -385,11 +386,17 @@ pub fn list(
     }
     let filters = filters.validated().map_err(MeetingsParamError::Filter)?;
     let configuration = resolve(file_system, environment);
-    let walk = transcripts::walk(
+    // The date window is handed to the walk, not applied afterwards: a fixed
+    // newest-first budget would otherwise make an old range unreachable.
+    let walk = transcripts::walk_in_range(
         file_system,
         &configuration.output_dir,
         MAX_DATE_FOLDERS_SCANNED,
         MAX_TRANSCRIPTS_SCANNED,
+        DateRange {
+            from: filters.from.as_deref(),
+            to: filters.to.as_deref(),
+        },
     );
     let installation = installation(file_system, environment);
     // The headline is computed from everything the walk saw, so page 2 of an
@@ -700,6 +707,64 @@ mod tests {
         assert!(past_end.meetings.is_empty());
         assert!(!past_end.has_more);
         assert_eq!(past_end.availability.reason, "ready");
+    }
+
+    #[test]
+    fn a_date_window_reaches_past_the_newest_first_walk_budget() {
+        let mut fs = FakeFileSystem::default();
+        installed(&mut fs);
+        let root = "/home/carlos/Transcripts";
+        // One date folder more than the walk budget, so the unfiltered walk
+        // stops before the oldest day. `corpus_dates` walks a real calendar.
+        let count = (MAX_DATE_FOLDERS_SCANNED + 100) as u32;
+        let dates = seed_corpus(&mut fs, root, count);
+        let oldest = dates.last().expect("a non-empty corpus").clone();
+        let env = environment("/home/carlos");
+
+        // Without a window the budget is real, and it says so: one folder per
+        // entry, so the entry count is exactly the folder budget.
+        let all = list(&fs, &env, Some(5), None, MeetingFilters::default()).unwrap();
+        assert!(all.scan_truncated);
+        assert_eq!(all.total, MAX_DATE_FOLDERS_SCANNED);
+
+        // The window is applied BEFORE the budget, so a day beyond it is
+        // still reachable — for the list and for a text search alike.
+        let day = MeetingFilters {
+            from: Some(oldest.clone()),
+            to: Some(oldest.clone()),
+            ..MeetingFilters::default()
+        };
+        let ranged = list(&fs, &env, Some(10), None, day.clone()).unwrap();
+        assert_eq!(ranged.total, 1);
+        assert_eq!(ranged.meetings[0].date_folder, oldest);
+        assert!(
+            !ranged.scan_truncated,
+            "a window inside the budget is not a truncated scan"
+        );
+        let searched = list(
+            &fs,
+            &env,
+            Some(10),
+            None,
+            MeetingFilters {
+                text: Some("hola".into()),
+                ..day
+            },
+        )
+        .unwrap();
+        assert_eq!(searched.total, 1);
+        assert_eq!(searched.meetings[0].date_folder, oldest);
+
+        // A window at the old end of the calendar is bounded by its own size.
+        let last_ten = MeetingFilters {
+            from: Some(oldest.clone()),
+            to: Some(dates[dates.len() - 10].clone()),
+            ..MeetingFilters::default()
+        };
+        let ranged = list(&fs, &env, Some(50), None, last_ten).unwrap();
+        assert_eq!(ranged.total, 10);
+        assert!(!ranged.scan_truncated);
+        assert!(ranged.meetings.iter().all(|row| row.date_folder >= oldest));
     }
 
     #[test]
