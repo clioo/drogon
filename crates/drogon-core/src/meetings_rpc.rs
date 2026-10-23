@@ -327,9 +327,13 @@ impl crate::Engine {
         // The whole read-check-create-link sequence is one critical section:
         // the "already tracked" answer below is only true if no other caller
         // can create between this read and the link that records it.
+        // The guard protects sequencing, not shared data (the ledger is
+        // re-read below), so a panic elsewhere must not disable tracking until
+        // the daemon restarts: recover the poisoned lock rather than propagate
+        // it forever.
         let _guard = TRACK_LOCK
             .lock()
-            .map_err(|_| error::internal_error("the meeting tracker lock was poisoned"))?;
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let commitment = self
             .meeting_commitments
             .get(&params.id)
