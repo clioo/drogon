@@ -336,10 +336,16 @@ fn delete_event(conn: &Connection, event_id: &str) -> Result<()> {
 /// leaving the rest queued would let one capped bot starve every other bot.
 fn settle_capped_bot_events(
     db: &Mutex<Connection>,
+    current_host_id: &str,
     bot_id: &str,
     now_ms: f64,
     summary: &mut DelegationSummary,
 ) -> bool {
+    // The bot's home folder keys the case run ids below. Without it this
+    // sweep cannot tell a join from excess, and settles the backlog exactly
+    // as it did before.
+    let folder = bots_storage::folder_for_bot_id(&db.lock().unwrap(), current_host_id, bot_id)
+        .unwrap_or(None);
     let rows = {
         let conn = db.lock().unwrap();
         let mut stmt = match conn.prepare(
@@ -399,14 +405,44 @@ fn settle_capped_bot_events(
         event.event_id = event_id;
         event.monitor_id = monitor_id;
         event.bot_id = Some(bot_id.to_string());
-        let responsibility_id = serde_json::from_str::<MonitorRecord>(&monitor_json)
-            .ok()
-            .and_then(|monitor| match monitor.inference_policy {
-                MonitorInferencePolicy::ExplicitResponsibility { responsibility_id } => {
-                    Some(responsibility_id)
+        let monitor = serde_json::from_str::<MonitorRecord>(&monitor_json).ok();
+        let responsibility_id =
+            monitor
+                .as_ref()
+                .and_then(|monitor| match &monitor.inference_policy {
+                    MonitorInferencePolicy::ExplicitResponsibility { responsibility_id } => {
+                        Some(responsibility_id.clone())
+                    }
+                    MonitorInferencePolicy::NotificationOnly => None,
+                });
+        // A release of a case this bot is ALREADY reviewing is a join, not
+        // excess: the cap bounds new delegations, and a join consumes no
+        // budget. Leave it queued so a drain hands it to the run that owns
+        // the case; deleting it here would drop the very release the join
+        // contract promises (issue #698).
+        if let (Some(folder), Some(responsibility_id), Some(monitor)) = (
+            folder.as_deref(),
+            responsibility_id.as_deref(),
+            monitor.as_ref(),
+        ) {
+            let run_id = case_run_id(
+                current_host_id,
+                folder,
+                bot_id,
+                responsibility_id,
+                &monitor.rule,
+                &event,
+            );
+            match find_run_by_id(&db.lock().unwrap(), &run_id) {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(e) => {
+                    // Never delete a release this sweep could not classify.
+                    eprintln!("[delegation] capped-backlog join check failed: {e}");
+                    continue;
                 }
-                MonitorInferencePolicy::NotificationOnly => None,
-            });
+            }
+        }
         settle_event(
             db,
             &event,
@@ -865,6 +901,60 @@ pub fn delegation_identity(
         }
         _ => event.event_id.clone(),
     }
+}
+
+/// The dispatch choices a GitHub watch's approval-hashed rule carries for
+/// the case it releases: repository, harness, skills. A file or script
+/// watch names none of them.
+fn case_fields(rule: &MonitorRule) -> (Option<&str>, Option<&str>, &[String]) {
+    match rule {
+        MonitorRule::GithubPr(rule) => (
+            Some(rule.repo.as_str()),
+            rule.harness.as_deref(),
+            rule.skills.as_slice(),
+        ),
+        MonitorRule::GithubIssue(rule) => (
+            Some(rule.repo.as_str()),
+            rule.harness.as_deref(),
+            rule.skills.as_slice(),
+        ),
+        _ => (None, None, &[]),
+    }
+}
+
+/// The GitHub case one event released, when its watch names a repository.
+fn case_of(rule: &MonitorRule, event: &DelegationEvent) -> Option<GithubCase> {
+    case_fields(rule).0.and_then(|_| {
+        crate::bots::monitors::github::case_from_resource(&event.resource)
+            .map(|(target, number)| GithubCase { target, number })
+    })
+}
+
+/// The run-row id one event's case maps to: the id a second release joins.
+/// The single spelling of that key — the drain checks it before the cap,
+/// and the capped sweep checks it so a join is never deleted as excess.
+fn case_run_id(
+    current_host_id: &str,
+    folder: &str,
+    bot_id: &str,
+    responsibility_id: &str,
+    rule: &MonitorRule,
+    event: &DelegationEvent,
+) -> String {
+    let case_repo = case_fields(rule).0;
+    let case = case_of(rule, event);
+    let is_pr_case = case_repo.is_some() && case.is_some();
+    delegation_request_id(
+        current_host_id,
+        folder,
+        bot_id,
+        if is_pr_case {
+            "github-pr-case"
+        } else {
+            responsibility_id
+        },
+        &delegation_identity(event, case_repo, case),
+    )
 }
 
 /// The idempotency key for one delegation: the same event always produces
@@ -1428,32 +1518,14 @@ fn drain_single_event<S: DispatchSeam>(
     // case is the dedupe identity: two watches releasing the same PR (or
     // the same issue) must land on the same run-row id and join instead of
     // racing for one worktree name.
-    let (case_repo, case_harness, case_skills): (Option<&str>, Option<&str>, &[String]) =
-        match &monitor.rule {
-            MonitorRule::GithubPr(rule) => (
-                Some(rule.repo.as_str()),
-                rule.harness.as_deref(),
-                rule.skills.as_slice(),
-            ),
-            MonitorRule::GithubIssue(rule) => (
-                Some(rule.repo.as_str()),
-                rule.harness.as_deref(),
-                rule.skills.as_slice(),
-            ),
-            _ => (None, None, &[]),
-        };
-    let case_github = case_repo.and_then(|_| {
-        crate::bots::monitors::github::case_from_resource(&event.resource)
-            .map(|(target, number)| GithubCase { target, number })
-    });
-    let identity = delegation_identity(event, case_repo, case_github);
+    let (case_repo, case_harness, case_skills) = case_fields(&monitor.rule);
     // A GitHub case is keyed BY THE CASE (repository + kind + number): one
     // bot, one pull request (or one issue), one session — whatever watch
     // (and whatever binding) released it, the second release joins the
     // first run and says so in its firing evidence. The run row itself
     // still records the dispatching event's own responsibility, and the
     // joined event's history names the exact run it joined.
-    let is_pr_case = case_repo.is_some() && case_github.is_some();
+    let case_github = case_of(&monitor.rule, event);
     // Owning bot gone (deleted after firing): orphan, delete — recorded
     // so the monitor's history shows the honest refusal.
     let bot_id = match event.bot_id.clone().or(monitor.bot_id.clone()) {
@@ -1474,10 +1546,6 @@ fn drain_single_event<S: DispatchSeam>(
             return;
         }
     };
-    if capped.contains(&bot_id) {
-        settle_capped_bot_events(db, &bot_id, now_ms, summary);
-        return;
-    }
     let folder_lookup =
         bots_storage::folder_for_bot_id(&db.lock().unwrap(), current_host_id, &bot_id);
     let folder = match folder_lookup {
@@ -1607,38 +1675,21 @@ fn drain_single_event<S: DispatchSeam>(
             bots_policy::ResponsibilityJobOutcome::ReactiveReady,
         )) => {}
     }
-    // Per-day cap, checked before dispatch and bumped in the record
-    // transaction: only real delegations consume budget.
-    let day_utc = utc_day_number(now_ms);
-    let used_lookup = delegation_count_for_day(&db.lock().unwrap(), &bot_id, day_utc);
-    let used = match used_lookup {
-        Ok(used) => used,
-        Err(e) => {
-            eprintln!("[delegation] cap read failed: {e}");
-            summary.failed += 1;
-            return;
-        }
-    };
-    if used >= MAX_DELEGATIONS_PER_BOT_PER_DAY {
-        capped.insert(bot_id.clone());
-        settle_capped_bot_events(db, &bot_id, now_ms, summary);
-        return;
-    }
     // Idempotency: the CASE (repository + pull number for a PR release,
     // the event id otherwise) maps to the run-row id, so a second watch
     // releasing the same PR — or a redelivery after a crash — joins
     // instead of opening a second session, and no second worktree name is
-    // minted.
-    let request_id = delegation_request_id(
+    // minted. Looked up BEFORE the cap on purpose: a join is not a new
+    // delegation and consumes no budget, so a bot that has spent today's
+    // budget must still hand a second release to the run already reviewing
+    // that case instead of deleting it as excess (issue #698).
+    let request_id = case_run_id(
         current_host_id,
         &folder,
         &bot_id,
-        if is_pr_case {
-            "github-pr-case"
-        } else {
-            &responsibility_id
-        },
-        &identity,
+        &responsibility_id,
+        &monitor.rule,
+        event,
     );
     let already_lookup = find_run_by_id(&db.lock().unwrap(), &request_id);
     let already = match already_lookup {
@@ -1662,6 +1713,31 @@ fn drain_single_event<S: DispatchSeam>(
             now_ms,
             summary,
         );
+        return;
+    }
+    // A bot already found capped earlier in this same drain: settle its
+    // remaining peeked events without re-reading the counter. Checked after
+    // the case lookup so another event's cap never swallows this join.
+    if capped.contains(&bot_id) {
+        settle_capped_bot_events(db, current_host_id, &bot_id, now_ms, summary);
+        return;
+    }
+    // Per-day cap, checked before dispatch and bumped in the record
+    // transaction: only real delegations consume budget. Joins returned
+    // above, so this gate only ever refuses a NEW delegation.
+    let day_utc = utc_day_number(now_ms);
+    let used_lookup = delegation_count_for_day(&db.lock().unwrap(), &bot_id, day_utc);
+    let used = match used_lookup {
+        Ok(used) => used,
+        Err(e) => {
+            eprintln!("[delegation] cap read failed: {e}");
+            summary.failed += 1;
+            return;
+        }
+    };
+    if used >= MAX_DELEGATIONS_PER_BOT_PER_DAY {
+        capped.insert(bot_id.clone());
+        settle_capped_bot_events(db, current_host_id, &bot_id, now_ms, summary);
         return;
     }
     // Resolve the event's workspace to the separately registered Project.
