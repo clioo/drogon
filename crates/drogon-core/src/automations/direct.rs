@@ -522,13 +522,16 @@ pub struct SessionEvidence {
 pub enum ReconcileOutcome {
     /// The session exited: the run is done, with this exit code.
     Exited { exit_code: Option<i64> },
-    /// The session is live but its hook wait-signal postdates dispatch:
-    /// the agent's turn ended and it now waits for follow-up input that
-    /// an automation never sends. Known gap: a tool-approval request
-    /// raises the same signal and cannot be distinguished here
-    /// (`session.rs` keeps only the stamp, not the event name); the run
-    /// detail keeps resolving the live snapshot, so an approval prompt
-    /// stays visible rather than hidden.
+    /// The session is live, its agent reads `idle`/`needs_input`, and the
+    /// harness reported a turn boundary for this run: the agent's turn
+    /// ended and it now waits for follow-up input that an automation never
+    /// sends. The turn boundary is the part a launch cannot forge — a
+    /// freshly launched Claude session is idle by definition and would
+    /// otherwise finalize the very run that started it (issue #684). Known
+    /// gap: a tool-approval request raises the same wait signal and cannot
+    /// be distinguished here (`session.rs` keeps only the stamp, not the
+    /// event name); the run detail keeps resolving the live snapshot, so an
+    /// approval prompt stays visible rather than hidden.
     TurnEnded,
     /// No handle for the run's session in this process (daemon restarted
     /// or the session was swept): closed out without claiming completion,
