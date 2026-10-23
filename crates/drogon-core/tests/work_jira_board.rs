@@ -1009,6 +1009,174 @@ fn a_local_move_waits_for_push_and_a_refusal_keeps_the_card() {
 }
 
 #[test]
+fn a_known_conflict_is_only_pushed_by_an_explicit_resolution() {
+    let b = Board::imported();
+    // Nothing here is about on-enter prompts.
+    for column in b.view(None)["columns"].as_array().unwrap() {
+        b.ctx.ok(
+            "work.column_update",
+            json!({"columnId": column["id"], "sendOnEnter": false}),
+        );
+    }
+    // A local move, then Jira moves the same issue: a conflict the user owns.
+    b.move_to("APP-142", "QA");
+    b.server
+        .control("issue/APP-142", json!({"status": "In Progress"}));
+    assert_eq!(b.sync()["conflicts"], 1);
+    assert_eq!(b.ticket("APP-142")["sync"], "conflict");
+
+    // An ordinary unsynced move on another card: the board push carries that
+    // one and refuses the conflict, one refusal not stopping the rest.
+    b.move_to("APP-128", "QA");
+    let pushed = b.ctx.ok("work.board_push", json!({"boardId": b.board_id}));
+    assert_eq!(pushed["pushed"], 1, "{pushed}");
+    assert_eq!(pushed["failed"], 1, "{pushed}");
+    assert_eq!(b.jira_issue("APP-128")["status"]["name"], "QA");
+    let refused = pushed["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["key"] == "APP-142")
+        .cloned()
+        .unwrap_or_else(|| panic!("APP-142 missing from {pushed}"));
+    assert_eq!(refused["conflict"], true, "{refused}");
+    assert_eq!(refused["fields"], json!([]), "{refused}");
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("keep Jira's status or push ours"),
+        "{refused}"
+    );
+    // Jira keeps the status the conflict was holding; the card is untouched.
+    assert_eq!(b.jira_issue("APP-142")["status"]["name"], "In Progress");
+    let t = b.ticket("APP-142");
+    assert_eq!(t["sync"], "conflict");
+    assert_eq!(t["statusConflict"], true);
+    assert_eq!(t["pendingStatus"]["name"], "QA");
+    assert_eq!(t["externalStatus"]["name"], "In Progress");
+    assert_eq!(t["pushError"], Value::Null, "Jira refused nothing: {t}");
+    assert!(
+        !b.activity("APP-142")
+            .iter()
+            .any(|a| a.contains("refused the push")),
+        "holding our own push back is not a Jira refusal"
+    );
+
+    // The RPC behind `drogon-cli work push --ticket` refuses it too; the
+    // card only hides the button.
+    let direct = b.ctx.ok(
+        "work.ticket_push",
+        json!({"ticketId": b.ticket_id("APP-142")}),
+    );
+    assert_eq!(direct["pushed"], false, "{direct}");
+    assert_eq!(direct["conflict"], true, "{direct}");
+    assert_eq!(direct["ticket"]["sync"], "conflict");
+    assert_eq!(b.jira_issue("APP-142")["status"]["name"], "In Progress");
+
+    // A pending sprint move is not part of a status conflict: it still goes,
+    // and the refused status is still reported.
+    b.ctx.ok(
+        "work.ticket_sprint",
+        json!({"ticketId": b.ticket_id("APP-142"), "to": "backlog"}),
+    );
+    let with_sprint = b.ctx.ok(
+        "work.ticket_push",
+        json!({"ticketId": b.ticket_id("APP-142")}),
+    );
+    assert_eq!(with_sprint["pushed"], false, "{with_sprint}");
+    assert_eq!(with_sprint["conflict"], true, "{with_sprint}");
+    assert_eq!(with_sprint["fields"], json!(["sprint"]), "{with_sprint}");
+    let t = b.ticket("APP-142");
+    assert_eq!(t["sprintPending"], false, "{t}");
+    assert_eq!(t["externalSprintId"], Value::Null, "{t}");
+    assert_eq!(t["sync"], "conflict");
+    assert_eq!(t["pendingStatus"]["name"], "QA");
+    assert_eq!(b.jira_issue("APP-142")["status"]["name"], "In Progress");
+
+    // Explicit resolution is the one push that may override a conflict.
+    let ours = b.ctx.ok(
+        "work.ticket_resolve",
+        json!({"ticketId": b.ticket_id("APP-142"), "keep": "ours"}),
+    );
+    assert_eq!(ours["push"]["pushed"], true, "{ours}");
+    assert_eq!(ours["sync"], "synced");
+    assert_eq!(ours["statusConflict"], false);
+    assert_eq!(b.jira_issue("APP-142")["status"]["name"], "QA");
+}
+
+#[test]
+fn a_refused_explicit_resolution_keeps_the_conflict() {
+    let b = Board::imported();
+    for column in b.view(None)["columns"].as_array().unwrap() {
+        b.ctx.ok(
+            "work.column_update",
+            json!({"columnId": column["id"], "sendOnEnter": false}),
+        );
+    }
+    // A column mapped to a status Jira's workflow cannot transition to.
+    let blocked = b.ctx.ok(
+        "work.column_create",
+        json!({"boardId": b.board_id, "name": "Blocked", "icon": "blocked"}),
+    );
+    b.ctx.ok(
+        "work.column_update",
+        json!({"columnId": blocked["id"], "statusIds": ["Blocked"], "sendOnEnter": false}),
+    );
+    b.move_to("APP-130", "Blocked");
+    b.server.control("issue/APP-130", json!({"status": "Done"}));
+    assert_eq!(b.sync()["conflicts"], 1);
+    let id = b.ticket_id("APP-130");
+
+    let refused = b.ctx.ok(
+        "work.ticket_resolve",
+        json!({"ticketId": id, "keep": "ours"}),
+    );
+    assert_eq!(refused["push"]["pushed"], false, "{refused}");
+    assert!(
+        refused["push"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("no transition"),
+        "{refused}"
+    );
+    // The conflict is still the user's to settle, with Jira's status intact.
+    assert_eq!(refused["sync"], "conflict", "{refused}");
+    assert_eq!(refused["statusConflict"], true);
+    assert_eq!(refused["pendingStatus"]["name"], "Blocked");
+    assert_eq!(refused["externalStatus"]["name"], "Done");
+    assert_eq!(b.jira_issue("APP-130")["status"]["name"], "Done");
+    // An ordinary push still refuses it, and the other choice still settles it.
+    assert_eq!(
+        b.ctx.ok("work.ticket_push", json!({"ticketId": id}))["conflict"],
+        true
+    );
+    let kept = b.ctx.ok(
+        "work.ticket_resolve",
+        json!({"ticketId": id, "keep": "jira"}),
+    );
+    assert_eq!(kept["sync"], "synced", "{kept}");
+    assert_eq!(kept["statusConflict"], false);
+    assert_eq!(b.column_name_of(&kept), "Done");
+
+    // Dropping a conflicted card somewhere new is itself the user deciding:
+    // it replaces the pending move, settles the conflict, and pushes again.
+    b.move_to("APP-128", "QA");
+    b.server.control("issue/APP-128", json!({"status": "Done"}));
+    assert_eq!(b.sync()["conflicts"], 1);
+    assert_eq!(b.ticket("APP-128")["sync"], "conflict");
+    let moved = b.move_to("APP-128", "Review");
+    assert_eq!(moved["sync"], "pending", "{moved}");
+    assert_eq!(moved["statusConflict"], false, "{moved}");
+    let pushed = b.ctx.ok(
+        "work.ticket_push",
+        json!({"ticketId": b.ticket_id("APP-128")}),
+    );
+    assert_eq!(pushed["pushed"], true, "{pushed}");
+    assert_eq!(b.jira_issue("APP-128")["status"]["name"], "In Review");
+}
+
+#[test]
 fn jira_changes_move_cards_fire_prompts_and_flag_conflicts_unmapped_and_removed() {
     let b = Board::imported();
     // Review sends its prompt on enter.

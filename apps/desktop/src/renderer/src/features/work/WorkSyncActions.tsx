@@ -1,7 +1,8 @@
 // The sync state of an imported ticket and what the user can do about it:
 // push an unsynced move, settle a conflict (Use Jira's / Push ours), retry a
 // refused push, or map an unmapped status to a column. Shared by the card
-// (compact) and the ticket panel (with the provider's full error).
+// (compact) and the ticket panel (with the provider's full error). A refused
+// "Push ours" keeps the conflict, so a conflicted card shows that error too.
 import { AlertTriangle, CloudOff, CloudUpload, GitCompareArrows, MapPin, Unlink } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import {
@@ -78,7 +79,7 @@ export function WorkSyncActions({
       {ticket.sync === "conflict" && ticket.pendingStatus ? (
         <p className="mt-0.5 opacity-80">Yours: {ticket.pendingStatus.name}</p>
       ) : null}
-      {ticket.sync === "error" && ticket.pushError ? (
+      {(ticket.sync === "error" || ticket.sync === "conflict") && ticket.pushError ? (
         <p className={`mt-0.5 opacity-90 ${detailed ? "" : "line-clamp-2"}`} title={ticket.pushError}>
           {ticket.pushError}
         </p>

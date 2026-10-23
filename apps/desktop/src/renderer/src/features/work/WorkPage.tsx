@@ -309,13 +309,20 @@ export function WorkPage({
       const result = await state.run(() => bridge.ticketPush({ ticketId: ticket.id }));
       if (!result.ok) notice(result.error, "error");
       else if (result.value.pushed) notice(`${ticketDisplayKey(ticket)} pushed to ${providerLabel(ticket.provider)}`);
-      else if (result.value.error) notice(`${providerLabel(ticket.provider)} refused: ${result.value.error}`, "error");
+      else if (result.value.error)
+        notice(
+          result.value.conflict ? result.value.error : `${providerLabel(ticket.provider)} refused: ${result.value.error}`,
+          "error",
+        );
     },
     onResolve: async (ticket, keep) => {
       if (!bridge) return;
       const result = await state.run(() => bridge.ticketResolve({ ticketId: ticket.id, keep }));
       if (!result.ok) notice(result.error, "error");
-      else if (keep === "ours" && result.value.sync === "error") notice(result.value.pushError ?? "Push refused", "error");
+      // A refused "push ours" keeps the conflict, so the push result — not
+      // the card's sync state — says whether the move reached the provider.
+      else if (keep === "ours" && result.value.push && !result.value.push.pushed)
+        notice(result.value.push.error ?? result.value.pushError ?? "Push refused", "error");
       else notice(keep === "theirs" ? `Kept ${providerLabel(ticket.provider)}'s status` : "Pushed your move");
     },
     onMapStatus: async (ticket, column) => {

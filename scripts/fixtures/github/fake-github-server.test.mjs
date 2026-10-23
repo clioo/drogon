@@ -27,14 +27,18 @@ let base;
 let dir;
 let dataPath;
 
-function setWorld(issues, pulls) {
-  writeFileSync(dataPath, JSON.stringify({ issues, pulls }));
+function setWorld(issues, pulls, extra = {}) {
+  writeFileSync(dataPath, JSON.stringify({ issues, pulls, ...extra }));
 }
 
 async function get(path, { token = TOKEN } = {}) {
   const headers = token ? { authorization: `Bearer ${token}` } : {};
   const response = await fetch(`${base}${path}`, { headers });
-  return { status: response.status, body: await response.json() };
+  return {
+    status: response.status,
+    body: await response.json(),
+    link: response.headers.get("link"),
+  };
 }
 
 before(async () => {
@@ -98,4 +102,43 @@ test("honours the caller's page bound and 404s anything else", async () => {
   const paged = await get("/repos/clioo/drogon/issues?per_page=2");
   assert.deepEqual(paged.body.map((row) => row.number), [1, 2]);
   assert.equal((await get("/repos/clioo/drogon/commits")).status, 404);
+});
+
+test("pages like GitHub: a page window plus a rel=next link while more remain", async () => {
+  setWorld([], [{ number: 1 }, { number: 2 }, { number: 3 }, { number: 4 }, { number: 5 }]);
+  const first = await get("/repos/clioo/drogon/pulls?per_page=2&page=1");
+  assert.deepEqual(first.body.map((row) => row.number), [1, 2]);
+  assert.match(first.link, /rel="next"/);
+  assert.match(first.link, /page=2/);
+
+  const second = await get("/repos/clioo/drogon/pulls?per_page=2&page=2");
+  assert.deepEqual(second.body.map((row) => row.number), [3, 4]);
+  assert.match(second.link, /rel="next"/);
+
+  // The last page is SHORT and advertises no next page: the two independent
+  // signals a client may rely on to stop, both true at once.
+  const third = await get("/repos/clioo/drogon/pulls?per_page=2&page=3");
+  assert.deepEqual(third.body.map((row) => row.number), [5]);
+  assert.doesNotMatch(third.link ?? "", /rel="next"/);
+
+  // Past the end: empty, never a wrap-around to page 1.
+  const past = await get("/repos/clioo/drogon/pulls?per_page=2&page=4");
+  assert.deepEqual(past.body, []);
+});
+
+test("a full last page advertises no next page", async () => {
+  setWorld([], [{ number: 1 }, { number: 2 }]);
+  const only = await get("/repos/clioo/drogon/pulls?per_page=2&page=1");
+  assert.deepEqual(only.body.map((row) => row.number), [1, 2]);
+  assert.doesNotMatch(only.link ?? "", /rel="next"/);
+});
+
+test("linkHeader:false serves the same pages with no Link header at all", async () => {
+  setWorld([], [{ number: 1 }, { number: 2 }, { number: 3 }], { linkHeader: false });
+  const first = await get("/repos/clioo/drogon/pulls?per_page=2&page=1");
+  assert.deepEqual(first.body.map((row) => row.number), [1, 2]);
+  assert.equal(first.link, null);
+  const second = await get("/repos/clioo/drogon/pulls?per_page=2&page=2");
+  assert.deepEqual(second.body.map((row) => row.number), [3]);
+  assert.equal(second.link, null);
 });

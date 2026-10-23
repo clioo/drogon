@@ -115,9 +115,15 @@ pub const MAX_CASE_SKILLS: usize = 16;
 pub const MAX_LOGIN_BYTES: usize = 39;
 /// Default GitHub REST base when the rule names none.
 pub const DEFAULT_GITHUB_API_BASE: &str = "https://api.github.com";
-/// How many pull requests (or issues) one poll reads — GitHub's own page
+/// How many pull requests (or issues) ONE PAGE carries — GitHub's own page
 /// ceiling, shared by both GitHub watch kinds.
 pub const GITHUB_PULLS_PER_PAGE: u16 = 100;
+
+/// How many pages one poll will read before it refuses to pretend it has
+/// seen the whole open list. `GITHUB_PULLS_PER_PAGE * GITHUB_MAX_PAGES`
+/// open items are reachable; past that the poll is an honest `Oversized`
+/// error, never a silent oldest-first prefix that hides the newest items.
+pub const GITHUB_MAX_PAGES: u32 = 10;
 
 /// A single watched file, project-relative. `max_bytes` is the monitor
 /// author's own bound and must never exceed [`MAX_FILE_BYTES`].

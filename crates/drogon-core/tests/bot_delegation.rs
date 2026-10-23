@@ -272,6 +272,71 @@ impl Fixture {
         bot_id
     }
 
+    /// A `github_pr.v1` watch on the SAME bot: a second binding able to
+    /// release the same pull request the first one already did.
+    fn add_pr_watch(&self, monitor_id: &str, repo: &str, filter: &str) -> String {
+        let created = ok(self._engine.dispatch(request(
+            &format!("m-create-{monitor_id}"),
+            "bot.monitor_create",
+            json!({
+                "workspaceId": self.workspace_id,
+                "hostId": self.host_id,
+                "botId": self.bot_id,
+                "monitorId": monitor_id,
+                "kind": "github_pr.v1",
+                "repo": repo,
+                "filter": filter,
+                "login": "white-walker",
+                "cron": "* * * * *",
+                "responsibilityName": format!("review {filter} pull requests"),
+                "instructions": "Read the diff and report.",
+            }),
+        )));
+        assert_eq!(created["approved"], false, "a network watch stages parked");
+        let approved = ok(self._engine.dispatch(request(
+            &format!("m-approve-{monitor_id}"),
+            "bot.monitor_approve",
+            json!({
+                "workspaceId": self.workspace_id,
+                "hostId": self.host_id,
+                "botId": self.bot_id,
+                "monitorId": monitor_id,
+            }),
+        )));
+        assert_eq!(approved["approved"], true);
+        created["responsibilityId"]
+            .as_str()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    /// Spend the bot's whole budget for `now_ms`'s UTC day without
+    /// dispatching anything, so the next event meets a capped bot.
+    fn spend_todays_budget(&self, now_ms: f64) {
+        self.conn()
+            .execute(
+                "INSERT INTO bot_delegation_daily (bot_id, day_utc, count) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(bot_id, day_utc) DO UPDATE SET count = ?3",
+                params![
+                    self.bot_id,
+                    utc_day_number(now_ms),
+                    MAX_DELEGATIONS_PER_BOT_PER_DAY
+                ],
+            )
+            .unwrap();
+    }
+
+    /// The durable firing verdict recorded for one event.
+    fn firing_outcome(&self, event_id: &str) -> Option<(String, Option<String>)> {
+        self.conn()
+            .query_row(
+                "SELECT outcome, run_id FROM bot_monitor_firings WHERE event_id = ?1",
+                params![event_id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+            )
+            .ok()
+    }
+
     fn conn(&self) -> Connection {
         Connection::open(&self.db_path).unwrap()
     }
@@ -711,6 +776,137 @@ fn delegation_cap_trips_with_an_honest_state() {
 }
 
 // --- Template rule: raw watched content never reaches the prompt ----------
+
+/// Issue #698: the cap bounds NEW delegations. A second watch releasing a
+/// pull request this bot is already reviewing is the same case, so it joins
+/// that run — the cap must not delete it as excess — while a brand-new pull
+/// request on the same capped bot is still refused.
+#[test]
+fn a_release_joining_a_review_in_flight_survives_the_daily_cap() {
+    let fixture = Fixture::new();
+    let now = Fixture::now_ms();
+    fixture.add_pr_watch("mon-pr-a", "clioo/drogon", "assigned");
+    fixture.add_pr_watch("mon-pr-b", "clioo/drogon", "review_requested");
+
+    // The bot opens the review for pull request 41.
+    fixture.enqueue_resource_for("mon-pr-a", 1, now, "pull/41");
+    let opened = fixture.drain(now + 1.0);
+    assert_eq!(opened.dispatched, 1, "the case opens a run: {opened:?}");
+    assert_eq!(fixture.used_today(now), 1);
+
+    // The bot then spends today's whole budget.
+    fixture.spend_todays_budget(now);
+
+    // A second watch releases the SAME pull request.
+    let joining = fixture.enqueue_resource_for("mon-pr-b", 2, now + 2.0, "pull/41");
+    let second = fixture.drain(now + 3.0);
+    assert_eq!(
+        second.joined_existing, 1,
+        "the second release joins the run reviewing the case: {second:?}"
+    );
+    assert_eq!(second.cap_exceeded, 0, "a join is not excess: {second:?}");
+    assert_eq!(second.dispatched, 0, "a join opens no second session");
+    assert_eq!(
+        fixture.seam.dispatch_count(),
+        1,
+        "still exactly one session for the case"
+    );
+    assert_eq!(
+        fixture.used_today(now),
+        MAX_DELEGATIONS_PER_BOT_PER_DAY,
+        "a join consumes no budget"
+    );
+    let (outcome, run_id) = fixture
+        .firing_outcome(&joining)
+        .expect("the join is recorded");
+    assert_eq!(outcome, "joined_existing");
+    assert!(run_id.is_some(), "the firing names the run it joined");
+
+    // A brand-new pull request on the same capped bot is still capped.
+    let fresh = fixture.enqueue_resource_for("mon-pr-a", 3, now + 4.0, "pull/42");
+    let third = fixture.drain(now + 5.0);
+    assert_eq!(
+        third.cap_exceeded, 1,
+        "the cap still refuses a new case: {third:?}"
+    );
+    assert_eq!(third.joined_existing, 0);
+    assert_eq!(third.dispatched, 0);
+    assert_eq!(fixture.seam.dispatch_count(), 1);
+    assert_eq!(
+        fixture.firing_outcome(&fresh).map(|(outcome, _)| outcome),
+        Some("cap_exceeded".to_string())
+    );
+}
+
+/// The capped sweep settles a bot's WHOLE queued backlog so one capped bot
+/// cannot starve the others. It must still spare the releases that join a
+/// case already under review, whatever order they were queued in.
+#[test]
+fn the_capped_backlog_sweep_spares_a_release_that_joins_an_existing_run() {
+    let fixture = Fixture::new();
+    let now = Fixture::now_ms();
+    fixture.add_pr_watch("mon-pr-a", "clioo/drogon", "assigned");
+    fixture.add_pr_watch("mon-pr-b", "clioo/drogon", "review_requested");
+
+    fixture.enqueue_resource_for("mon-pr-a", 1, now, "pull/41");
+    assert_eq!(fixture.drain(now + 1.0).dispatched, 1);
+    fixture.spend_todays_budget(now);
+
+    // Seven brand-new cases queued ahead of the one release that joins the
+    // run already reviewing pull request 41: the first of them trips the
+    // cap, and the sweep that follows sees the join in the same backlog.
+    for number in 50..57u64 {
+        fixture.enqueue_resource_for(
+            "mon-pr-a",
+            number,
+            now + number as f64,
+            &format!("pull/{number}"),
+        );
+    }
+    let joining = fixture.enqueue_resource_for("mon-pr-b", 100, now + 200.0, "pull/41");
+    // A second bot's event behind all of that: sparing the join must not
+    // hand the queue back to the capped bot and starve anyone.
+    let second_bot_id = fixture.add_second_bound_bot();
+    fixture.enqueue_resource_for_bot("mon-2", &second_bot_id, 1, now + 201.0, RESOURCE);
+
+    let swept = fixture.drain(now + 300.0);
+    assert_eq!(
+        swept.cap_exceeded, 7,
+        "every new case in the backlog is refused: {swept:?}"
+    );
+    assert_eq!(swept.dispatched, 0, "the capped bot dispatches nothing");
+    assert_eq!(
+        fixture.outbox_len(),
+        2,
+        "the join is left queued, never deleted as excess: {swept:?}"
+    );
+    assert_eq!(
+        fixture.firing_outcome(&joining),
+        None,
+        "the join has no terminal verdict yet"
+    );
+
+    let joined = fixture.drain(now + 400.0);
+    assert_eq!(
+        joined.joined_existing, 1,
+        "the next drain hands it to the run: {joined:?}"
+    );
+    assert_eq!(
+        joined.dispatched, 1,
+        "the other bot is not starved by the spared join: {joined:?}"
+    );
+    assert_eq!(fixture.outbox_len(), 0);
+    assert_eq!(
+        fixture.firing_outcome(&joining).map(|(outcome, _)| outcome),
+        Some("joined_existing".to_string()),
+        "the join's only durable verdict is the join"
+    );
+    assert_eq!(
+        fixture.used_today(now),
+        MAX_DELEGATIONS_PER_BOT_PER_DAY,
+        "no join ever consumed budget"
+    );
+}
 
 #[test]
 fn delegation_prompt_never_contains_raw_watched_content() {

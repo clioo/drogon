@@ -1490,11 +1490,19 @@ fn sync_note(t: &Value) -> Option<String> {
             "not synced to {provider} → {}",
             t["sprintName"].as_str().unwrap_or("backlog")
         )),
-        "conflict" => Some(format!(
-            "{provider}: {} (yours: {}) — resolve",
-            text(&t["externalStatus"]["name"]),
-            text(&t["pendingStatus"]["name"])
-        )),
+        "conflict" => {
+            let mut note = format!(
+                "{provider}: {} (yours: {}) — resolve",
+                text(&t["externalStatus"]["name"]),
+                text(&t["pendingStatus"]["name"])
+            );
+            // A refused "push ours" keeps the conflict, so the error it left
+            // belongs here: the card is no longer in the "error" state.
+            if let Some(error) = t["pushError"].as_str() {
+                note.push_str(&format!("; last push refused: {error}"));
+            }
+            Some(note)
+        }
         "error" => Some(format!("push refused: {}", text(&t["pushError"]))),
         "unmapped" => Some(format!(
             "status '{}' not mapped",
@@ -1739,12 +1747,14 @@ fn render_push(v: &Value) -> String {
     if v["nothing"] == true {
         return format!("{} has nothing to push.", text(&v["key"]));
     }
-    match v["error"].as_str() {
-        Some(error) => format!(
-            "{}: the provider refused the push: {error}",
-            text(&v["key"])
+    let key = text(&v["key"]);
+    // A status conflict is Drogon holding the push back, not the provider.
+    match (v["error"].as_str(), v["conflict"] == true) {
+        (Some(error), true) => format!(
+            "{key}: {error}; settle it with `work resolve --ticket {key} --keep theirs|ours`."
         ),
-        None => format!("{}: pushed.", text(&v["key"])),
+        (Some(error), false) => format!("{key}: the provider refused the push: {error}"),
+        (None, _) => format!("{key}: pushed."),
     }
 }
 

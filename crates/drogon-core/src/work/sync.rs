@@ -17,6 +17,8 @@
 //!   to the mapped column ("Moved by Jira") and fires its on-enter prompt;
 //! - a provider change while a local move is pending is a conflict the user
 //!   settles (`work.ticket_resolve`: keep the provider's, or push ours);
+//!   until then an ordinary push refuses that ticket rather than writing
+//!   over the provider's status;
 //! - a status no column maps leaves the card in place, flagged, until a
 //!   column adopts it (`work.column_update statusIds`);
 //! - an issue gone from the provider is flagged, never deleted.
@@ -2084,15 +2086,14 @@ impl Engine {
 
     /// Pushes one ticket's unsynced status and sprint to the provider.
     /// A refusal keeps the card where it is and records the provider's error.
+    /// A known status conflict is never pushed over: only `work.ticket_resolve`
+    /// settles it.
     pub(super) fn push_ticket(&self, ticket_id: &str) -> Result<Value, RpcError> {
-        self.push_ticket_with_resolution(ticket_id, false)
+        self.push_ticket_resolving(ticket_id, false)
     }
 
-    fn push_ticket_with_resolution(
-        &self,
-        ticket_id: &str,
-        resolve_conflict: bool,
-    ) -> Result<Value, RpcError> {
+    /// Only explicit resolution may overwrite a conflicted status.
+    fn push_ticket_resolving(&self, ticket_id: &str, resolving: bool) -> Result<Value, RpcError> {
         let Some(_push) = claim_push(ticket_id) else {
             let conn = self.db.lock().unwrap();
             let ticket = get_ticket(&conn, ticket_id)?;
@@ -2115,12 +2116,6 @@ impl Engine {
         };
         let label = provider_label(&board.provider);
         let ext_key = ticket.ext.key.clone().unwrap_or_default();
-        if ticket.ext.status_conflict && !resolve_conflict {
-            return Ok(json!({
-                "ticketId": ticket.id, "key": ext_key, "pushed": false,
-                "error": "Resolve the status conflict explicitly: keep the source's status or push ours",
-            }));
-        }
         let sprint_pending = ticket.ext.sprint_id != ticket.ext.ext_sprint_id;
         if ticket.ext.pending_status_id.is_none() && !sprint_pending {
             return Ok(
@@ -2132,6 +2127,27 @@ impl Engine {
                 "{ext_key} is not in {label} anymore"
             )));
         }
+        // A conflict is the user's to settle (`work.ticket_resolve`: keep the
+        // provider's status, or push ours). An ordinary push never writes over
+        // the provider status the conflict is holding, and leaves the pending
+        // move and the flag where the conflict left them. A pending sprint
+        // move is not part of the conflict and still goes.
+        let conflict = ticket.ext.status_conflict && !resolving;
+        let refusal = conflict.then(|| {
+            format!(
+                "{label} moved it while your move was unsynced: keep {label}'s status or push ours"
+            )
+        });
+        if conflict && !sprint_pending {
+            return Ok(json!({
+                "ticketId": ticket.id,
+                "key": ext_key,
+                "pushed": false,
+                "fields": [],
+                "error": refusal,
+                "conflict": true,
+            }));
+        }
         let provider = self.board_provider(&board)?;
         let issue = IssueRef {
             key: &ext_key,
@@ -2139,7 +2155,7 @@ impl Engine {
         };
         let mut failure: Option<String> = None;
         let mut pushed = Vec::new();
-        if let Some(pending) = &ticket.ext.pending_status_id {
+        if let Some(pending) = ticket.ext.pending_status_id.as_ref().filter(|_| !conflict) {
             match provider.set_status(&board.external_id, issue, pending) {
                 Ok(()) => {
                     let name = status_name(&board, &columns, pending);
@@ -2229,12 +2245,14 @@ impl Engine {
                 &format!("{label} refused the push: {message}"),
             );
         }
+        let error = failure.or(refusal);
         Ok(json!({
             "ticketId": ticket.id,
             "key": ext_key,
-            "pushed": failure.is_none(),
+            "pushed": error.is_none(),
             "fields": pushed,
-            "error": failure,
+            "error": error,
+            "conflict": conflict,
         }))
     }
 
@@ -2347,8 +2365,10 @@ impl Engine {
                     (ticket, enter)
                 }
                 "ours" | "drogon" | "local" => {
+                    // The flag stays until the push really lands: a refused
+                    // settlement leaves the conflict to settle again.
                     drop(conn);
-                    let result = self.push_ticket_with_resolution(&ticket.id, true)?;
+                    let result = self.push_ticket_resolving(&ticket.id, true)?;
                     let conn = self.db.lock().unwrap();
                     let fresh = get_ticket(&conn, &ticket.id)?;
                     drop(conn);
