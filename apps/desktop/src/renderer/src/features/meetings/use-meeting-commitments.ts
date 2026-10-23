@@ -13,6 +13,8 @@ import type {
 } from "../../../../shared/meetings-contract";
 
 export const MEETINGS_ACTIONS_DEBOUNCE_MS = 250;
+/** The daemon's ledger page cap (`MAX_COMMITMENT_PAGE`). */
+export const COMMITMENTS_PAGE_SIZE = 200;
 
 export type MeetingCommitmentsController = {
   page: MeetingCommitmentPage | null;
@@ -20,6 +22,10 @@ export type MeetingCommitmentsController = {
   error: string | null;
   status: "all" | MeetingCommitmentStatus;
   query: string;
+  /** Zero-based page of the ledger, and how many pages the filter produces. */
+  pageIndex: number;
+  totalPages: number;
+  goToPage: (page: number) => void;
   setStatus: (status: "all" | MeetingCommitmentStatus) => void;
   setQuery: (query: string) => void;
   busyId: string | null;
@@ -52,6 +58,9 @@ export function useMeetingCommitments({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<"all" | MeetingCommitmentStatus>("all");
   const [query, setQuery] = useState("");
+  // The ledger is corpus-wide; the daemon pages it, so the page keeps one
+  // window of rows rather than asking for an unbounded slice it cannot show.
+  const [offset, setOffset] = useState(0);
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [acceptNotice, setAcceptNotice] = useState<string | null>(null);
@@ -72,7 +81,8 @@ export function useMeetingCommitments({
     const request = bridge?.commitments({
       ...(status === "all" ? {} : { status }),
       ...(debouncedQuery.trim() === "" ? {} : { query: debouncedQuery.trim() }),
-      limit: 200,
+      limit: COMMITMENTS_PAGE_SIZE,
+      offset,
     });
     if (!request) {
       setPage(null);
@@ -90,6 +100,14 @@ export function useMeetingCommitments({
           setError(result.error.message);
           return;
         }
+        // A row that left the filter (resolved, dismissed) can shrink the
+        // ledger under the current window: clamp to the last real page
+        // instead of rendering an empty one that looks like "nothing left".
+        const total = result.result.total;
+        if (offset > 0 && (total === 0 || offset >= total)) {
+          setOffset(total === 0 ? 0 : Math.floor((total - 1) / COMMITMENTS_PAGE_SIZE) * COMMITMENTS_PAGE_SIZE);
+          return;
+        }
         setPage(result.result);
       })
       .catch((failure: unknown) => {
@@ -102,7 +120,7 @@ export function useMeetingCommitments({
       .finally(() => {
         if (current === generation.current) setLoading(false);
       });
-  }, [bridge, debouncedQuery, status]);
+  }, [bridge, debouncedQuery, offset, status]);
 
   useEffect(() => {
     load();
@@ -174,6 +192,10 @@ export function useMeetingCommitments({
     [bridge, busyId, load],
   );
 
+  const goToPage = useCallback((next: number) => {
+    setOffset(Math.max(0, Math.trunc(next)) * COMMITMENTS_PAGE_SIZE);
+  }, []);
+
   const clearNotices = useCallback(() => {
     setAcceptNotice(null);
     setAcceptError(null);
@@ -185,8 +207,17 @@ export function useMeetingCommitments({
     error,
     status,
     query,
-    setStatus,
-    setQuery,
+    pageIndex: Math.floor(offset / COMMITMENTS_PAGE_SIZE),
+    totalPages: Math.max(1, Math.ceil((page?.total ?? 0) / COMMITMENTS_PAGE_SIZE)),
+    goToPage,
+    setStatus: (next) => {
+      setOffset(0);
+      setStatus(next);
+    },
+    setQuery: (next) => {
+      setOffset(0);
+      setQuery(next);
+    },
     busyId,
     acceptNotice,
     acceptError,

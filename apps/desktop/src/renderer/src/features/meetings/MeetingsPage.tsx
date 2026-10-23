@@ -222,8 +222,11 @@ export default function MeetingsPage({
                 error={commitments.error}
                 status={commitments.status}
                 query={commitments.query}
+                pageIndex={commitments.pageIndex}
+                totalPages={commitments.totalPages}
                 busyId={commitments.busyId}
                 onStatusChange={commitments.setStatus}
+                onPageChange={commitments.goToPage}
                 onQueryChange={commitments.setQuery}
                 onRefresh={commitments.refresh}
                 onOpenMeeting={openFromLedger}

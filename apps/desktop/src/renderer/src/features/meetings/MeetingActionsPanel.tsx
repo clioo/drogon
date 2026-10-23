@@ -25,6 +25,7 @@ import type {
   MeetingCommitmentStatus,
 } from "../../../../shared/meetings-contract";
 import { meetingCommitmentStatusLabel } from "./meetings-page-copy";
+import { MeetingsPagination } from "./MeetingsPagination";
 
 export type CommitmentStatusFilter = "all" | MeetingCommitmentStatus;
 export const MEETINGS_ACTIONS_SEARCH_ID = "meetings-actions-search";
@@ -120,8 +121,11 @@ export function MeetingActionsPanel({
   error,
   status,
   query,
+  pageIndex,
+  totalPages,
   busyId,
   onStatusChange,
+  onPageChange,
   onQueryChange,
   onRefresh,
   onOpenMeeting,
@@ -132,8 +136,11 @@ export function MeetingActionsPanel({
   error: string | null;
   status: CommitmentStatusFilter;
   query: string;
+  pageIndex: number;
+  totalPages: number;
   busyId: string | null;
   onStatusChange: (status: CommitmentStatusFilter) => void;
+  onPageChange: (page: number) => void;
   onQueryChange: (query: string) => void;
   onRefresh: () => void;
   onOpenMeeting: (meetingId: string) => void;
@@ -233,12 +240,20 @@ export function MeetingActionsPanel({
         </div>
       ) : null}
 
+      <MeetingsPagination
+        currentPage={pageIndex}
+        totalPages={totalPages}
+        loading={loading}
+        onPageChange={onPageChange}
+        ariaLabel="Action pages"
+      />
+
       {page !== null && page.commitments.length > 0 ? (
         <p className="text-xs text-muted-foreground">
           {page.total} action{page.total === 1 ? "" : "s"} in this view · {page.open} still
           open
-          {page.hasMore
-            ? ` · showing the first ${page.commitments.length}; narrow the search to see the rest`
+          {totalPages > 1
+            ? ` · page ${pageIndex + 1} of ${totalPages}`
             : ""}
         </p>
       ) : null}

@@ -6,7 +6,7 @@
    namespace); the availability taxonomy, the paging arithmetic and the
    reader all run for real. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { MeetingRead, MeetingsBridge } from "../../../../shared/meetings-contract";
 import {
   OLDER_NOTE_ID,
@@ -533,6 +533,55 @@ describe("Meetings page list and reader", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Open transcript/ }));
     await waitFor(() =>
       expect(bridge.read).toHaveBeenCalledWith({ id: NOTE_ID }),
+    );
+  });
+});
+
+describe("Meetings page ledger paging", () => {
+  it("pages the corpus-wide ledger instead of truncating it at 200", async () => {
+    const first = commitmentPage({
+      commitments: [commitment()],
+      total: 401,
+      open: 401,
+      limit: 200,
+      hasMore: true,
+    });
+    const second = commitmentPage({
+      commitments: [commitment({ id: "commitment-201", text: "Ship the budget report" })],
+      total: 401,
+      open: 401,
+      offset: 200,
+      limit: 200,
+      hasMore: true,
+    });
+    const commitments = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true as const, result: first })
+      .mockResolvedValue({ ok: true as const, result: second });
+    renderPage({ bridge: fixturesBridge({ commitments }) });
+    await openActionsTab();
+
+    const actions = await screen.findByRole("region", { name: "My actions" });
+    // One page of the corpus, and the pager says which page it is.
+    expect(within(actions).getByText(/page 1 of 3/)).toBeTruthy();
+    expect(within(actions).queryByText(/narrow the search/)).toBeNull();
+    fireEvent.click(within(actions).getByRole("button", { name: "Next page" }));
+    await waitFor(() =>
+      expect(commitments).toHaveBeenCalledWith({ limit: 200, offset: 200 }),
+    );
+    expect(await within(actions).findByText(/page 2 of 3/)).toBeTruthy();
+
+    // Narrowing the filter goes back to the first page of the new result set.
+    await chooseOption(
+      within(actions).getByRole("combobox", { name: "Action status" }),
+      "Open",
+    );
+    await waitFor(() =>
+      expect(commitments).toHaveBeenLastCalledWith({
+        status: "open",
+        limit: 200,
+        offset: 0,
+      }),
     );
   });
 });

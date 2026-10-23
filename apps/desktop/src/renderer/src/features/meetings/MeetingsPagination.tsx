@@ -39,11 +39,14 @@ export function MeetingsPagination({
   totalPages,
   loading,
   onPageChange,
+  ariaLabel = "Meeting pages",
 }: {
   currentPage: number;
   totalPages: number;
   loading: boolean;
   onPageChange: (page: number) => void;
+  /** Which list these pages belong to (the ledger reuses the same chrome). */
+  ariaLabel?: string;
 }): React.JSX.Element | null {
   if (totalPages <= 1) return null;
   const pageNumbers = getMeetingsPageNumbers(currentPage, totalPages);
@@ -57,7 +60,7 @@ export function MeetingsPagination({
         : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
     );
   return (
-    <nav aria-label="Meeting pages" className="flex flex-wrap items-center justify-center gap-1">
+    <nav aria-label={ariaLabel} className="flex flex-wrap items-center justify-center gap-1">
       <button
         type="button"
         disabled={currentPage === 0 || loading}
