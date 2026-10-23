@@ -219,7 +219,8 @@ pub(crate) trait WorkProvider {
         new: &NewIssue,
     ) -> ProviderResult<(ExtIssue, Vec<String>)>;
 
-    /// Persist confirmed creation before optional provider follow-up requests.
+    /// Override to persist confirmation before provider follow-up requests.
+    /// The default reports the result of the provider's existing create method.
     fn create_issue_confirmed(
         &self,
         board_id: &str,
