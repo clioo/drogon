@@ -35,7 +35,7 @@ const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("orchestration_attempts", 1, &[]),
     (
         "work",
-        6,
+        8,
         &[
             ("work-v1", 1),
             ("work-v2", 2),
@@ -759,6 +759,98 @@ fn fresh_install_backfill_is_a_no_op_with_no_pre_existing_workspaces() {
     });
     let projects = response.result.unwrap();
     assert_eq!(projects["projects"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn work_v6_and_v7_upgrade_once_preserving_moves_and_delivery_history() {
+    for version in [6, 7] {
+        let dir = temp_dir(&format!("work-v{version}"));
+        let engine = Engine::open(dir.path()).unwrap();
+        let ticket = engine.dispatch(Request {
+            protocol: PROTOCOL_VERSION,
+            request_id: "migration-ticket".into(),
+            auth: None,
+            method: "work.ticket_create".into(),
+            params: json!({"title": "Keep this move"}),
+        });
+        assert!(ticket.ok);
+        drop(engine);
+        let conn = read_db(&dir);
+        conn.execute_batch("INSERT INTO work_sends (column_id, ticket_id, trigger, message, results, at) SELECT column_id, id, 'manual', 'Keep history', '[{\"action\":\"sent\",\"sessionId\":\"old\"}]', 10 FROM work_tickets;
+            UPDATE work_tickets SET pending_status_id = 'next', status_revision = 17;
+            DROP INDEX work_sends_event;
+            ALTER TABLE work_sends DROP COLUMN event_id;
+            ALTER TABLE work_sends DROP COLUMN delivery_pending;").unwrap();
+        if version == 6 {
+            conn.execute_batch("ALTER TABLE work_tickets DROP COLUMN status_revision;")
+                .unwrap();
+        }
+        conn.execute(
+            "UPDATE schema_versions SET version = ?1 WHERE component = 'work'",
+            [version],
+        )
+        .unwrap();
+        drop(conn);
+        for _ in 0..2 {
+            let reopened = Engine::open(dir.path()).unwrap();
+            let conn = read_db(&dir);
+            assert_eq!(version_of(&conn, "work"), 8);
+            let moved: (String, i64) = conn
+                .query_row(
+                    "SELECT pending_status_id, status_revision FROM work_tickets",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(moved, ("next".into(), if version == 6 { 0 } else { 17 }));
+            let send: (String, Option<String>, i64) = conn
+                .query_row(
+                    "SELECT results, event_id, delivery_pending FROM work_sends",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                send,
+                (
+                    "[{\"action\":\"sent\",\"sessionId\":\"old\"}]".into(),
+                    None,
+                    0
+                )
+            );
+            assert_eq!(
+                conn.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = 'work_sends_event'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+            drop(conn);
+            drop(reopened);
+        }
+    }
+}
+
+#[test]
+fn a_newer_work_schema_is_refused_without_rewriting_the_database() {
+    let dir = temp_dir("work-future");
+    drop(Engine::open(dir.path()).unwrap());
+    let conn = read_db(&dir);
+    conn.execute_batch("UPDATE schema_versions SET version = 9 WHERE component = 'work'; ALTER TABLE work_sends ADD COLUMN future_data TEXT DEFAULT 'keep';").unwrap();
+    drop(conn);
+    let before = std::fs::read(db_path(&dir)).unwrap();
+    let error = Engine::open(dir.path())
+        .err()
+        .expect("newer Work schema must be refused");
+    assert!(
+        error.message.contains("work") && error.message.contains("newer"),
+        "{}",
+        error.message
+    );
+    assert_eq!(std::fs::read(db_path(&dir)).unwrap(), before);
+    assert_eq!(version_of(&read_db(&dir), "work"), 9);
 }
 
 #[test]
