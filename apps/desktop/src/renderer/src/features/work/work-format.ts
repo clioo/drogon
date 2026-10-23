@@ -118,3 +118,7 @@ export function deliverySummary(results: { action: string }[]): string {
   for (const r of results) counts.set(r.action, (counts.get(r.action) ?? 0) + 1);
   return [...counts.entries()].map(([action, n]) => `${n} ${action}`).join(", ");
 }
+
+export function deliveryHasFailures(results: { action: string }[]): boolean {
+  return results.some((r) => r.action === "failed" || r.action === "unverifiable");
+}

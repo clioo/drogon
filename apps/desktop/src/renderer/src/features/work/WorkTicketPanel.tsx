@@ -40,7 +40,7 @@ import {
 } from "../../../../shared/work-contract";
 import type { WorkBoardState } from "./use-work-board";
 import { JiraMarkdown } from "../tasks/jira/jira-markdown";
-import { deliverySummary, formatClock } from "./work-format";
+import { deliveryHasFailures, deliverySummary, formatClock } from "./work-format";
 import { WorkColumnIcon, WorkSessionGlyph, WorkSessionState, workSessionLabel } from "./work-icons";
 import {
   Avatar,
@@ -312,7 +312,7 @@ export function WorkTicketPanel({
     ...sends.map((s) => ({
       at: s.at,
       key: `s${s.id}`,
-      text: `${board.columns.find((c) => c.id === s.columnId)?.name ?? "Column"} sent (${s.trigger}): ${deliverySummary(s.results)}`,
+      text: `${board.columns.find((c) => c.id === s.columnId)?.name ?? "Column"} delivery (${s.trigger}): ${deliverySummary(s.results)}`,
       detail: s.message,
     })),
   ].sort((a, b) => b.at - a.at);
@@ -466,7 +466,7 @@ export function WorkTicketPanel({
                       );
                       if (!result.ok) onNotice(result.error, "error");
                       else if (result.value.delivery)
-                        onNotice(`Sent to ${ticket.key}: ${deliverySummary(result.value.delivery.results)}`, "success");
+                        onNotice(`Delivery to ${ticket.key}: ${deliverySummary(result.value.delivery.results)}`, deliveryHasFailures(result.value.delivery.results) ? "error" : "success");
                     }}
                   >
                     {board.columns.map((c) => (

@@ -16,7 +16,7 @@ import {
   type WorkPreview,
 } from "../../../../shared/work-contract";
 import type { WorkBoardState } from "./use-work-board";
-import { deliverySummary, formatClock, scheduleLabel, WORK_SCHEDULES } from "./work-format";
+import { deliveryHasFailures, deliverySummary, formatClock, scheduleLabel, WORK_SCHEDULES } from "./work-format";
 import { templatesFor } from "./work-prompt-templates";
 import { providerLabel, sprintTerm } from "./work-sources";
 
@@ -347,7 +347,7 @@ export function WorkColumnPanel({
                 const result = await state.run(() => bridge.columnSend({ columnId: column.id }));
                 if (result.ok) {
                   const all = result.value.sends.flatMap((s) => s.results);
-                  onNotice(`Sent to ${column.name}: ${deliverySummary(all) || "nothing"}`, "success");
+                  onNotice(`Delivery to ${column.name}: ${deliverySummary(all) || "nothing"}`, deliveryHasFailures(all) ? "error" : "success");
                 } else {
                   onNotice(result.error, "error");
                 }
