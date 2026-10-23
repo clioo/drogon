@@ -810,6 +810,64 @@ fn a_watch_fires_once_per_new_pull_request_and_seeds_instead_of_catching_up() {
 
 // --- the owner's scenario: the released review session --------------------
 
+/// Issue #696, end to end: a repository with more than one page of open
+/// pull requests. The newest PR is the one oldest-first paging puts LAST,
+/// so a watch that read a single page never saw it while the first hundred
+/// stayed open. The watch now walks the pages, and the hundred-and-first
+/// fires like any other.
+#[test]
+fn a_pull_request_past_the_first_page_is_still_released() {
+    let fx = Fixture::new(false);
+    let t0 = (Fixture::now_ms() / 60_000.0).floor() * 60_000.0;
+
+    // A full page of open pull requests, all assigned to the Bot's login:
+    // the baseline the first check seeds.
+    let full_page: Vec<Value> = (1..=100u64).map(|n| pull(n, &[LOGIN], &[])).collect();
+    fx.github.set_pulls(&full_page);
+    fx.tick(t0);
+    assert!(fx.events().is_empty(), "the first check seeds");
+    assert_eq!(fx.seen_pulls().len(), 100, "the whole page is the baseline");
+    // GitHub sends no `Link` header when the result fits one page, so a
+    // FULL first page is continued: the watch asks for page two and learns
+    // the list ended there, instead of assuming it did.
+    let first_look = fx.github.requests();
+    assert_eq!(first_look.len(), 2, "{first_look:?}");
+    assert_eq!(first_look[0]["query"]["page"], "1");
+    assert_eq!(first_look[1]["query"]["page"], "2");
+
+    // The 101st pull request is opened. It is the NEWEST, so it sits alone
+    // on page two of an oldest-first list — invisible to a one-page read.
+    let mut past_the_page = full_page.clone();
+    past_the_page.push(pull(101, &[LOGIN], &[]));
+    fx.github.set_pulls(&past_the_page);
+    let before = fx.github.requests().len();
+    fx.tick(t0 + 61_000.0);
+    let pages: Vec<Value> = fx.github.requests().into_iter().skip(before).collect();
+    assert_eq!(pages.len(), 2, "both pages are read: {pages:?}");
+    assert_eq!(pages[0]["query"]["page"], "1");
+    assert_eq!(pages[1]["query"]["page"], "2");
+    assert_eq!(pages[1]["query"]["per_page"], "100");
+    assert_eq!(
+        pages[1]["hasCredential"], true,
+        "the sealed token rides to page two as well"
+    );
+
+    let events = fx.events();
+    assert_eq!(events.len(), 1, "the newest PR fires once: {events:?}");
+    assert_eq!(events[0]["resource"], "pull/101");
+    assert!(fx.seen_pulls().contains(&101), "{:?}", fx.seen_pulls());
+
+    // ...and it never fires twice, page two or not.
+    fx.tick(t0 + 122_000.0);
+    assert_eq!(fx.events().len(), 1, "a released PR stays released");
+    assert_eq!(
+        fx.monitor_view()["lastError"],
+        Value::Null,
+        "paging is not an error: {:?}",
+        fx.monitor_view()
+    );
+}
+
 #[test]
 fn an_assigned_pull_request_releases_a_review_session_in_the_project() {
     let fx = Fixture::new(true);
