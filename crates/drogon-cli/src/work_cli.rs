@@ -102,20 +102,20 @@ pub enum WorkAction {
 pub enum WorkSourceAction {
     /// Allow a source: its boards can be imported and synced
     Enable {
-        /// jira | linear | github
+        /// jira | linear | github | plane
         #[arg(long, value_name = "SOURCE")]
         provider: String,
     },
     /// Turn a source off: no import, no sync, no push (boards stay)
     Disable {
-        /// jira | linear | github
+        /// jira | linear | github | plane
         #[arg(long, value_name = "SOURCE")]
         provider: String,
     },
-    /// Connect Linear (a personal API key) or GitHub (a token, or the gh
+    /// Connect Linear or Plane (an API key) or GitHub (a token, or the gh
     /// login when none is given); the key is checked, then kept sealed
     Connect {
-        /// linear | github
+        /// linear | github | plane
         #[arg(long, value_name = "SOURCE")]
         provider: String,
         /// Read the API key or token from stdin (keeps it out of shell
@@ -125,10 +125,13 @@ pub enum WorkSourceAction {
         /// GitHub Enterprise API URL (`https://ghe.example/api/v3`)
         #[arg(long, value_name = "URL")]
         api_url: Option<String>,
+        /// Plane workspace slug from https://app.plane.so/<slug>/projects/
+        #[arg(long, value_name = "SLUG")]
+        workspace_slug: Option<String>,
     },
     /// Forget a source's stored key (the gh login itself is left alone)
     Disconnect {
-        /// linear | github
+        /// linear | github | plane
         #[arg(long, value_name = "SOURCE")]
         provider: String,
     },
@@ -459,7 +462,7 @@ pub enum WorkTicketAction {
         #[arg(long, value_name = "TICKET")]
         ticket: String,
         /// theirs (keep the source's status; the card goes to its column;
-        /// `jira`, `linear` and `github` also work) | ours (push your move)
+        /// `jira`, `linear`, `github` and `plane` also work) | ours (push your move)
         #[arg(long, value_name = "theirs|ours")]
         keep: String,
     },
@@ -638,7 +641,8 @@ pub fn validate(action: &WorkAction) -> Result<(), CliError> {
             | WorkTicketAction::NewSession { ticket, .. } => nonempty("ticket", ticket)?,
             WorkTicketAction::Resolve { ticket, keep } => {
                 nonempty("ticket", ticket)?;
-                if !["theirs", "ours", "jira", "linear", "github"].contains(&keep.as_str()) {
+                if !["theirs", "ours", "jira", "linear", "github", "plane"].contains(&keep.as_str())
+                {
                     return Err(usage("--keep must be theirs or ours"));
                 }
             }
@@ -794,6 +798,7 @@ fn source_call(action: &WorkSourceAction) -> Result<WorkCall, CliError> {
             provider,
             api_key_stdin,
             api_url,
+            workspace_slug,
         } => {
             let mut params = json!({ "provider": provider });
             if *api_key_stdin {
@@ -808,6 +813,9 @@ fn source_call(action: &WorkSourceAction) -> Result<WorkCall, CliError> {
             }
             if let Some(url) = api_url {
                 params["apiUrl"] = json!(url);
+            }
+            if let Some(slug) = workspace_slug {
+                params["workspaceSlug"] = json!(slug);
             }
             ("work.source_connect", params, render_source)
         }
@@ -1462,6 +1470,7 @@ fn source_name(provider: &Value) -> &str {
         Some("jira") => "Jira",
         Some("linear") => "Linear",
         Some("github") => "GitHub",
+        Some("plane") => "Plane",
         _ => "the source",
     }
 }

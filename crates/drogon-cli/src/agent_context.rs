@@ -1908,7 +1908,7 @@ pub fn all_commands() -> Vec<AgentCommand> {
 fn work_commands() -> Vec<AgentCommand> {
     const REQUIRES: &str = "Requires work.v1. Columns and tickets accept an id, or a column name / ticket key (DRG-41).";
     const BOARDS: &str = "Requires work.boards.v1. Boards accept an id or name; tickets an id, Drogon key or source key (APP-128, ENG-12, owner/repo#12).";
-    const SOURCES: &str = "Requires work.sources.v1. Sources: jira, linear, github.";
+    const SOURCES: &str = "Requires work.sources.v1. Sources: jira, linear, github, plane.";
     vec![
         entry(
             "work board",
@@ -1941,7 +1941,7 @@ fn work_commands() -> Vec<AgentCommand> {
         entry(
             "work sources",
             &["work", "sources"],
-            "List the ticket sources (Jira, Linear, GitHub): which are allowed and how each is connected",
+            "List the ticket sources (Jira, Linear, GitHub, Plane): which are allowed and how each is connected",
             "drogon-cli work sources",
             &[],
             &[],
@@ -1974,25 +1974,27 @@ fn work_commands() -> Vec<AgentCommand> {
         entry(
             "work source connect",
             &["work", "source", "connect"],
-            "Connect Linear (API key) or GitHub (token, or the gh login when none is given)",
-            "drogon-cli work source connect --provider <linear|github> [--api-key-stdin] [--api-url <URL>]",
-            &["api-key-stdin", "api-url", "provider"],
+            "Connect Linear or Plane (API key) or GitHub (token, or the gh login when none is given)",
+            "drogon-cli work source connect --provider <linear|github|plane> [--api-key-stdin] [--api-url <URL>] [--workspace-slug <SLUG>]",
+            &["api-key-stdin", "api-url", "provider", "workspace-slug"],
             &[],
             &[
                 "drogon-cli work source connect --provider linear --api-key-stdin",
                 "drogon-cli work source connect --provider github",
+                "drogon-cli work source connect --provider plane --workspace-slug my-team --api-key-stdin",
             ],
             &[
                 SOURCES,
                 "The key is checked against the service, then sealed on disk; it is never printed. Jira connects on the Tasks page.",
                 "GitHub without a key uses `gh auth token`; --api-url names a GitHub Enterprise API (https://ghe.example/api/v3).",
+                "Plane requires --workspace-slug from its workspace URL; projects map to boards, states to columns, cycles to sprints.",
             ],
         ),
         entry(
             "work source disconnect",
             &["work", "source", "disconnect"],
             "Forget a source's stored key (imported boards stay; the gh login is untouched)",
-            "drogon-cli work source disconnect --provider <linear|github>",
+            "drogon-cli work source disconnect --provider <linear|github|plane>",
             &["provider"],
             &[],
             &["drogon-cli work source disconnect --provider linear"],
@@ -2001,7 +2003,7 @@ fn work_commands() -> Vec<AgentCommand> {
         entry(
             "work import boards",
             &["work", "import", "boards"],
-            "List a source's boards (Jira boards, Linear teams, GitHub projects and repositories), marking the ones already imported",
+            "List a source's boards (Jira boards, Linear teams, GitHub projects and repositories, Plane projects), marking the ones already imported",
             "drogon-cli work import boards [--provider <PROVIDER>] [--site <SITE>]",
             &["provider", "site"],
             &[],
@@ -2153,7 +2155,7 @@ fn work_commands() -> Vec<AgentCommand> {
             &["drogon-cli work ticket resolve --ticket APP-142 --keep theirs"],
             &[
                 BOARDS,
-                "theirs (or jira, linear, github) moves the card to the source status's column; ours pushes the pending move.",
+                "theirs (or jira, linear, github, plane) moves the card to the source status's column; ours pushes the pending move.",
             ],
         ),
         entry(
