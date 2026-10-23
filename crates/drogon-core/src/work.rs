@@ -2381,7 +2381,9 @@ impl Engine {
         let mut conn = self.db.lock().unwrap();
         let tx = conn.transaction().map_err(error::from_sqlite)?;
         let fresh = get_ticket(&tx, &ticket.id)?;
-        if fresh.pr_fingerprint != ticket.pr_fingerprint {
+        if fresh.pr_fingerprint != ticket.pr_fingerprint
+            || fresh.pr_checked_at != ticket.pr_checked_at
+        {
             return Ok(None);
         }
         let receipt = if ticket
@@ -2390,7 +2392,7 @@ impl Engine {
             .is_some_and(|old| old != fingerprint)
         {
             let digest = sha2::Sha256::digest(
-                json!([ticket.pr_fingerprint, fingerprint])
+                json!([ticket.pr_fingerprint, ticket.pr_checked_at, fingerprint])
                     .to_string()
                     .as_bytes(),
             );
@@ -2401,7 +2403,11 @@ impl Engine {
         };
         tx.execute(
             "UPDATE work_tickets SET pr_fingerprint = ?2, pr_checked_at = ?3 WHERE id = ?1",
-            params![ticket.id, fingerprint, now],
+            params![
+                ticket.id,
+                fingerprint,
+                now.max(fresh.pr_checked_at.unwrap_or(0).saturating_add(1))
+            ],
         )
         .map_err(error::from_sqlite)?;
         tx.commit().map_err(error::from_sqlite)?;
@@ -2575,6 +2581,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn recurring_pr_transitions_get_distinct_intents_and_stale_polls_cannot_replay() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open(dir.path()).unwrap();
+        let created = engine
+            .do_work_ticket_create(&json!({"title": "PR events", "columnId": "Review"}))
+            .unwrap();
+        let id = created["id"].as_str().unwrap();
+        let column = get_column(&engine.db.lock().unwrap(), "Review").unwrap();
+        let initial = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
+        assert!(
+            engine
+                .pr_change_intent(&column, &initial, "A", 1)
+                .unwrap()
+                .is_none()
+        );
+        for (at, fingerprint) in [(2, "B"), (3, "A"), (4, "B")] {
+            let ticket = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
+            assert!(
+                engine
+                    .pr_change_intent(&column, &ticket, fingerprint, at)
+                    .unwrap()
+                    .is_some(),
+                "event {at} must be admitted"
+            );
+            assert!(
+                engine
+                    .pr_change_intent(&column, &ticket, fingerprint, at)
+                    .unwrap()
+                    .is_none(),
+                "same poll is stale"
+            );
+        }
+        assert!(
+            engine
+                .pr_change_intent(&column, &initial, "A", 5)
+                .unwrap()
+                .is_none(),
+            "an old baseline must not roll back the current PR state"
+        );
+        let sends = engine.work_sends(&json!({"ticketId": id})).unwrap();
+        assert_eq!(sends["sends"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
     fn a_schedule_is_not_consumed_when_its_delivery_intent_cannot_be_saved() {
         let dir = tempfile::tempdir().unwrap();
         let engine = Engine::open(dir.path()).unwrap();
@@ -2698,6 +2748,15 @@ mod tests {
             column_json(&engine.db.lock().unwrap(), &column).unwrap()["lastSentCount"],
             0
         );
+        drop(engine);
+        let second_restart = Engine::open(dir.path()).unwrap();
+        second_restart.tick_work(due as f64);
+        assert_eq!(
+            second_restart
+                .work_sends(&json!({"ticketId": ticket_id}))
+                .unwrap(),
+            sends
+        );
     }
 
     #[cfg(unix)]
@@ -2730,6 +2789,17 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn failed_or_partial_pty_delivery_never_starts_a_replacement() {
+        assert_failed_delivery(&[false, true]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_partial_pty_write_alone_never_starts_a_replacement() {
+        assert_failed_delivery(&[true]);
+    }
+
+    #[cfg(unix)]
+    fn assert_failed_delivery(partials: &[bool]) {
         struct FailingWriter {
             accept_body: bool,
         }
@@ -2749,7 +2819,7 @@ mod tests {
                 Ok(())
             }
         }
-        for partial in [false, true] {
+        for &partial in partials {
             let dir = tempfile::tempdir().unwrap();
             let engine = Engine::open(dir.path()).unwrap();
             let ticket = engine
