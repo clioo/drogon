@@ -1245,6 +1245,13 @@ impl Engine {
         // names from becoming subdirectories.
         let project_segment = sanitize_worktree_root(project_name);
         let workspaces_root = self.data_dir.join("workspaces").join(project_segment);
+        // Issue #690: `create_dir_all` follows a symlinked `workspaces/` or
+        // project segment, so the guard belongs ahead of it.
+        crate::worktree_rpc::refuse_escape_from_workspaces(
+            &self.data_dir,
+            &workspaces_root,
+            "to create a workspace under",
+        )?;
         std::fs::create_dir_all(&workspaces_root)
             .map_err(|e| error::io_error(format!("cannot create workspaces directory: {e}")))?;
         let dir_base = format!("pr-{number}-{}", slugify(&head_branch));
@@ -1318,10 +1325,10 @@ impl Engine {
         // worktree row); that constructor is module-private to worktree_rpc,
         // so the sequence is repeated here rather than widened for one caller.
         let conn = self.db.lock().unwrap();
-        let workspace = crate::workspace::register(
+        let workspace = crate::workspace::register_resolved(
             &conn,
             &self.host_id,
-            &canonical_target_str,
+            Path::new(&canonical_target_str),
             Some(&head_branch),
         )?;
         let workspace_id = workspace["id"]

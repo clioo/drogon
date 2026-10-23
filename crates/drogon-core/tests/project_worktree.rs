@@ -1502,3 +1502,44 @@ fn worktree_force_remove_refuses_a_workspaces_root_swapped_for_a_symlink() {
     );
     assert!(!recorded.exists());
 }
+
+/// Issue #690: `create_dir_all` on the project's root under the data
+/// directory follows a symlinked `workspaces/` or project segment and makes
+/// directories at the link's target. A guard that only runs afterwards has
+/// already let the call write outside the data directory.
+#[test]
+fn worktree_create_writes_nothing_outside_when_the_project_root_is_a_symlink() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let canonical_data = std::fs::canonicalize(data_dir.path()).unwrap();
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_segment = repo.path().file_name().unwrap().to_owned();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(canonical_data.join("workspaces")).unwrap();
+    std::os::unix::fs::symlink(
+        outside.path(),
+        canonical_data.join("workspaces").join(&project_segment),
+    )
+    .unwrap();
+
+    let code = err_code(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project["id"], "name": "first"}),
+    );
+    assert_eq!(code, "invalid_argument");
+    assert_eq!(
+        std::fs::read_dir(outside.path()).unwrap().count(),
+        0,
+        "the refused create left nothing at the link's target"
+    );
+}

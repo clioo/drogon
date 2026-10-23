@@ -428,21 +428,21 @@ fn workspaces_tree(data_dir: &Path) -> PathBuf {
 /// does not read as being in that tree at all. Purely lexical: it answers
 /// which rule a path is judged by, never where it really leads.
 ///
-/// The `workspaces` segment is matched without regard to case because macOS
-/// and Windows hand back a case-insensitive filesystem, where a row spelled
-/// `WORKSPACES` names the very same directory Drogon created. Treating that
-/// spelling as foreign would send a perfectly ordinary workspace down the
-/// legacy path for a difference the filesystem itself does not make.
+/// The segment is matched exactly. A case-insensitive match would read a
+/// genuinely separate `WORKSPACES` directory -- which a case-sensitive
+/// filesystem will happily hold beside `workspaces` -- as the protected
+/// tree, and a path's spelling is not the place to start guessing which
+/// directory the filesystem meant. A row spelled some other way than the
+/// directory on disk is judged by the rule for paths outside the tree,
+/// which refuses it rather than resolving the difference away.
 fn workspaces_relative<'a>(data_dir: &Path, path: &'a Path) -> Option<&'a Path> {
     let relative = path.strip_prefix(data_dir).ok()?;
-    let first = match relative.components().next()? {
-        std::path::Component::Normal(first) => first,
-        _ => return None,
-    };
-    if !first.to_str()?.eq_ignore_ascii_case("workspaces") {
-        return None;
+    match relative.components().next()? {
+        std::path::Component::Normal(first) if first == std::ffi::OsStr::new("workspaces") => {
+            Some(relative)
+        }
+        _ => None,
     }
-    Some(relative)
 }
 
 /// Refuses a checkout path that reads as being inside `<data-dir>/workspaces`
@@ -465,7 +465,7 @@ fn workspaces_relative<'a>(data_dir: &Path, path: &'a Path) -> Option<&'a Path> 
 /// name -- is a real directory inside it. A component that does not exist
 /// ends the walk: nothing below a missing directory exists either, and on
 /// the create path that missing directory is what is about to be made.
-fn refuse_symlinked_components(
+pub(crate) fn refuse_escape_from_workspaces(
     data_dir: &Path,
     path: &Path,
     subject: &str,
@@ -512,48 +512,6 @@ fn refuse_symlinked_components(
     Ok(())
 }
 
-/// Defence in depth behind the component walk: the deepest ancestor of
-/// `path` that exists right now has to resolve back inside the workspaces
-/// tree. Here `canonicalize` is the right tool rather than the wrong one --
-/// the question is where that directory really is, not whether the path
-/// reached it honestly -- and it catches what a per-component link check
-/// cannot: a mount point, a bind mount, or a tree rearranged between the
-/// walk and the `git worktree add` that follows it.
-///
-/// Nothing existing is not a refusal. A workspaces tree that is not there at
-/// all has nothing to escape through, and refusing over it would stand a
-/// workspace back up that nothing can reach -- which is what #604 was.
-fn refuse_resolved_ancestor_outside_workspaces(
-    data_dir: &Path,
-    path: &Path,
-    subject: &str,
-) -> Result<(), RpcError> {
-    let workspaces = workspaces_tree(data_dir);
-    let mut ancestor = path;
-    while ancestor.starts_with(&workspaces) {
-        if let Ok(resolved) = std::fs::canonicalize(ancestor) {
-            if !resolved.starts_with(&workspaces) {
-                return Err(error::invalid_argument(format!(
-                    "refusing {subject} \"{}\": \"{}\" resolves to \"{}\", outside \"{}\"",
-                    path.display(),
-                    ancestor.display(),
-                    resolved.display(),
-                    workspaces.display()
-                )));
-            }
-            return Ok(());
-        }
-        match ancestor.parent() {
-            Some(parent) => ancestor = parent,
-            None => break,
-        }
-    }
-    Ok(())
-}
-
-/// Both guards, in the order their messages read best. Issue #690: every
-/// caller that is about to create a checkout at a path, or delete one at a
-/// path, runs this against that path first.
 /// Where a freshly created checkout actually landed. Called with the
 /// canonicalized path `git worktree add` produced, after the fact, because
 /// the preflight guards run against a tree that nothing keeps still until
@@ -570,15 +528,6 @@ pub(crate) fn refuse_registration_outside_workspaces(
         canonical_target.display(),
         workspaces_tree(data_dir).display()
     )))
-}
-
-pub(crate) fn refuse_escape_from_workspaces(
-    data_dir: &Path,
-    path: &Path,
-    subject: &str,
-) -> Result<(), RpcError> {
-    refuse_symlinked_components(data_dir, path, subject)?;
-    refuse_resolved_ancestor_outside_workspaces(data_dir, path, subject)
 }
 
 /// What a recorded workspace path has to prove before `remove_dir_all` runs
@@ -1181,6 +1130,15 @@ impl Engine {
             .data_dir
             .join("workspaces")
             .join(sanitize_path_component(&project.name));
+        // Before `create_dir_all`, not after: it follows a symlinked
+        // `workspaces/` or project segment and makes directories at the
+        // link's target, so a guard that runs later has already let the
+        // call write outside the data directory.
+        refuse_escape_from_workspaces(
+            &self.data_dir,
+            &workspaces_root,
+            "to create a workspace under",
+        )?;
         std::fs::create_dir_all(&workspaces_root)
             .map_err(|e| error::io_error(format!("cannot create workspaces directory: {e}")))?;
         let target = workspaces_root.join(&name);
@@ -1303,8 +1261,15 @@ impl Engine {
         .to_string();
 
         let conn = self.db.lock().unwrap();
-        let workspace =
-            crate::workspace::register(&conn, &self.host_id, &canonical_target_str, Some(&name))?;
+        // `register_resolved`, not `register`: resolving the string a second
+        // time would be a second chance for the tree to have moved, and the
+        // row would record a path this call never checked (#690).
+        let workspace = crate::workspace::register_resolved(
+            &conn,
+            &self.host_id,
+            &canonical_target,
+            Some(&name),
+        )?;
         let workspace_id = workspace["id"]
             .as_str()
             .ok_or_else(|| error::internal_error("workspace registration missing id"))?
@@ -2209,29 +2174,25 @@ mod tests {
         .expect("a checkout that is not there deletes nothing and refuses nothing");
     }
 
-    /// On a case-insensitive filesystem `WORKSPACES` names the very
-    /// directory Drogon created, so a row spelled that way is an ordinary
-    /// in-tree workspace, not a foreign path.
+    /// The `workspaces` segment is read exactly: a separate `WORKSPACES`
+    /// directory, which a case-sensitive filesystem will hold beside it, is
+    /// not the protected tree and is judged by the rule for paths outside
+    /// it -- which refuses one whose recorded spelling is not the one on
+    /// disk rather than resolving the difference away.
     #[test]
-    fn checkout_delete_reads_the_workspaces_segment_without_regard_to_case() {
+    fn a_differently_cased_workspaces_segment_is_not_read_as_the_protected_tree() {
         let (_root, data_dir) = data_dir_with_workspaces();
-        let lower = data_dir.join("workspaces").join("Proj").join("feature");
-        std::fs::create_dir_all(&lower).unwrap();
-        if !data_dir.join("WORKSPACES").join("Proj").is_dir() {
-            // A case-sensitive filesystem: the spelling really is a
-            // different path there, and the legacy rule judges it.
-            return;
-        }
-        let project = data_dir.join("project");
-        std::fs::create_dir(&project).unwrap();
-
-        delete_checkout_directory(
-            &data_dir,
-            &project,
-            &data_dir.join("WORKSPACES").join("Proj").join("feature"),
-        )
-        .unwrap();
-        assert!(!lower.exists());
+        assert!(
+            workspaces_relative(&data_dir, &data_dir.join("workspaces").join("Proj")).is_some()
+        );
+        assert!(
+            workspaces_relative(&data_dir, &data_dir.join("WORKSPACES").join("Proj")).is_none()
+        );
+        assert!(
+            workspaces_relative(&data_dir, &data_dir.join("workspaces-other").join("Proj"))
+                .is_none(),
+            "a longer name that merely starts the same is a different directory"
+        );
     }
 
     /// The post-`git worktree add` half of #690: whatever the preflight

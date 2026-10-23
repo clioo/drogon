@@ -61,6 +61,8 @@ impl Drop for SavedPath {
     }
 }
 
+/// A swap performed the instant `git worktree add` runs: the preflight
+/// guards have passed and the checkout lands at the link's target.
 #[test]
 fn create_refuses_to_register_a_checkout_a_mid_call_swap_pushed_outside() {
     let data = tempfile::tempdir().unwrap();
@@ -68,24 +70,8 @@ fn create_refuses_to_register_a_checkout_a_mid_call_swap_pushed_outside() {
     let outside = tempfile::tempdir().unwrap();
     let wrapper_dir = tempfile::tempdir().unwrap();
 
-    let real_git = String::from_utf8(
-        Command::new("/usr/bin/env")
-            .args(["which", "git"])
-            .output()
-            .unwrap()
-            .stdout,
-    )
-    .unwrap()
-    .trim()
-    .to_string();
-    assert!(!real_git.is_empty(), "this test needs a real git on PATH");
-
-    git(repo.path(), &["init", "-q", "-b", "main", "."]);
-    git(repo.path(), &["config", "user.email", "t@example.com"]);
-    git(repo.path(), &["config", "user.name", "Test"]);
-    std::fs::write(repo.path().join("README.md"), "hello\n").unwrap();
-    git(repo.path(), &["add", "README.md"]);
-    git(repo.path(), &["commit", "-qm", "first"]);
+    let real_git = real_git();
+    init_repo(repo.path());
 
     let engine = Engine::open(data.path()).unwrap();
     let canonical_data = std::fs::canonicalize(data.path()).unwrap();
@@ -162,8 +148,114 @@ fn create_refuses_to_register_a_checkout_a_mid_call_swap_pushed_outside() {
     }
 }
 
+/// The `git` the wrapper delegates to, resolved before `PATH` is rewritten.
+fn real_git() -> String {
+    let resolved = String::from_utf8(
+        Command::new("/usr/bin/env")
+            .args(["which", "git"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    assert!(!resolved.is_empty(), "this test needs a real git on PATH");
+    resolved
+}
+
+/// A repository with one commit on `main`, so `HEAD` resolves for
+/// `worktree.create`'s default base ref.
+fn init_repo(dir: &Path) {
+    git(dir, &["init", "-q", "-b", "main", "."]);
+    git(dir, &["config", "user.email", "t@example.com"]);
+    git(dir, &["config", "user.name", "Test"]);
+    std::fs::write(dir.join("README.md"), "hello\n").unwrap();
+    git(dir, &["add", "README.md"]);
+    git(dir, &["commit", "-qm", "first"]);
+}
+
 /// Minimal single-quoted shell literal for a path interpolated into the
 /// wrapper script above.
 fn shell_quote(raw: &str) -> String {
     format!("'{}'", raw.replace('\'', "'\\''"))
+}
+
+/// The later half of the same window: the swap happens after `git worktree
+/// add` and after the post-add check, while the call is still resolving the
+/// new checkout. Registration must not resolve the path a second time and
+/// record wherever it points by then -- whatever this call does, nothing
+/// outside the data directory may end up in a row.
+#[test]
+fn create_never_records_a_path_a_post_check_swap_moved_outside() {
+    let data = tempfile::tempdir().unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let wrapper_dir = tempfile::tempdir().unwrap();
+
+    let real_git = real_git();
+    init_repo(repo.path());
+
+    let engine = Engine::open(data.path()).unwrap();
+    let canonical_data = std::fs::canonicalize(data.path()).unwrap();
+    let project = engine
+        .dispatch(req(
+            "project.add",
+            json!({"path": repo.path().to_string_lossy()}),
+        ))
+        .result
+        .unwrap();
+    let project_id = project["id"].as_str().unwrap().to_string();
+    let workspaces_root = canonical_data
+        .join("workspaces")
+        .join(repo.path().file_name().unwrap());
+    std::fs::create_dir_all(&workspaces_root).unwrap();
+
+    // `rev-parse` is the first git call after the post-add check, so the
+    // wrapper copies the finished checkout outside, swaps the root for a
+    // link to the copy, and lets git answer from there. Everything the call
+    // resolves from now on points outside.
+    let wrapper = wrapper_dir.path().join("git");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = rev-parse ] && [ -d {root} ] && [ ! -L {root} ]; then\n\
+             \x20 cp -R {root}/ {outside}/copy\n\
+             \x20 mv {root} {root}.swapped-away\n\
+             \x20 ln -s {outside}/copy {root}\n\
+             fi\n\
+             exec {git} \"$@\"\n",
+            root = shell_quote(&workspaces_root.to_string_lossy()),
+            outside = shell_quote(&outside.path().to_string_lossy()),
+            git = shell_quote(&real_git),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _path = SavedPath::prepend(wrapper_dir.path());
+
+    let response = engine.dispatch(req(
+        "worktree.create",
+        json!({"projectId": project_id, "name": "raced"}),
+    ));
+    if let Some(created) = &response.result {
+        let recorded = created["path"].as_str().unwrap();
+        assert!(
+            !Path::new(recorded).starts_with(outside.path()),
+            "the row records a path outside the data directory: {recorded}"
+        );
+    }
+
+    let workspaces = engine
+        .dispatch(req("workspace.list", json!({})))
+        .result
+        .unwrap();
+    for workspace in workspaces["workspaces"].as_array().unwrap() {
+        let path = workspace["path"].as_str().unwrap();
+        assert!(
+            !Path::new(path).starts_with(outside.path()),
+            "a workspace registration points outside the data directory: {path}"
+        );
+    }
 }
