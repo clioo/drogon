@@ -46,8 +46,8 @@ pub(crate) const SCHEMA_COMPONENT: &str = "work";
 /// sources the owner allows and their connections (Linear, GitHub). v4: a
 /// board can keep importing new issues assigned to the owner. v5: columns
 /// can be collapsed. v6: the workspace made for a ticket, where its New
-/// session starts.
-pub(crate) const SCHEMA_VERSION: i64 = 6;
+/// session starts. v7: a revision fences acknowledgement of local status moves.
+pub(crate) const SCHEMA_VERSION: i64 = 7;
 
 /// How often a watched pull request is re-read (`gh pr view`).
 pub(crate) const PR_POLL_MS: i64 = 5 * 60_000;
@@ -152,6 +152,14 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
                 ticket_id TEXT PRIMARY KEY,
                 workspace_id TEXT NOT NULL
             );",
+        )?;
+    }
+    if existing.unwrap_or(0) < 7 {
+        add_column(
+            tx,
+            "work_tickets",
+            "status_revision",
+            "INTEGER NOT NULL DEFAULT 0",
         )?;
     }
     tx.execute(
@@ -424,10 +432,11 @@ struct TicketExt {
     ext_sprint_id: Option<String>,
     push_error: Option<String>,
     removed_at: Option<i64>,
+    status_revision: i64,
 }
 
 const COLUMN_SELECT: &str = "SELECT id, name, icon, position, send_on_enter, cron, pr_watch, message, recipients, harness_id, next_run_at, board_id, statuses, collapsed FROM work_columns";
-const TICKET_SELECT: &str = "SELECT id, key, project_id, workspace_id, column_id, position, title, description, pr_url, pr_number, source_url, next_step, pr_fingerprint, pr_checked_at, created_at, updated_at, board_id, ext_id, ext_key, ext_url, issue_type, priority, assignee, ext_status_id, ext_status_name, ext_status_category, pending_status_id, status_conflict, sprint_id, ext_sprint_id, push_error, removed_at FROM work_tickets";
+const TICKET_SELECT: &str = "SELECT id, key, project_id, workspace_id, column_id, position, title, description, pr_url, pr_number, source_url, next_step, pr_fingerprint, pr_checked_at, created_at, updated_at, board_id, ext_id, ext_key, ext_url, issue_type, priority, assignee, ext_status_id, ext_status_name, ext_status_category, pending_status_id, status_conflict, sprint_id, ext_sprint_id, push_error, removed_at, status_revision FROM work_tickets";
 
 fn column_from_row(r: &rusqlite::Row) -> rusqlite::Result<Column> {
     Ok(Column {
@@ -483,6 +492,7 @@ fn ticket_from_row(r: &rusqlite::Row) -> rusqlite::Result<Ticket> {
             ext_sprint_id: r.get(29)?,
             push_error: r.get(30)?,
             removed_at: r.get(31)?,
+            status_revision: r.get(32)?,
         },
     })
 }
@@ -2462,7 +2472,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, SCHEMA_VERSION);
         conn.execute(
             "INSERT INTO work_ticket_workspaces (ticket_id, workspace_id) VALUES ('t', 'w')",
             [],
