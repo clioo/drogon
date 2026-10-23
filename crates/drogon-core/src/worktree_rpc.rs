@@ -424,6 +424,27 @@ fn workspaces_tree(data_dir: &Path) -> PathBuf {
     data_dir.join("workspaces")
 }
 
+/// `path`'s remainder below `<data-dir>/workspaces`, or `None` when the path
+/// does not read as being in that tree at all. Purely lexical: it answers
+/// which rule a path is judged by, never where it really leads.
+///
+/// The `workspaces` segment is matched without regard to case because macOS
+/// and Windows hand back a case-insensitive filesystem, where a row spelled
+/// `WORKSPACES` names the very same directory Drogon created. Treating that
+/// spelling as foreign would send a perfectly ordinary workspace down the
+/// legacy path for a difference the filesystem itself does not make.
+fn workspaces_relative<'a>(data_dir: &Path, path: &'a Path) -> Option<&'a Path> {
+    let relative = path.strip_prefix(data_dir).ok()?;
+    let first = match relative.components().next()? {
+        std::path::Component::Normal(first) => first,
+        _ => return None,
+    };
+    if !first.to_str()?.eq_ignore_ascii_case("workspaces") {
+        return None;
+    }
+    Some(relative)
+}
+
 /// Refuses a checkout path that reads as being inside `<data-dir>/workspaces`
 /// but would not land there, by walking it one component at a time with
 /// `symlink_metadata` and refusing the first symbolic link it meets.
@@ -456,15 +477,9 @@ fn refuse_symlinked_components(
             workspaces_tree(data_dir).display()
         ))
     };
-    let Ok(relative) = path.strip_prefix(data_dir) else {
+    let Some(relative) = workspaces_relative(data_dir, path) else {
         return Err(outside());
     };
-    if !matches!(
-        relative.components().next(),
-        Some(std::path::Component::Normal(first)) if first == std::ffi::OsStr::new("workspaces")
-    ) {
-        return Err(outside());
-    }
     let mut walked = data_dir.to_path_buf();
     for component in relative.components() {
         match component {
@@ -539,6 +554,24 @@ fn refuse_resolved_ancestor_outside_workspaces(
 /// Both guards, in the order their messages read best. Issue #690: every
 /// caller that is about to create a checkout at a path, or delete one at a
 /// path, runs this against that path first.
+/// Where a freshly created checkout actually landed. Called with the
+/// canonicalized path `git worktree add` produced, after the fact, because
+/// the preflight guards run against a tree that nothing keeps still until
+/// git has written into it. Issue #690.
+pub(crate) fn refuse_registration_outside_workspaces(
+    data_dir: &Path,
+    canonical_target: &Path,
+) -> Result<(), RpcError> {
+    if workspaces_relative(data_dir, canonical_target).is_some() {
+        return Ok(());
+    }
+    Err(error::invalid_argument(format!(
+        "the new workspace resolved to \"{}\", outside \"{}\", so it was not registered. Nothing there was deleted: remove it by hand if it is not wanted, and run `git worktree prune` in the project.",
+        canonical_target.display(),
+        workspaces_tree(data_dir).display()
+    )))
+}
+
 pub(crate) fn refuse_escape_from_workspaces(
     data_dir: &Path,
     path: &Path,
@@ -546,6 +579,44 @@ pub(crate) fn refuse_escape_from_workspaces(
 ) -> Result<(), RpcError> {
     refuse_symlinked_components(data_dir, path, subject)?;
     refuse_resolved_ancestor_outside_workspaces(data_dir, path, subject)
+}
+
+/// What a recorded workspace path has to prove before `remove_dir_all` runs
+/// on it. The parent was resolved with `canonicalize` above, and
+/// `canonicalize` resolves a symlink as readily as a directory -- so a
+/// workspaces root renamed away and replaced by a link made the target any
+/// path on the machine, and the delete took whatever was there (#690).
+///
+/// Two populations, two rules, because one rule cannot serve both:
+///
+/// * A path inside `<data-dir>/workspaces` is one Drogon wrote, and it must
+///   still lead there through real directories -- including a link that
+///   stays inside the tree but lands on another Project's checkout, which is
+///   the same harm as leaving it.
+/// * A path outside that tree is a row Drogon no longer creates but may
+///   still hold: the pre-`projects` migration copies `path` verbatim, a
+///   Project's own checkout is registered as a worktree, and a data
+///   directory that moved leaves its rows behind. Refusing those outright
+///   would make exactly the unreachable-and-undeletable workspace #604
+///   exists to end, so the rule for them is the narrower one that still
+///   closes the escape: the parent must already be fully resolved, so the
+///   delete follows no link to get there.
+///
+/// Both rules are decided from the *recorded* path, never from what it
+/// resolves to, so nothing can be moved from the strict population into the
+/// lenient one by rearranging the filesystem.
+fn refuse_delete_reached_through_a_symlink(data_dir: &Path, parent: &Path) -> Result<(), RpcError> {
+    if workspaces_relative(data_dir, parent).is_some() {
+        return refuse_escape_from_workspaces(data_dir, parent, "to delete");
+    }
+    match std::fs::canonicalize(parent) {
+        Ok(resolved) if resolved != parent => Err(error::invalid_argument(format!(
+            "refusing to delete under \"{}\": it resolves to \"{}\", so the delete would follow a symbolic link out of the recorded path",
+            parent.display(),
+            resolved.display()
+        ))),
+        _ => Ok(()),
+    }
 }
 
 fn delete_checkout_directory(
@@ -595,19 +666,14 @@ fn delete_checkout_directory(
             target.display()
         )));
     }
-    // Issue #690: the parent was just resolved, and `canonicalize` resolves
-    // a symlink as readily as a directory -- so a workspaces root renamed
-    // away and replaced by a link makes `target` any path on the machine,
-    // and the `remove_dir_all` below would take whatever is there. The
-    // recorded path has to lead into the workspaces tree through real
-    // directories; the final component is still never followed, so a
-    // symlinked workspace is unlinked exactly as before.
-    refuse_escape_from_workspaces(data_dir, parent, "to delete")?;
     let metadata = match std::fs::symlink_metadata(&target) {
         Ok(metadata) => metadata,
         // A path that is already gone is a success: the caller's next step is
         // dropping the rows either way, and refusing here would stand a
         // workspace back up that nothing can reach -- which is what #604 was.
+        // Deliberately ahead of the containment guards below: where there is
+        // nothing to delete there is nothing to escape into, and a data
+        // directory that moved must not leave its old rows undeletable.
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(err) => {
             return Err(error::io_error(format!(
@@ -616,6 +682,7 @@ fn delete_checkout_directory(
             )));
         }
     };
+    refuse_delete_reached_through_a_symlink(data_dir, parent)?;
     let deleted = if metadata.is_dir() {
         std::fs::remove_dir_all(&target)
     } else {
@@ -1214,6 +1281,16 @@ impl Engine {
                 "worktree created but its path could not be resolved: {e}"
             ))
         })?;
+        // Issue #690, the other half: the guard above ran *before* `git
+        // worktree add`, and nothing holds the tree still in between -- a
+        // workspaces root swapped for a link inside that window puts the
+        // checkout outside after every preflight passed. This is the
+        // check-and-use pair closed at use: where the checkout actually
+        // landed is what gets registered, so that is what has to be inside
+        // the tree. The stray directory is deliberately left alone rather
+        // than removed; deleting a path outside the workspaces tree is the
+        // very thing this guard exists to refuse.
+        refuse_registration_outside_workspaces(&self.data_dir, &canonical_target)?;
         let canonical_target_str = canonical_target
             .to_str()
             .ok_or_else(|| error::invalid_argument("resolved worktree path is not UTF-8"))?
@@ -2074,23 +2151,108 @@ mod tests {
         assert!(!stray.exists());
     }
 
+    /// #604 outlives #690: a row the pre-`projects` migration copied in, or
+    /// one left behind by a data directory that moved, names a checkout
+    /// outside the workspaces tree through no symlink at all. Confining
+    /// every delete to that tree would make those rows undeletable, so a
+    /// fully resolved path outside it is still cleared.
     #[test]
-    fn checkout_delete_refuses_a_path_outside_the_workspaces_tree() {
+    fn checkout_delete_still_clears_a_legacy_checkout_outside_the_workspaces_tree() {
         let (_root, data_dir) = data_dir_with_workspaces();
         let project = data_dir.join("project");
         std::fs::create_dir(&project).unwrap();
-        let elsewhere = data_dir.join("elsewhere");
-        std::fs::create_dir_all(elsewhere.join("checkout")).unwrap();
+        let legacy = data_dir.join("elsewhere").join("legacy-checkout");
+        std::fs::create_dir_all(legacy.join("src")).unwrap();
+        std::fs::write(legacy.join("src").join("main.rs"), "fn main() {}").unwrap();
+
+        delete_checkout_directory(&data_dir, &project, &legacy).unwrap();
+        assert!(!legacy.exists());
+    }
+
+    /// The same legacy row still may not be reached through a link: the
+    /// parent has to be where it says it is.
+    #[cfg(unix)]
+    #[test]
+    fn checkout_delete_refuses_a_legacy_parent_reached_through_a_symlink() {
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let project = data_dir.join("project");
+        std::fs::create_dir(&project).unwrap();
+        let victim = data_dir.join("victim");
+        std::fs::create_dir_all(victim.join("legacy-checkout")).unwrap();
+        std::fs::write(victim.join("legacy-checkout").join("secret.txt"), "theirs").unwrap();
+        let link = data_dir.join("elsewhere");
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
 
         assert_eq!(
-            delete_checkout_directory(&data_dir, &project, &elsewhere.join("checkout"))
+            delete_checkout_directory(&data_dir, &project, &link.join("legacy-checkout"))
                 .unwrap_err()
                 .code,
             "invalid_argument"
         );
+        assert!(victim.join("legacy-checkout").join("secret.txt").exists());
+    }
+
+    /// A data directory that moved leaves rows pointing at a tree that is no
+    /// longer there. Nothing exists to delete, so nothing can escape, and
+    /// the row must still retire (#604).
+    #[test]
+    fn checkout_delete_retires_a_row_from_a_data_directory_that_moved() {
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let project = data_dir.join("project");
+        std::fs::create_dir(&project).unwrap();
+
+        delete_checkout_directory(
+            &data_dir,
+            &project,
+            Path::new("/nonexistent-former-data-dir/workspaces/Proj/feature"),
+        )
+        .expect("a checkout that is not there deletes nothing and refuses nothing");
+    }
+
+    /// On a case-insensitive filesystem `WORKSPACES` names the very
+    /// directory Drogon created, so a row spelled that way is an ordinary
+    /// in-tree workspace, not a foreign path.
+    #[test]
+    fn checkout_delete_reads_the_workspaces_segment_without_regard_to_case() {
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let lower = data_dir.join("workspaces").join("Proj").join("feature");
+        std::fs::create_dir_all(&lower).unwrap();
+        if !data_dir.join("WORKSPACES").join("Proj").is_dir() {
+            // A case-sensitive filesystem: the spelling really is a
+            // different path there, and the legacy rule judges it.
+            return;
+        }
+        let project = data_dir.join("project");
+        std::fs::create_dir(&project).unwrap();
+
+        delete_checkout_directory(
+            &data_dir,
+            &project,
+            &data_dir.join("WORKSPACES").join("Proj").join("feature"),
+        )
+        .unwrap();
+        assert!(!lower.exists());
+    }
+
+    /// The post-`git worktree add` half of #690: whatever the preflight
+    /// guards saw, the path actually written is what gets registered, and
+    /// that one has to be inside the tree.
+    #[test]
+    fn registration_refuses_a_checkout_that_landed_outside_the_workspaces_tree() {
+        let (_root, data_dir) = data_dir_with_workspaces();
+        refuse_registration_outside_workspaces(
+            &data_dir,
+            &data_dir.join("workspaces").join("Proj").join("feature"),
+        )
+        .expect("an ordinary workspace registers");
+        let refusal =
+            refuse_registration_outside_workspaces(&data_dir, &data_dir.join("outside-checkout"))
+                .unwrap_err();
+        assert_eq!(refusal.code, "invalid_argument");
         assert!(
-            elsewhere.join("checkout").exists(),
-            "nothing outside the workspaces tree is deleted"
+            refusal.message.contains("Nothing there was deleted"),
+            "the refusal says the stray checkout was left alone -- got: {}",
+            refusal.message
         );
     }
 

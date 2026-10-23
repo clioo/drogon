@@ -1292,6 +1292,13 @@ impl Engine {
                     "worktree created but its path could not be resolved: {e}"
                 ))
             })?;
+            // Issue #690: the guard above ran before `git worktree add`, so
+            // where the checkout actually landed is what has to be inside
+            // the workspaces tree.
+            crate::worktree_rpc::refuse_registration_outside_workspaces(
+                &self.data_dir,
+                &canonical,
+            )?;
             let canonical_str = canonical
                 .to_str()
                 .ok_or_else(|| error::invalid_argument("resolved worktree path is not UTF-8"))?
