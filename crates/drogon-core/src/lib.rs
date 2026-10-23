@@ -179,11 +179,11 @@ const CAPABILITIES: &[&str] = &[
     // Meetings (additive): read-only index of the owner's local Write That
     // Down Markdown notes, discoverable by Bots through `drogon-cli meeting`.
     meetings::MEETINGS_CAPABILITY,
-    // Meetings, the working half: extraction through the free LOCAL model
-    // (never a paid provider) and the commitment ledger the owner accepts
-    // suggestions into. Separate from `meetings.v1` on purpose, so a client
-    // that meets an index-only service still lists and searches instead of
-    // offering an action that cannot work.
+    // Meetings, the working half: extraction through the user's configured Pi
+    // default and the commitment ledger the owner accepts suggestions into.
+    // Separate from `meetings.v1` on purpose, so a client that meets an
+    // index-only service still lists and searches instead of offering an
+    // action that cannot work.
     meetings::MEETINGS_ACTIONS_CAPABILITY,
     // Meetings, tracked work: an accepted commitment becomes a real Drogon
     // Work ticket (labeling, column placement and the column's own delivery

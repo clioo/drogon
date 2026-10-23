@@ -103,10 +103,13 @@ The twelve journeys were the scope. Three things grew out of using them.
 **Meetings became a section, not a sidebar.** Drogon indexes the Markdown transcripts
 written by a local note-taking tool — read-only, never edited or moved — and makes a
 corpus of hundreds usable: full-text search, date and duration filters, bounded reads
-instead of loading everything. From a transcript you can pull out commitments and turn
-one into a real Drogon task, with the line it came from shown next to it. Extraction is
-a suggestion until you accept it and runs only when requested, through the provider and
-model configured in Pi. Browsing, searching and reading meetings never launch inference.
+instead of loading everything. From a transcript you can pull out commitments, accept the
+ones you agree with, and turn one into a real Drogon ticket on the Work board; the ticket
+keeps the meeting, the line number and the verbatim quote, so the work carries its own
+evidence and a session started from it already has the brief. Drogon opens the tool it
+found and reveals the folder, and never writes there. Extraction is a suggestion until you
+accept it and runs only when requested, through the provider and model configured in Pi.
+Browsing, searching and reading meetings never launch inference.
 
 **Bots grew their own triggers.** A bot no longer waits to be asked. It owns monitors —
 a file digest, an HTTP poll, a script, or a watch on a repository's pull requests — and
@@ -195,6 +198,7 @@ drogon-cli graph run --workspace <ID> --all   # compile and run the whole graph
 drogon-cli graph run-node-failover --workspace <ID> --node <ID> --follow
 drogon-cli bot watch-pr --repo <owner/name>   # a watch that releases a review session
 drogon-cli meeting list --limit 20            # the indexed transcripts, read-only
+drogon-cli meeting actions track --id <ID>     # an accepted action becomes a Work ticket
 drogon-cli backups list                       # pre-migration snapshots, restorable
 ```
 

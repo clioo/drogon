@@ -467,7 +467,11 @@ describe("Meetings page list and reader", () => {
         confidence: "high",
       }),
     );
-    expect(await screen.findByText(/Added to my actions: Fix the flaky login test/)).toBeTruthy();
+    expect(
+      await screen.findByText(
+        /Added to my actions: Fix the flaky login test — track it as a Drogon task from My actions/,
+      ),
+    ).toBeTruthy();
   });
 
   it("reports a refused acceptance instead of showing the action as recorded", async () => {
@@ -512,6 +516,9 @@ describe("Meetings page list and reader", () => {
       screen.getByText("[00:12] I will fix the flaky login test before the release."),
     ).toBeTruthy();
     expect(screen.getByText(/1 action in this view · 1 still open/)).toBeTruthy();
+    // Confidence is carried into the ledger, exactly as the suggestion stated
+    // it: a high-confidence action is not marked uncertain...
+    expect(screen.queryByText("uncertain")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /Mark done/ }));
     await waitFor(() =>
@@ -520,6 +527,19 @@ describe("Meetings page list and reader", () => {
         status: "done",
       }),
     );
+  });
+
+  it("marks an inferred action as uncertain in the ledger too", async () => {
+    const commitments = vi.fn(async () => ({
+      ok: true as const,
+      result: commitmentPage({
+        commitments: [commitment({ confidence: "low" })],
+      }),
+    }));
+    renderPage({ bridge: fixturesBridge({ commitments }) });
+    await openActionsTab();
+    // ...and one the model only inferred keeps that warning after acceptance.
+    expect(await screen.findByText("uncertain")).toBeTruthy();
   });
 
   it("opens the transcript an action came from, for checking", async () => {

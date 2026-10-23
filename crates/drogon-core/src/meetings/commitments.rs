@@ -1,9 +1,10 @@
 // MIT Copyright (c) 2026 Lovecast Inc.
 //! The commitment ledger: what the owner accepted out of a meeting.
 //!
-//! Extraction produces *suggestions*; nothing becomes tracked work until the
-//! owner accepts one. This module is that acceptance step's storage, and three
-//! properties matter more than the shape:
+//! Extraction produces *suggestions*; accepting one records the promise here,
+//! and a separate, explicit step ([`CommitmentStore::link_ticket`]) records the
+//! Work ticket it became. This module is that storage, and three properties
+//! matter more than the shape:
 //!
 //! 1. **It is Drogon's own file, never the notes.** The ledger lives at
 //!    `<data-dir>/meeting-commitments.json` and is written with an atomic

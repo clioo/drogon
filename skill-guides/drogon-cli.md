@@ -739,9 +739,10 @@ again reports the same ticket with `created: false`, never a duplicate.
 
 The ticket's body is the meeting brief: the meeting title and date, the
 transcript line number, the verbatim quote, and how the action was accepted
-(suggested by the configured Pi model, or written by the owner). A session
-started from that ticket therefore already has the evidence, and the ledger
-row prints `tracked as <KEY>` so the promise and the work stay linked.
+(suggested by the configured Pi model, or written by the owner). The Work board
+shows it on the ticket, and a column prompt that uses `{ticket.description}`
+types it into the session that column starts; the ledger row prints
+`tracked as <KEY>` so the promise and the work stay linked.
 
 A typical Bot flow — a morning brief of yesterday's meetings with
 recommended actions — is one automation whose prompt tells the harness to

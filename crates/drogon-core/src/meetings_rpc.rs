@@ -402,8 +402,9 @@ fn ticket_title(text: &str) -> String {
 }
 
 /// The ticket body: the meeting it came from, the verbatim line that proves
-/// it, and how it was accepted. This is the brief a session started from the
-/// ticket reads, so it carries the evidence rather than a summary of it.
+/// it, and how it was accepted. It is the meeting's brief on the board, and a
+/// column prompt that uses `{ticket.description}` types it into the session
+/// that prompt starts, so it carries the evidence rather than a summary of it.
 fn commitment_ticket_description(commitment: &Commitment) -> String {
     let owner = commitment
         .owner

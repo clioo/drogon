@@ -55,6 +55,14 @@ function CommitmentRow({
               {commitment.ticketKey}
             </Badge>
           ) : null}
+          {commitment.confidence === "low" ? (
+            <Badge
+              variant="outline"
+              title="The model inferred this; the transcript does not state it directly."
+            >
+              uncertain
+            </Badge>
+          ) : null}
           {commitment.owner ? <Badge variant="outline">{commitment.owner}</Badge> : null}
           <Badge
             variant={

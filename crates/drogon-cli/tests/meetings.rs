@@ -1156,6 +1156,33 @@ fn an_accepted_commitment_becomes_real_tracked_work() {
         "the ticket body must say how the action was accepted: {description}"
     );
 
+    // The handoff: a column prompt that uses {ticket.description} renders the
+    // meeting's own evidence into what a session receives. Rendered by the
+    // real daemon, through the board's own placeholder path — no session is
+    // started here, so nothing is typed anywhere.
+    let preview_params = format!(
+        "{{\"ticketId\":\"{ticket_id}\",\"message\":\"Work on {{ticket.key}}.\\n{{ticket.description}}\"}}"
+    );
+    let preview = fixture.cli_ok(&[
+        "rpc",
+        "work.column_preview",
+        "--params",
+        &preview_params,
+        "--json",
+    ]);
+    let rendered = preview["previews"][0]["message"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        rendered.starts_with(&format!("Work on {ticket_key}.")),
+        "the ticket key renders into the prompt: {rendered}"
+    );
+    assert!(
+        rendered.contains("From Write That Down: Weekly sync · 2026-09-10 · line 8")
+            && rendered.contains("> [00:10] I will fix the flaky login test before the release"),
+        "the ticket body hands the session the meeting, its line and its quote: {rendered}"
+    );
+
     // One commitment, one ticket: tracking again reports the same work.
     let again = fixture.cli_ok(&[
         "meeting",

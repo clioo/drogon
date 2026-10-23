@@ -158,7 +158,9 @@ export function useMeetingCommitments({
             setAcceptError(result.error.message);
             return;
           }
-          setAcceptNotice(`Added to my actions: ${result.result.text}`);
+          setAcceptNotice(
+            `Added to my actions: ${result.result.text} — track it as a Drogon task from My actions.`,
+          );
           load();
         })
         .catch((failure: unknown) => {
