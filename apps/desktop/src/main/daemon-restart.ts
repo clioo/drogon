@@ -116,24 +116,19 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function workspaceIds(value: unknown): string[] | null {
-  const root = asRecord(value);
-  const list = root?.["workspaces"];
-  if (!Array.isArray(list)) return null;
-  const ids: string[] = [];
-  for (const entry of list) {
-    const id = asRecord(entry)?.["id"];
-    if (typeof id !== "string" || id.length === 0) return null;
-    ids.push(id);
-  }
-  return ids;
-}
+/** One row of a host-wide `session.list`: the identity a mutation needs and
+ *  the verdict that decides which mutation can settle it. */
+type ObservedSession = {
+  sessionId: string;
+  incarnation: string;
+  verdict: string | null;
+};
 
-function sessionIdentities(value: unknown): { sessionId: string; incarnation: string }[] | null {
+function sessionObservations(value: unknown): ObservedSession[] | null {
   const root = asRecord(value);
   const list = root?.["sessions"];
   if (!Array.isArray(list)) return null;
-  const identities: { sessionId: string; incarnation: string }[] = [];
+  const sessions: ObservedSession[] = [];
   for (const entry of list) {
     const record = asRecord(entry);
     const sessionId = record?.["id"];
@@ -145,9 +140,14 @@ function sessionIdentities(value: unknown): { sessionId: string; incarnation: st
       incarnation.length === 0
     )
       return null;
-    identities.push({ sessionId, incarnation });
+    const verdict = record?.["verdict"];
+    sessions.push({
+      sessionId,
+      incarnation,
+      verdict: typeof verdict === "string" ? verdict : null,
+    });
   }
-  return identities;
+  return sessions;
 }
 
 function shutdownFences(
@@ -161,37 +161,46 @@ function shutdownFences(
     : null;
 }
 
-/** Stops every session through the same `session.stop` the pane uses; aborts (leaving the daemon up) on the first refusal. */
+/**
+ * Settles every session on this host so `runtime.shutdown` can be admitted.
+ * One host-wide `session.list`, never one call per Workspace: a session whose
+ * `workspaces` row is gone (a removed project) is invisible to a
+ * per-workspace list yet still blocks the shutdown, which is exactly the
+ * state that left "Restart daemon" permanently refused. The verdict picks the
+ * verb: a live session is stopped through the same `session.stop` the pane
+ * uses (it keeps its exited history), and anything else — a post-restart
+ * `unverifiable` stub, a `pending` row — is closed, because `session.stop`
+ * can only *report* a session this instance holds no handle for and would
+ * never clear it. Any refusal aborts with the daemon still running.
+ */
 async function stopAllSessions(
   call: NativeCall,
 ): Promise<{ stopped: number } | { failed: string }> {
-  const workspacesResult = await call("workspace.list", {});
-  if (!workspacesResult.ok)
-    return { failed: "Could not list projects, so no session was stopped." };
-  const ids = workspaceIds(workspacesResult.result);
-  if (!ids) return { failed: "The service returned an unexpected project list." };
-  let total = 0;
+  const listed = await call("session.list", {});
+  if (!listed.ok)
+    return { failed: "Could not list sessions, so no session was stopped." };
+  const sessions = sessionObservations(listed.result);
+  if (!sessions)
+    return { failed: "The service returned an unexpected session list." };
+  let stopped = 0;
   let failed = 0;
-  for (const workspaceId of ids) {
-    const sessionsResult = await call("session.list", { workspaceId });
-    if (!sessionsResult.ok) {
-      failed += 1;
-      continue;
-    }
-    const identities = sessionIdentities(sessionsResult.result);
-    if (!identities)
-      return { failed: "The service returned an unexpected session list." };
-    for (const identity of identities) {
-      total += 1;
-      const stopped = await call("session.stop", identity);
-      if (!stopped.ok) failed += 1;
-    }
+  for (const session of sessions) {
+    const identity = {
+      sessionId: session.sessionId,
+      incarnation: session.incarnation,
+    };
+    const settled =
+      session.verdict === "live"
+        ? await call("session.stop", identity)
+        : await call("session.close", identity);
+    if (settled.ok) stopped += 1;
+    else failed += 1;
   }
   if (failed > 0)
     return {
-      failed: `Could not stop ${failed} of ${total} session(s); the daemon was left running.`,
+      failed: `Could not stop ${failed} of ${sessions.length} session(s); the daemon was left running.`,
     };
-  return { stopped: total };
+  return { stopped };
 }
 
 async function serving(call: NativeCall): Promise<boolean> {

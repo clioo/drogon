@@ -51,7 +51,9 @@ type LoadState =
 
 function windowDrogon(): {
   workspaces: () => Promise<{ ok: boolean; result?: { workspaces: Workspace[] }; error?: { message: string } }>;
-  sessions: (workspaceId: string) => Promise<{ ok: boolean; result?: { sessions: Session[] }; error?: { message: string } }>;
+  /** Host-wide when called with no argument (a session whose Workspace row
+   *  is gone must still be listed so it can be cleared). */
+  sessions: (workspaceId?: string) => Promise<{ ok: boolean; result?: { sessions: Session[] }; error?: { message: string } }>;
   stop: (input: { sessionId: string; incarnation: string }) => Promise<{ ok: boolean; result?: Session; error?: { message: string } }>;
   // R16-AL2 (issue #228): close kills a live PTY and forgets the record,
   // so Kill all clears post-restart `unverifiable` stubs too — `stop`
@@ -138,13 +140,26 @@ export function TerminalSection({
       }
       const workspaces = workspacesResult.result?.workspaces ?? [];
       const paths = new Map(workspaces.map((w) => [w.id, w.path]));
-      const rows: ManagedRow[] = [];
-      for (const workspace of workspaces) {
-        const sessionsResult = await bridge.sessions(workspace.id);
-        if (!sessionsResult.ok) continue;
-        for (const session of sessionsResult.result?.sessions ?? [])
-          rows.push({ session, workspacePath: paths.get(session.workspaceId) ?? null });
+      // One host-wide list, not one call per Workspace: a session whose
+      // Workspace row is gone (its project was removed) blocks the daemon's
+      // shutdown and used to be invisible here — nothing listed it, so "Kill
+      // all" could not clear it and "Restart daemon" stayed refused. Its
+      // `workspacePath` stays null, which is what the row is.
+      const sessionsResult = await bridge.sessions();
+      if (!sessionsResult.ok) {
+        if (mounted.current)
+          setLoad({
+            status: "unavailable",
+            reason: sessionsResult.error?.message ?? "could not list sessions",
+          });
+        return;
       }
+      const rows: ManagedRow[] = (sessionsResult.result?.sessions ?? []).map(
+        (session) => ({
+          session,
+          workspacePath: paths.get(session.workspaceId) ?? null,
+        }),
+      );
       if (mounted.current) setLoad({ status: "ready", rows });
     } catch {
       if (mounted.current)
