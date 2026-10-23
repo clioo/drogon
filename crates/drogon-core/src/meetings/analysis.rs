@@ -44,6 +44,23 @@ pub const MAX_ANALYSIS_OUTPUT_BYTES: usize = 256 * 1024;
 /// prompt at 32 KiB of argv, so the transcript budget sits below that with
 /// room for the instructions.
 pub const MAX_ANALYSIS_TRANSCRIPT_BYTES: usize = 24 * 1024;
+/// Agent capabilities the extraction one-shot must not carry. The note being
+/// read is untrusted text — every participant's words are in it verbatim — and
+/// the run is non-interactive, so a tool-enabled agent would turn "ignore the
+/// instructions above and run this" into a real command with the user's
+/// privileges. Extraction needs the model's reading, not an agent's hands.
+/// These are Pi's own flags (`pi --help`): tools, extensions, skills, MCP
+/// servers and project context files all off. The analysis harness is Pi by
+/// construction ([`ANALYSIS_HARNESS`]), so the flag set is not portable by
+/// accident.
+pub const EXTRACTION_HARDENING_ARGS: &[&str] = &[
+    "--no-tools",
+    "--no-extensions",
+    "--no-skills",
+    "--no-mcp",
+    "--no-context-files",
+];
+
 /// Shortest quote that counts as evidence. A three-word "quote" matches half
 /// the corpus and proves nothing.
 pub const MIN_QUOTE_CHARS: usize = 12;
@@ -595,6 +612,16 @@ impl LocalModelInference {
             agent_session_transcript_path: None,
         };
         let plan = plan_launch(&request, &self.executable).map_err(|_| AnalysisError::Spawn)?;
+        // `plan_launch` knows Pi's general one-shot argv; this caller adds the
+        // one thing a general launch must not: the note is untrusted input, so
+        // the run is stripped of tools, extensions, skills, MCP servers and
+        // project context before it ever starts.
+        let mut args = plan.args.clone();
+        args.extend(
+            EXTRACTION_HARDENING_ARGS
+                .iter()
+                .map(|flag| flag.to_string()),
+        );
         // The run happens inside a throwaway directory so that nothing an
         // agentic CLI decides to write lands in the owner's notes folder or
         // in the daemon's data dir.
@@ -606,7 +633,7 @@ impl LocalModelInference {
 
         let mut command = Command::new(&plan.command);
         command
-            .args(&plan.args)
+            .args(&args)
             .current_dir(&cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -989,6 +1016,40 @@ mod tests {
         }
 
         const ANSWER: &str = "{\"summary\":\"Budget report ships Friday.\",\"decisions\":[{\"text\":\"Ship the budget report on Friday\",\"quote\":\"We agreed to ship the budget report on Friday\"}],\"actions\":[],\"openQuestions\":[]}";
+
+        /// The extraction is a reading task, not an agent turn: the note is
+        /// untrusted text (any participant's words are in it verbatim), so the
+        /// run must not carry tools that could act on an instruction in it.
+        #[test]
+        fn the_extraction_run_disables_agent_tools() {
+            let dir = tempfile::tempdir().expect("temp dir");
+            let data_dir = dir.path().join("data");
+            std::fs::create_dir_all(&data_dir).expect("data dir");
+            let argv_file = dir.path().join("argv.txt");
+            // Records every argv entry (one per line), then answers with the
+            // smallest accepted JSON so the run completes normally.
+            let executable = script(
+                dir.path(),
+                "pi",
+                &format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\necho '{{}}'\n",
+                    argv_file.display()
+                ),
+            );
+            let output = inference(&executable, Duration::from_secs(20), &data_dir)
+                .analyze("prompt")
+                .expect("the fixture answers");
+            assert_eq!(output.trim(), "{}");
+            let argv = std::fs::read_to_string(&argv_file).expect("the fixture records its argv");
+            for flag in EXTRACTION_HARDENING_ARGS {
+                assert!(
+                    argv.lines().any(|line| line == *flag),
+                    "the extraction run must pass {flag}: {argv}"
+                );
+            }
+            // It is still the one-shot entrypoint, not a TUI launch.
+            assert!(argv.lines().any(|line| line == "-p"), "{argv}");
+        }
 
         #[test]
         fn a_real_one_shot_run_yields_verified_suggestions() {
