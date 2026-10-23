@@ -291,6 +291,21 @@ fn push_acknowledges_only_the_status_and_sprint_that_were_sent() {
 
     b.sync();
     assert_eq!(b.ticket("APP-142")["pendingStatus"], Value::Null);
+    b.move_to("APP-142", "In progress");
+    let pause = PausedPush::new();
+    std::thread::scope(|scope| {
+        let push = scope.spawn(|| b.ctx.ok("work.ticket_push", json!({"ticketId": id})));
+        pause.wait();
+        // Cancelling against the cached remote QA must remain a QA move
+        // after the older request changes the actual remote to In Progress.
+        b.move_to("APP-142", "QA");
+        pause.release();
+        assert_eq!(push.join().unwrap()["pushed"], true);
+    });
+    drop(pause);
+    assert_eq!(b.ticket("APP-142")["externalStatus"]["name"], "In Progress");
+    assert_eq!(b.ticket("APP-142")["pendingStatus"]["name"], "QA");
+    b.ctx.ok("work.ticket_push", json!({"ticketId": id}));
     b.ctx.ok(
         "work.ticket_sprint",
         json!({"ticketId": id, "to": "backlog"}),

@@ -16,7 +16,8 @@ import type {
 } from "../../../../shared/work-contract";
 import { columnDropIndex, resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
 import { TooltipProvider } from "../../components/ui/tooltip";
-import { toast } from "sonner";
+import { WorkColumnPanel } from "./WorkColumnPanel";
+import { useWorkBoard } from "./use-work-board";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
@@ -467,13 +468,16 @@ describe("Work board", () => {
   test("an unverifiable prompt delivery is surfaced as an error", async () => {
     const bridge = fakeBridge();
     bridge.columnSend.mockResolvedValue({ ok: true, result: { columnId: "review", sends: [{ ticketId: "t2", ticketKey: "DRG-42", columnId: "review", trigger: "manual", message: "m", results: [{ sessionId: null, action: "unverifiable", error: "Interrupted delivery" }], at: 1 }] } } as never);
-    vi.mocked(toast.error).mockClear();
-    await mount(bridge);
-    openMenu(screen.getByRole("button", { name: "Review column actions" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Configure prompt…" }));
+    const onNotice = vi.fn();
+    function PromptPanel() {
+      const state = useWorkBoard(bridge as unknown as WorkBridge, true);
+      const board = boardFixture();
+      return <WorkColumnPanel column={board.columns[2]} board={board} state={state} bridge={bridge as unknown as WorkBridge} onNotice={onNotice} onClose={vi.fn()} />;
+    }
+    render(<TooltipProvider><PromptPanel /></TooltipProvider>);
     const panel = await screen.findByRole("complementary", { name: "Review prompt" });
     fireEvent.click(within(panel).getByRole("button", { name: "Send now" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("unverifiable")));
+    await waitFor(() => expect(onNotice).toHaveBeenCalledWith(expect.stringContaining("unverifiable"), "error"));
   });
 
   test("a live session on a ticket opens directly in its workspace", async () => {
