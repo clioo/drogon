@@ -53,7 +53,10 @@ pub(crate) const SCHEMA_VERSION: i64 = 6;
 pub(crate) const PR_POLL_MS: i64 = 5 * 60_000;
 
 const MAX_NAME: usize = 64;
-const MAX_TITLE: usize = 200;
+/// A ticket's title bound. `pub(crate)` because another surface that creates
+/// work (a meeting commitment becoming a ticket) must respect the same cap
+/// instead of inventing a second one.
+pub(crate) const MAX_TITLE: usize = 200;
 const MAX_TEXT: usize = 20_000;
 const MAX_MESSAGE: usize = 16_000;
 const MAX_URL: usize = 2048;

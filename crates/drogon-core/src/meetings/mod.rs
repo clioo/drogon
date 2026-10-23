@@ -72,6 +72,13 @@ pub const MEETINGS_CAPABILITY: &str = "meetings.v1";
 /// client lists and searches, and simply does not offer the actions.
 pub const MEETINGS_ACTIONS_CAPABILITY: &str = "meetings.actions.v1";
 
+/// Service capability for turning an accepted commitment into a Drogon Work
+/// ticket. Additive on top of [`MEETINGS_ACTIONS_CAPABILITY`]: a service that
+/// only keeps the ledger still accepts and resolves actions, and simply does
+/// not offer tracked work — the client says so instead of failing on a method
+/// an older service does not implement.
+pub const MEETINGS_WORK_CAPABILITY: &str = "meetings.work.v1";
+
 /// Executable inside the Write That Down app bundle.
 const APP_EXECUTABLE: &str = "Contents/MacOS/WriteThatDown";
 

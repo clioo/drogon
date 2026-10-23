@@ -723,6 +723,26 @@ owner, quote, meeting title and date). Every row carries `meetingId`,
 with `meeting actions done --id <ID>` or `meeting actions dismiss --id <ID>`
 (dismissed and done are deliberately different answers).
 
+### From an accepted action to tracked work
+
+Accepting is a ledger entry; tracked work is a Drogon Work ticket. The second
+step is explicit and additive (`meetings.work.v1`):
+`drogon-cli meeting actions track --id <ID>` turns one accepted commitment into
+a ticket through the Work board's own creation path — it gets a Drogon key
+(`DRG-41`), lands in a column (the board's first column unless you pass
+`--column <ID>`, with `--project <ID>` and `--workspace <ID>` available), and
+takes that column's on-enter delivery like any other ticket. The daemon
+re-reads the note and re-verifies the commitment's `quote` first: if the
+transcript no longer contains it, nothing is created and the verb fails with
+`commitment_quote_missing`. One commitment is one ticket — running the verb
+again reports the same ticket with `created: false`, never a duplicate.
+
+The ticket's body is the meeting brief: the meeting title and date, the
+transcript line number, the verbatim quote, and how the action was accepted
+(suggested by the configured Pi model, or written by the owner). A session
+started from that ticket therefore already has the evidence, and the ledger
+row prints `tracked as <KEY>` so the promise and the work stay linked.
+
 A typical Bot flow — a morning brief of yesterday's meetings with
 recommended actions — is one automation whose prompt tells the harness to
 run `drogon-cli meeting list --limit 20 --json`, filter the dates it cares

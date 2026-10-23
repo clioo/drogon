@@ -119,6 +119,15 @@ pub struct Commitment {
     /// `high` or `low`, carried over from the suggestion.
     pub confidence: String,
     pub status: CommitmentStatus,
+    /// The Drogon Work ticket this commitment became, once the owner tracked
+    /// it. `None` means it is accepted but not yet tracked work; the ticket
+    /// is created through the Work board's own path, never here.
+    #[serde(default)]
+    pub ticket_id: Option<String>,
+    /// The ticket's human key (`DRG-41`), so the ledger can name the work
+    /// without a second lookup. Both fields are written together.
+    #[serde(default)]
+    pub ticket_key: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub resolved_at: Option<String>,
@@ -136,6 +145,9 @@ pub enum CommitmentError {
     UnknownStatus,
     UnknownSource,
     UnknownId,
+    /// This commitment already became a different Work ticket; one promise is
+    /// one tracked piece of work.
+    AlreadyTracked,
     Full,
     Storage,
 }
@@ -151,6 +163,7 @@ impl CommitmentError {
             CommitmentError::UnknownStatus => "commitment_unknown_status",
             CommitmentError::UnknownSource => "commitment_unknown_source",
             CommitmentError::UnknownId => "commitment_unknown_id",
+            CommitmentError::AlreadyTracked => "commitment_already_tracked",
             CommitmentError::Full => "commitment_ledger_full",
             CommitmentError::Storage => "commitment_storage_failed",
         }
@@ -180,6 +193,9 @@ impl CommitmentError {
                 "A source must be one of: suggested, owner.".to_string()
             }
             CommitmentError::UnknownId => "No such commitment.".to_string(),
+            CommitmentError::AlreadyTracked => {
+                "This commitment is already tracked as a Drogon task.".to_string()
+            }
             CommitmentError::Full => format!(
                 "This ledger is full ({MAX_COMMITMENTS} commitments). Resolve or dismiss some \
                  before adding more."
@@ -403,6 +419,8 @@ impl CommitmentStore {
             source,
             confidence: if confidence == "high" { "high" } else { "low" }.to_string(),
             status: CommitmentStatus::Open,
+            ticket_id: None,
+            ticket_key: None,
             created_at: now.clone(),
             updated_at: now,
             resolved_at: None,
@@ -411,6 +429,55 @@ impl CommitmentStore {
         ledger.commitments.push(commitment.clone());
         self.write(&ledger)?;
         Ok(commitment)
+    }
+
+    /// One commitment by id, or [`CommitmentError::UnknownId`]. Used by the
+    /// tracking step, which must read the stored quote before creating work.
+    pub fn get(&self, id: &str) -> Result<Commitment, CommitmentError> {
+        let _guard = self.lock.lock().map_err(|_| CommitmentError::Storage)?;
+        let ledger = self.read()?;
+        ledger
+            .commitments
+            .into_iter()
+            .find(|commitment| commitment.id == id)
+            .ok_or(CommitmentError::UnknownId)
+    }
+
+    /// Records the Work ticket a commitment became. Called only after the
+    /// ticket exists, so a failure here is reported as a storage failure and
+    /// the ticket is still the truth on the board. Linking the same ticket
+    /// twice is a no-op; re-pointing a commitment at a different ticket is
+    /// refused.
+    pub fn link_ticket(
+        &self,
+        id: &str,
+        ticket_id: &str,
+        ticket_key: &str,
+    ) -> Result<Commitment, CommitmentError> {
+        if ticket_id.is_empty() || ticket_key.is_empty() {
+            return Err(CommitmentError::Storage);
+        }
+        let _guard = self.lock.lock().map_err(|_| CommitmentError::Storage)?;
+        let mut ledger = self.read()?;
+        let Some(commitment) = ledger
+            .commitments
+            .iter_mut()
+            .find(|commitment| commitment.id == id)
+        else {
+            return Err(CommitmentError::UnknownId);
+        };
+        if let Some(existing) = &commitment.ticket_id {
+            if existing == ticket_id {
+                return Ok(commitment.clone());
+            }
+            return Err(CommitmentError::AlreadyTracked);
+        }
+        commitment.ticket_id = Some(ticket_id.to_string());
+        commitment.ticket_key = Some(ticket_key.to_string());
+        commitment.updated_at = crate::now_rfc3339();
+        let updated = commitment.clone();
+        self.write(&ledger)?;
+        Ok(updated)
     }
 
     pub fn set_status(
@@ -719,6 +786,64 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o600, "the ledger is the owner's own state");
         }
+    }
+
+    #[test]
+    fn tracking_links_one_work_ticket_and_never_re_points_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = CommitmentStore::new(dir.path());
+        let fs = fixture();
+        let id = transcript_id(Path::new(NOTE));
+        let (note, content) = meeting(&id, &fs);
+        let stored = store
+            .create(
+                &note,
+                &content,
+                "Fix the flaky login test",
+                Some("Carlos"),
+                "I will fix the flaky login test before the release",
+                CommitmentSource::Suggested,
+                "high",
+            )
+            .expect("quote is in the note");
+
+        // Accepted is not tracked: the ticket fields are empty until the
+        // Work board actually creates one.
+        assert_eq!(stored.ticket_id, None);
+        assert_eq!(stored.ticket_key, None);
+        assert_eq!(store.get(&stored.id).unwrap().ticket_id, None);
+
+        let tracked = store
+            .link_ticket(&stored.id, "ticket-1", "DRG-41")
+            .expect("the first link is recorded");
+        assert_eq!(tracked.ticket_id.as_deref(), Some("ticket-1"));
+        assert_eq!(tracked.ticket_key.as_deref(), Some("DRG-41"));
+
+        // Linking the same ticket again is a no-op, and the ledger is still
+        // there after a fresh store reads it back.
+        let again = store.link_ticket(&stored.id, "ticket-1", "DRG-41").unwrap();
+        assert_eq!(again.ticket_key.as_deref(), Some("DRG-41"));
+        let reopened = CommitmentStore::new(dir.path());
+        let read_back = reopened.get(&stored.id).unwrap();
+        assert_eq!(read_back.ticket_id.as_deref(), Some("ticket-1"));
+        assert_eq!(read_back.ticket_key.as_deref(), Some("DRG-41"));
+
+        // A second ticket for the same promise is refused rather than
+        // silently re-pointing tracked work.
+        assert_eq!(
+            store
+                .link_ticket(&stored.id, "ticket-2", "DRG-42")
+                .unwrap_err(),
+            CommitmentError::AlreadyTracked
+        );
+        assert_eq!(
+            store.get("commitment-nope").unwrap_err(),
+            CommitmentError::UnknownId
+        );
+        assert_eq!(
+            store.link_ticket("commitment-nope", "ticket-3", "DRG-43"),
+            Err(CommitmentError::UnknownId)
+        );
     }
 
     #[test]

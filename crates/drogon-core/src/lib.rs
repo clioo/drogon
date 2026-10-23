@@ -185,6 +185,11 @@ const CAPABILITIES: &[&str] = &[
     // that meets an index-only service still lists and searches instead of
     // offering an action that cannot work.
     meetings::MEETINGS_ACTIONS_CAPABILITY,
+    // Meetings, tracked work: an accepted commitment becomes a real Drogon
+    // Work ticket (labeling, column placement and the column's own delivery
+    // all come from the Work board). Additive on top of `meetings.actions.v1`
+    // so a ledger-only service is still usable.
+    meetings::MEETINGS_WORK_CAPABILITY,
 ];
 
 pub(crate) fn now_rfc3339() -> String {
@@ -771,6 +776,9 @@ impl Engine {
             "meeting.commitment_update" => {
                 self.mutating(request, Self::do_meeting_commitment_update)
             }
+            // Tracking creates a Work ticket through the board's own path and
+            // re-verifies the commitment's quote against the note first.
+            "meeting.commitment_track" => self.mutating(request, Self::do_meeting_commitment_track),
             // The work graph. `graph.read`/`graph.node_state`/`graph.compile`
             // are read-only projections (they write only the daemon-owned
             // `state` half or the compiled recipe); the rest mutate.

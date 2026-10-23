@@ -1038,3 +1038,253 @@ fn extraction_is_unavailable_without_the_local_model() {
     assert_eq!(searched["total"], 1);
     fixture.cli_ok(&["meeting", "read", "--id", &id, "--json"]);
 }
+
+/// The tracked-work leg: an accepted commitment becomes a real Work ticket,
+/// through the board's own creation path, with the meeting's own line as its
+/// body. The daemon re-verifies the quote against the note first, and one
+/// commitment never becomes two tickets.
+#[test]
+fn an_accepted_commitment_becomes_real_tracked_work() {
+    let mut fixture = Fixture::new();
+    fixture.write_note(
+        "2026-09-10",
+        "08-05",
+        "42 min",
+        "Weekly sync",
+        "[00:00] we agreed to ship the budget report\n[00:10] I will fix the flaky login test before the release",
+    );
+    fixture.write_note(
+        "2026-09-09",
+        "09-00",
+        "12 min",
+        "Design review",
+        "[00:05] I will write the migration notes by Wednesday",
+    );
+    fixture.start_daemon(&[]);
+
+    // Tracked work is additive: an index/ledger-only service still lists and
+    // accepts, and the client says so instead of failing on a missing verb.
+    let status = fixture.cli_ok(&["status", "--json"]);
+    let capabilities = status["capabilities"].as_array().expect("capabilities");
+    assert!(
+        capabilities.iter().any(|cap| cap == "meetings.work.v1"),
+        "status must advertise meetings.work.v1: {capabilities:?}"
+    );
+
+    let list = fixture.cli_ok(&["meeting", "list", "--json"]);
+    let sync_id = list["meetings"][0]["id"].as_str().unwrap().to_string();
+    let design_id = list["meetings"][1]["id"].as_str().unwrap().to_string();
+
+    // Accepting records the promise; it does not yet create work.
+    let accepted = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "add",
+        "--meeting-id",
+        &sync_id,
+        "--text",
+        "Fix the flaky login test",
+        "--quote",
+        "I will fix the flaky login test before the release",
+        "--owner",
+        "Carlos",
+        "--source",
+        "suggested",
+        "--confidence",
+        "high",
+        "--json",
+    ]);
+    let commitment_id = accepted["id"].as_str().unwrap().to_string();
+    assert!(accepted["ticketId"].is_null());
+    assert!(accepted["ticketKey"].is_null());
+    let board = fixture.cli_ok(&["work", "board", "--json"]);
+    assert_eq!(
+        board["tickets"].as_array().unwrap().len(),
+        0,
+        "accepting a suggestion must not invent tracked work: {board}"
+    );
+
+    // Tracking creates exactly one ticket, through the Work board's own path.
+    let tracked = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "track",
+        "--id",
+        &commitment_id,
+        "--json",
+    ]);
+    assert_eq!(tracked["created"], true);
+    let ticket_id = tracked["ticket"]["id"].as_str().unwrap().to_string();
+    let ticket_key = tracked["ticket"]["key"].as_str().unwrap().to_string();
+    assert!(
+        ticket_key.ends_with("-1"),
+        "a fresh board starts at 1: {ticket_key}"
+    );
+    assert_eq!(tracked["commitment"]["id"], commitment_id.as_str());
+    assert_eq!(tracked["commitment"]["ticketId"], ticket_id.as_str());
+    assert_eq!(tracked["commitment"]["ticketKey"], ticket_key.as_str());
+    assert_eq!(tracked["ticket"]["title"], "Fix the flaky login test");
+
+    // The ticket is ordinary Drogon work: it is on the board, in the first
+    // column, and its body carries the meeting, the line and the quote.
+    let board = fixture.cli_ok(&["work", "board", "--json"]);
+    let tickets = board["tickets"].as_array().unwrap();
+    assert_eq!(tickets.len(), 1);
+    assert_eq!(tickets[0]["id"], ticket_id.as_str());
+    assert_eq!(tickets[0]["key"], ticket_key.as_str());
+    assert_eq!(
+        tickets[0]["columnId"],
+        tracked["ticket"]["columnId"].clone()
+    );
+    assert_eq!(board["columns"][0]["name"], "To do");
+    assert_eq!(
+        tickets[0]["columnId"], board["columns"][0]["id"],
+        "tracking without a column lands in the board's first column"
+    );
+    let detail = fixture.cli_ok(&["work", "ticket", "show", "--ticket", &ticket_id, "--json"]);
+    let description = detail["description"].as_str().unwrap();
+    assert!(
+        description.contains("From Write That Down: Weekly sync · 2026-09-10 · line 8"),
+        "the ticket body must name the meeting and the line: {description}"
+    );
+    assert!(
+        description.contains("> [00:10] I will fix the flaky login test before the release"),
+        "the ticket body must carry the note's own line: {description}"
+    );
+    assert!(
+        description.contains("confidence high"),
+        "the ticket body must say how the action was accepted: {description}"
+    );
+
+    // One commitment, one ticket: tracking again reports the same work.
+    let again = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "track",
+        "--id",
+        &commitment_id,
+        "--json",
+    ]);
+    assert_eq!(again["created"], false);
+    assert_eq!(again["ticket"]["key"], ticket_key.as_str());
+    assert_eq!(
+        fixture.cli_ok(&["work", "board", "--json"])["tickets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // The ledger says the action is tracked, and the link survives a restart.
+    let listed = fixture.cli_ok(&["meeting", "actions", "list", "--json"]);
+    assert_eq!(listed["commitments"][0]["ticketKey"], ticket_key.as_str());
+
+    // A column the board does not have is refused, not silently ignored.
+    let second = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "add",
+        "--meeting-id",
+        &design_id,
+        "--text",
+        "Write the migration notes",
+        "--quote",
+        "I will write the migration notes by Wednesday",
+        "--source",
+        "owner",
+        "--json",
+    ]);
+    let second_id = second["id"].as_str().unwrap().to_string();
+    let bad_column = fixture
+        .cli(&[
+            "meeting",
+            "actions",
+            "track",
+            "--id",
+            &second_id,
+            "--column",
+            "not-a-column",
+            "--json",
+        ])
+        .expect_err("an unknown column must fail");
+    assert_eq!(bad_column.0, 1);
+    assert!(
+        bad_column.1.contains("work column") || bad_column.1.contains("not found"),
+        "the refusal must name the problem: {}",
+        bad_column.1
+    );
+    assert_eq!(
+        fixture.cli_ok(&["work", "board", "--json"])["tickets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "a refused placement must not create a ticket anywhere"
+    );
+
+    // The transcript is the evidence, so it is re-read: once the note no
+    // longer holds the quote, no work is created and the refusal says why.
+    let design_file = fixture.notes.join("2026-09-09").join("09-00_12min.md");
+    std::fs::write(
+        &design_file,
+        "# Design review\n**Date:** 2026-09-09 09:00\n**Duration:** 12 min\n\n## Transcript\n\n[00:05] the importer stays\n",
+    )
+    .expect("rewrite the design note");
+    let missing = fixture
+        .cli(&["meeting", "actions", "track", "--id", &second_id, "--json"])
+        .expect_err("a quote the note no longer holds must be refused");
+    assert_eq!(missing.0, 1);
+    assert!(
+        missing.1.contains("commitment_quote_missing"),
+        "the refusal must carry its own code: {}",
+        missing.1
+    );
+    assert_eq!(
+        fixture.cli_ok(&["work", "board", "--json"])["tickets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let untracked = fixture.cli_ok(&["meeting", "actions", "list", "--json"]);
+    let second_row = untracked["commitments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == second_id.as_str())
+        .expect("the untracked action is still in the ledger");
+    assert_eq!(second_row["ticketKey"], Value::Null);
+
+    // Placement is explicit when asked for: the same commitment can be
+    // tracked into another column of the same board.
+    let review = fixture.cli_ok(&["work", "board", "--json"])["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|column| column["name"] == "Review")
+        .expect("the default board has a Review column")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Restore the note so the quote is findable again. This is the last write
+    // this test makes to the notes; everything after it must leave them
+    // byte-identical.
+    fixture.write_note(
+        "2026-09-09",
+        "09-00",
+        "12 min",
+        "Design review",
+        "[00:05] I will write the migration notes by Wednesday",
+    );
+    let before = tree_snapshot(&fixture.notes);
+    let placed = fixture.cli_ok(&[
+        "meeting", "actions", "track", "--id", &second_id, "--column", &review, "--json",
+    ]);
+    assert_eq!(placed["created"], true);
+    assert_eq!(placed["ticket"]["columnId"], review.as_str());
+
+    // Nothing in this leg wrote to the notes: acceptance and tracking are
+    // Drogon state plus Work tickets, never an edit of the owner's files.
+    assert_eq!(tree_snapshot(&fixture.notes), before);
+    assert!(fixture.data_dir.join("meeting-commitments.json").is_file());
+}
