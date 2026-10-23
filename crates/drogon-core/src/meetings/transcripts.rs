@@ -22,7 +22,10 @@ use super::filesystem::{DirectoryState, EntryKind, MeetingFileSystem, inspect_di
 /// Write That Down caps a single transcript at 5 MiB; anything larger is
 /// reported as a named failure instead of being read.
 pub const MAX_TRANSCRIPT_BYTES: u64 = 5 * 1024 * 1024;
-/// Newest-first walk budget: enough for ~10 years of daily meetings.
+/// Newest-first walk budget, in date folders. It bounds one walk, not the
+/// corpus: a date window is applied before this budget (see
+/// [`walk_in_range`]), so an old range is still reachable. 1024 distinct days
+/// is under three years of daily use, which is why the window matters.
 pub const MAX_DATE_FOLDERS_SCANNED: usize = 1024;
 /// Hard cap on transcript files examined per list call.
 pub const MAX_TRANSCRIPTS_SCANNED: usize = 5_000;

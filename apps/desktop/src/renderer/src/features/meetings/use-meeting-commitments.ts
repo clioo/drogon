@@ -5,16 +5,20 @@
 // quote before storing anything — so a refused acceptance shows up here as an
 // error and the ledger is reloaded rather than optimistically updated.
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  MeetingCommitment,
+import {
+  MAX_COMMITMENT_PAGE,
+  type MeetingCommitment,
   MeetingCommitmentPage,
   MeetingCommitmentStatus,
   MeetingsBridge,
 } from "../../../../shared/meetings-contract";
 
 export const MEETINGS_ACTIONS_DEBOUNCE_MS = 250;
-/** The daemon's ledger page cap (`MAX_COMMITMENT_PAGE`). */
-export const COMMITMENTS_PAGE_SIZE = 200;
+/**
+ * The daemon's ledger page cap, taken from the shared contract so a page size
+ * here can never drift out of the range the daemon accepts.
+ */
+export const COMMITMENTS_PAGE_SIZE = MAX_COMMITMENT_PAGE;
 
 export type MeetingCommitmentsController = {
   page: MeetingCommitmentPage | null;
