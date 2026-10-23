@@ -739,6 +739,7 @@ try {
   await planeDialog.getByRole("region", { name: "Current cycle · Active" }).waitFor();
   await planeDialog.getByRole("button", { name: /^Import \d+ issues?$/ }).click();
   await planeDialog.waitFor({ state: "detached" });
+  await page.getByRole("tab", { name: "board", exact: true }).click();
   await page.getByRole("button", { name: "Cycle", exact: true }).getByText("Current cycle · Active").waitFor();
   await page.getByRole("article", { name: /APP-129/ }).waitFor();
   const planeBoard = (await cli(["work", "boards"])).boards.find((b) => b.provider === "plane");
