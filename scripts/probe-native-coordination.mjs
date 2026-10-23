@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 
 // Real typed CLI and daemon; this probe never launches an agent or model.
 export async function probeNativeCoordination({ cli }) {
-  const invoke = async (args, requestId = randomUUID(), pending = false) => {
+  const invoke = async (args, requestId = randomUUID()) => {
     let response;
     try {
       response = await cli([
@@ -13,13 +13,6 @@ export async function probeNativeCoordination({ cli }) {
         ...args,
       ]);
     } catch (error) {
-      if (pending && error.code === 1) {
-        response = JSON.parse(error.stdout);
-        assert.equal(response.ok, true);
-        assert.equal(response.result.wait.outcome, "pending");
-        assert.equal(response.requestId, requestId);
-        return response.result;
-      }
       let code = "no_valid_envelope";
       try {
         code = JSON.parse(error.stdout).error.code;
@@ -31,6 +24,29 @@ export async function probeNativeCoordination({ cli }) {
     assert.equal(response.ok, true);
     assert.equal(response.requestId, requestId);
     return response.result;
+  };
+  // `orchestration ask --json` is deliberately NOT an envelope: it prints the
+  // source's bare object (`.answer`, `.timedOut`, `.messageId`, `.threadId`,
+  // `.cancelled`, `.connectionLost` — see skill-guides/orchestration.md) and
+  // exits 1 while the question is still pending. Reading it as an envelope is
+  // what left this lane red and unrun; this helper owns the shipped shape.
+  const ask = async (args, requestId = randomUUID()) => {
+    try {
+      const bare = await cli([
+        "--request-id",
+        requestId,
+        "orchestration",
+        "ask",
+        ...args,
+      ]);
+      return { bare, exitCode: 0 };
+    } catch (error) {
+      if (error.code !== 1)
+        throw new Error(`Native CLI ask failed unexpectedly`, {
+          cause: error,
+        });
+      return { bare: JSON.parse(error.stdout), exitCode: 1 };
+    }
   };
   const coordinator = `accept-${randomUUID()}`;
   const createId = randomUUID();
@@ -125,38 +141,50 @@ export async function probeNativeCoordination({ cli }) {
   assert.equal(acked.acknowledged.deliveryId, batch.delivery.deliveryId);
   assert.equal(acked.messages.length, 0);
   const askId = randomUUID();
-  const ask = [
-    "ask",
+  const askArgs = [
     ...scope,
     "--question",
     "Proceed literally?",
     "--timeout-ms",
     "1",
   ];
-  const question = await invoke(ask, askId, true);
+  const pendingAsk = await ask(askArgs, askId);
+  // Still open: the bare object says so, and the process says so with exit 1.
+  assert.equal(pendingAsk.exitCode, 1);
+  assert.equal(pendingAsk.bare.timedOut, true);
+  assert.equal(pendingAsk.bare.cancelled, false);
+  assert.equal(pendingAsk.bare.connectionLost, false);
+  assert.equal(pendingAsk.bare.answer, null);
+  assert.equal(typeof pendingAsk.bare.messageId, "string");
+  assert.equal(typeof pendingAsk.bare.threadId, "string");
+  const questionMessageId = pendingAsk.bare.messageId;
+  const replayedAsk = await ask(askArgs, askId);
+  assert.equal(replayedAsk.exitCode, 1);
   assert.equal(
-    (await invoke(ask, askId, true)).questionMessageId,
-    question.questionMessageId,
+    replayedAsk.bare.messageId,
+    questionMessageId,
+    "a replayed ask returns the same question",
   );
   const answer = await invoke([
     "reply",
     ...scope,
     "--question",
-    question.questionMessageId,
+    questionMessageId,
     "--body",
     "Yes — $PATH stays literal",
   ]);
-  assert.equal(answer.questionMessageId, question.questionMessageId);
-  const resumed = await invoke([
-    "ask",
+  assert.equal(answer.questionMessageId, questionMessageId);
+  const resumed = await ask([
     ...scope,
     "--resume",
-    question.questionMessageId,
+    questionMessageId,
     "--timeout-ms",
     "1",
   ]);
-  assert.equal(resumed.wait.outcome, "answered");
-  assert.equal(resumed.answer.body, "Yes — $PATH stays literal");
+  assert.equal(resumed.exitCode, 0, "an answered question exits 0");
+  assert.equal(resumed.bare.timedOut, false);
+  assert.equal(resumed.bare.answer, "Yes — $PATH stays literal");
+  assert.equal(resumed.bare.messageId, questionMessageId);
   const mail = await invoke(["check", ...scope, "--all"]);
   assert.equal(mail.messages.length, 3);
   return [
@@ -164,6 +192,6 @@ export async function probeNativeCoordination({ cli }) {
     "native-typed-cli-task-replay-literal-text-and-actor-receipt",
     "native-typed-cli-empty-inspection-and-absent-receipt",
     "native-typed-cli-send-replay-fifo-and-whole-batch-ack",
-    "native-typed-cli-question-timeout-replay-reply-and-resume",
+    "native-typed-cli-question-bare-contract-timeout-replay-reply-and-resume",
   ];
 }

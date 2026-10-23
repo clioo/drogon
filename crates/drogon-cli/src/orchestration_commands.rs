@@ -61,6 +61,20 @@ pub const MAX_WAIT_BUDGET_MS: u32 = drogon_protocol::orchestration_common::MAX_W
 /// is still a hard timeout.
 const WAIT_TRANSPORT_MARGIN_MS: u64 = 5_000;
 
+/// `send`'s own structured flags. `--body` is a greedy tail (`num_args = 1..`
+/// with hyphen values), so one of these written after it lands in the message
+/// text instead of being applied; see the `Send` validation in
+/// [`validate_actor_flags`].
+const SEND_STRUCTURED_FLAGS: &[&str] = &[
+    "--kind",
+    "--subject",
+    "--to",
+    "--payload",
+    "--thread-id",
+    "--outcome",
+    "--result",
+];
+
 fn usage(message: impl Into<String>) -> CliError {
     CliError::Usage(message.into())
 }
@@ -181,6 +195,25 @@ pub fn validate_actor_flags(command: &OrchestrationCommand) -> Result<(), CliErr
             ));
         }
         return Ok(());
+    }
+    // `--body` is a greedy multi-value flag (the guide's "keep --body last":
+    // it takes every remaining shell word, bullets and flag-like text
+    // included). A structured flag written after it is therefore swallowed
+    // into the message text — a `worker_done` written as
+    // `--body <REPORT> --result '{"testsPassed":7}'` sent NO report metadata
+    // and appended `--result {...}` to the body, and the RPC still answered
+    // ok. Refuse that shape by name instead: the caller must put the
+    // structured flags before `--body`.
+    if let OrchestrationCommand::Send { body, .. } = command
+        && let Some(body) = body
+        && let Some(flag) = body
+            .iter()
+            .find(|token| SEND_STRUCTURED_FLAGS.contains(&token.as_str()))
+    {
+        return Err(usage(format!(
+            "{flag} must precede --body: --body takes the remaining shell words, \
+             so a flag after it becomes message text instead of being applied"
+        )));
     }
     // Dual-actor mail verbs.
     if let OrchestrationCommand::Send { actor, .. }

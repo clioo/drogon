@@ -121,6 +121,13 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=6144
       - run: pnpm accept:core-cli
+      # The coordination lane is a second, independent world: it drives the
+      # typed CLI's run/task/gate/mail/worker verbs plus a shell-fixture
+      # worker (no model, no credentials) and proves the shipped `ask`
+      # contract. It was unrun for long enough that its probe drifted from
+      # that contract and stayed red; wiring it here keeps it honest.
+      - name: Verify native coordination over the typed CLI
+        run: node scripts/accept-core-cli.mjs --coordination
       - name: Verify real live-child service-crash recovery
         run: |
           node --test scripts/live-child-crash-fixture.test.mjs

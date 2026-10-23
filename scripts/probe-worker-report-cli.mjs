@@ -21,8 +21,11 @@ set -eu
 out="$NATIVE_REPORT_FIXTURE"
 cli="$DROGON_CLI_COMMAND"
 if "$cli" --json --request-id fixture-answer orchestration send --kind answer --subject forged --body 'Must use correlated reply' > "$out/answer.stdout" 2> "$out/answer.stderr"; then exit 83; else printf '%s\\n' "$?" > "$out/answer.exit"; fi
-"$cli" --json --request-id fixture-final orchestration send --kind final-report --outcome succeeded --subject completed --body 'Synthetic worker, no model inference' --result '{"testsPassed":7}' > "$out/first.json"
-"$cli" --json --request-id fixture-final orchestration send --kind final-report --outcome succeeded --subject completed --body 'Synthetic worker, no model inference' --result '{"testsPassed":7}' > "$out/replay.json"
+# --body is the greedy tail: the structured flags (--outcome/--result) must
+# precede it, or the CLI refuses the invocation instead of folding them into
+# the report text.
+"$cli" --json --request-id fixture-final orchestration send --kind final-report --outcome succeeded --subject completed --result '{"testsPassed":7}' --body 'Synthetic worker, no model inference' > "$out/first.json"
+"$cli" --json --request-id fixture-final orchestration send --kind final-report --outcome succeeded --subject completed --result '{"testsPassed":7}' --body 'Synthetic worker, no model inference' > "$out/replay.json"
 "$cli" --json --request-id fixture-status status > "$out/status.json"
 "$cli" --json --request-id fixture-recover orchestration request-show --scope dispatch --request fixture-final > "$out/receipt.json"
 "$cli" --json --request-id fixture-duplicate orchestration send --kind final-report --outcome succeeded --subject completed > "$out/duplicate.json"
