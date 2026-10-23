@@ -9,7 +9,7 @@
 //! module deliberately does not reuse.
 
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -160,6 +160,20 @@ pub(crate) struct SessionHandle {
     /// Set by the reader thread when the PTY read side reached EOF or an
     /// unrecoverable read error — i.e. the drain phase is over.
     reader_done: AtomicBool,
+    /// Whether this session's exit poller thread is still running (issue
+    /// #694). Set before the thread is spawned and cleared however
+    /// `poll_until_exit` returns, so a teardown path can be held to the
+    /// contract that it leaves no thread behind.
+    poller_live: AtomicBool,
+    /// How long this session's exit poller waits between looks at a child
+    /// that has not exited yet, in milliseconds. Per session rather than
+    /// the bare [`CHILD_POLL_INTERVAL`] constant so a teardown test can
+    /// park the observer on a longer cycle and decide which thread reaps
+    /// the exit; the race it settles that way happens by chance only a few
+    /// times in a hundred closes, which is no basis for a regression test.
+    /// Every session starts at the constant and nothing in the product
+    /// moves it.
+    child_poll_interval_ms: AtomicU64,
     /// Monotonic instant of the most recent PTY output chunk, paired with the
     /// wall-clock stamp captured at the same moment (an `Instant` cannot be
     /// rendered as `agentStateAt`). `None` until the first chunk arrives.
@@ -340,6 +354,8 @@ impl SessionHandle {
             exit_code: Mutex::new(None),
             handoff: crate::session_handoff::ReaderGate::default(),
             reader_done: AtomicBool::new(false),
+            poller_live: AtomicBool::new(false),
+            child_poll_interval_ms: AtomicU64::new(CHILD_POLL_INTERVAL.as_millis() as u64),
             last_activity: Mutex::new(None),
             needs_input_at: Mutex::new(None),
             hook_transition_at: Mutex::new(None),
@@ -956,6 +972,7 @@ const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(30);
 
 pub(crate) fn spawn_reader_thread(handle: Arc<SessionHandle>, mut reader: Box<dyn Read + Send>) {
     let observed_child = handle.clone();
+    observed_child.poller_live.store(true, Ordering::Release);
     std::thread::spawn(move || poll_until_exit(&observed_child));
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
@@ -1094,42 +1111,128 @@ fn try_reap(handle: &SessionHandle) -> Option<Option<i64>> {
     Some(code)
 }
 
+/// How long the exit poller keeps retrying a failed exit write before it
+/// gives up, and how long it waits between attempts. The connection already
+/// waits out a contended write for five seconds (`db.rs`'s `busy_timeout`),
+/// so reaching this means five minutes of storage that is not coming back —
+/// and a thread
+/// retrying it forever pins the session handle and the database `Arc`
+/// behind it (issue #694). Giving up costs the durable `exited` verdict,
+/// which the next startup reconciles from the missing process anyway; the
+/// run rows this exit completes are still advanced below.
+const EXIT_PERSIST_RETRY_WINDOW: Duration = Duration::from_secs(300);
+const EXIT_PERSIST_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Clears [`SessionHandle::poller_live`] however [`poll_until_exit`] ends,
+/// including an unwind, so "the exit poller is still running" is a fact
+/// about the thread rather than about the path it took out.
+struct ExitPollerLive<'a>(&'a SessionHandle);
+
+impl Drop for ExitPollerLive<'_> {
+    fn drop(&mut self) {
+        self.0.poller_live.store(false, Ordering::Release);
+    }
+}
+
 /// Polls (never blocks, never holds a lock across the sleep) until the
 /// child's real exit is observed, then persists it and releases the native
-/// PTY halves. Runs for as long as it takes — a background thread waiting on
-/// its own session's eventual exit costs nothing else while it waits.
+/// PTY halves. Runs for as long as the child does — a background thread
+/// waiting on its own session's eventual exit costs nothing else while it
+/// waits — but never longer: every way out of the observation below
+/// returns, so a closed session can never strand this thread (issue #694).
 fn poll_until_exit(handle: &SessionHandle) {
+    let _live = ExitPollerLive(handle);
+    let mut persist_failing_since: Option<Instant> = None;
     loop {
-        if let Some(code) = try_reap(handle) {
-            if persist_exit(handle, code).is_ok() {
-                // A headless daemon run's exit IS its completion signal:
-                // advance the linked run rows to their terminal state now,
-                // while the linkage is still provable in this process.
-                // Interactive sessions never carry run linkage (runs always
-                // launch headless), so they skip this. A failure here must
-                // never disturb the already-persisted exit.
-                if handle.is_headless() {
-                    let observed_at = crate::now_unix_ms() as f64;
-                    if let Err(e) = advance_headless_run_records(
-                        &handle.db,
-                        &handle.session_id,
-                        &handle.incarnation,
-                        code,
-                        observed_at,
-                    ) {
-                        eprintln!(
-                            "[session] failed to advance headless run records for {}: {e}",
-                            handle.session_id
-                        );
-                    }
-                }
-                try_release_native(handle);
-                return;
+        let Some(code) = try_reap(handle) else {
+            std::thread::sleep(handle.child_poll_interval());
+            continue;
+        };
+        match persist_exit_record(handle, code) {
+            Ok(ExitRecord::Written) => {}
+            Ok(ExitRecord::Forgotten) => {
+                // `session.close`/`session.forget` deleted the row on
+                // purpose, so no later attempt can ever match it: retrying
+                // is an immortal thread, not a recovery (issue #694). The
+                // reaped code is still owed to the linked run rows below —
+                // those are their own durable records, and a forgotten
+                // terminal never made this exit unknown.
+                eprintln!(
+                    "[session] exit record for {} is gone (the session was forgotten); \
+                     recording the reaped exit on its run rows only",
+                    handle.session_id
+                );
             }
-            std::thread::sleep(Duration::from_secs(1));
-        } else {
-            std::thread::sleep(CHILD_POLL_INTERVAL);
+            Err(e) => {
+                let failing_since = *persist_failing_since.get_or_insert_with(Instant::now);
+                if failing_since.elapsed() < EXIT_PERSIST_RETRY_WINDOW {
+                    std::thread::sleep(EXIT_PERSIST_RETRY_INTERVAL);
+                    continue;
+                }
+                eprintln!(
+                    "[session] gave up persisting the exit of {} after {}s: {e:?}",
+                    handle.session_id,
+                    EXIT_PERSIST_RETRY_WINDOW.as_secs()
+                );
+            }
         }
+        // A headless daemon run's exit IS its completion signal: advance
+        // the linked run rows to their terminal state now, while the
+        // linkage is still provable in this process. Interactive sessions
+        // never carry run linkage (runs always launch headless), so they
+        // skip this. A failure here must never disturb the persisted exit.
+        if handle.is_headless() {
+            let observed_at = crate::now_unix_ms() as f64;
+            if let Err(e) = advance_headless_run_records(
+                &handle.db,
+                &handle.session_id,
+                &handle.incarnation,
+                code,
+                observed_at,
+            ) {
+                eprintln!(
+                    "[session] failed to advance headless run records for {}: {e}",
+                    handle.session_id
+                );
+            }
+        }
+        try_release_native(handle);
+        return;
+    }
+}
+
+/// Writes the reaped exit of a session whose durable row the caller is
+/// about to delete, and completes the headless run rows that exit settles,
+/// before it is deleted. `session.close` and `session.forget` are the only
+/// paths that remove a row the exit poller may still be racing; once the
+/// row is gone the poller's own write can never land, so the completion a
+/// headless run owes its automation/bot records has to be written here,
+/// from the code this process already reaped. A session whose exit was
+/// never observed claims nothing: an `unverifiable` close leaves the run
+/// for startup reconciliation to label, exactly as it does today.
+pub(crate) fn settle_exit_before_forget(handle: &SessionHandle) {
+    let Some(code) = try_reap(handle) else {
+        return;
+    };
+    // `stop` already wrote this for the close path; a `forget` of a row
+    // some other path reaped may not have. Either way the row is about to
+    // go, so a failure here is not worth reporting over the forget itself.
+    let _ = persist_exit_record(handle, code);
+    if !handle.is_headless() {
+        return;
+    }
+    let observed_at = crate::now_unix_ms() as f64;
+    if let Err(e) = advance_headless_run_records(
+        &handle.db,
+        &handle.session_id,
+        &handle.incarnation,
+        code,
+        observed_at,
+    ) {
+        eprintln!(
+            "[session] failed to advance headless run records for {} before forgetting it: {e}",
+            handle.session_id
+        );
     }
 }
 
@@ -1278,7 +1381,29 @@ fn try_release_native(handle: &SessionHandle) {
     drop(handle.writer.lock().unwrap().take());
 }
 
+/// Whether a session's durable row was still there to take its exit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExitRecord {
+    /// The row took the write.
+    Written,
+    /// No row matched: `session.close`/`session.forget` deleted it. Not a
+    /// failure and never retryable — a deleted row cannot reappear.
+    Forgotten,
+}
+
 fn persist_exit(handle: &SessionHandle, exit_code: Option<i64>) -> Result<(), RpcError> {
+    match persist_exit_record(handle, exit_code)? {
+        ExitRecord::Written => Ok(()),
+        ExitRecord::Forgotten => Err(error::io_error("Session exit record is missing")),
+    }
+}
+
+/// [`persist_exit`] with the two outcomes kept apart, for the callers that
+/// must not treat a deliberately forgotten row as a failure to retry.
+fn persist_exit_record(
+    handle: &SessionHandle,
+    exit_code: Option<i64>,
+) -> Result<ExitRecord, RpcError> {
     // An exit resolves any pending wait: the agent will never be answered,
     // so its stamp must not outlive the session in the durable row. A
     // restored `exited` row carrying a stale `needs_input_at` reports
@@ -1300,14 +1425,14 @@ fn persist_exit(handle: &SessionHandle, exit_code: Option<i64>) -> Result<(), Rp
         )
         .map_err(error::from_sqlite)?;
     if changed != 1 {
-        return Err(error::io_error("Session exit record is missing"));
+        return Ok(ExitRecord::Forgotten);
     }
     // R16-BF2 push: the exit moves the agent state to `exited` now. The
     // snapshot derives `exited` from the reaped code (never a stamp), so a
     // racing late activity mark can never resurrect `working` through the
     // transition guard.
     crate::session_events::record_snapshot(&snapshot(handle));
-    Ok(())
+    Ok(ExitRecord::Written)
 }
 
 /// Activity-based wait-signal clear. Idempotent: a noisy session can push
@@ -1402,6 +1527,28 @@ impl SessionHandle {
     /// Whether the reader drained the PTY to EOF (or failed for good).
     pub(crate) fn reader_finished(&self) -> bool {
         self.reader_done.load(Ordering::Acquire)
+    }
+
+    /// Whether this session's exit poller thread is still running. Only
+    /// teardown tests ask: the leak this proves absent (issue #694) is
+    /// invisible to every product surface, which is why it survived.
+    #[cfg(test)]
+    pub(crate) fn exit_poller_is_live(&self) -> bool {
+        self.poller_live.load(Ordering::Acquire)
+    }
+
+    fn child_poll_interval(&self) -> Duration {
+        Duration::from_millis(self.child_poll_interval_ms.load(Ordering::Relaxed))
+    }
+
+    /// Parks this session's exit observer on a longer cycle, so a test can
+    /// be the one that decides whether `session.close` or the poller reaps
+    /// the exit. The poller still runs its own real path; only how long it
+    /// waits between looks changes, and only for the session asked.
+    #[cfg(test)]
+    pub(crate) fn park_exit_poller(&self, interval: Duration) {
+        self.child_poll_interval_ms
+            .store(interval.as_millis() as u64, Ordering::Relaxed);
     }
 
     /// The PTY master descriptor, while this handle still holds it.
