@@ -1144,6 +1144,15 @@ export async function callNative(
    * other flight's connection stays up.
    */
   signal?: AbortSignal,
+  /**
+   * How long this one flight may take before it is settled as unreachable.
+   * The 15 s default bounds every ordinary request; a method whose daemon-side
+   * work is deliberately longer (`meeting.analyze` runs a model for up to
+   * 240 s) passes its own budget here instead of being cut off by a transport
+   * limit it cannot meet. Absent, behavior is byte-for-byte identical to
+   * before.
+   */
+  deadlineMs: number = REQUEST_DEADLINE_MS,
 ): Promise<Result<unknown>> {
   if (signal?.aborted) throw new Error("Request aborted");
   let creds: CachedCredentials;
@@ -1195,7 +1204,7 @@ export async function callNative(
       resolve,
       reject,
       deadline: undefined as unknown as ReturnType<typeof setTimeout>,
-      deadlineAt: Date.now() + REQUEST_DEADLINE_MS,
+      deadlineAt: Date.now() + deadlineMs,
       signal,
       replayed: false,
       authRetried: false,
@@ -1204,7 +1213,7 @@ export async function callNative(
     const onDeadline = () => {
       settle(call, unreachable("Service request timed out"));
     };
-    call.deadline = setTimeout(onDeadline, REQUEST_DEADLINE_MS);
+    call.deadline = setTimeout(onDeadline, deadlineMs);
     const onAbort = () => {
       cancel(call, new Error("Request aborted"));
     };

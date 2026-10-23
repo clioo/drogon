@@ -427,6 +427,29 @@ describe("callNative multiplexed transport (PERF-02)", () => {
     expect(getNativeConnectionStats().connections).toBe(1);
   });
 
+  test("a per-call deadline bounds that flight instead of the shared 15 s default", async () => {
+    // The daemon-side work behind `meeting.analyze` is allowed 240 s, so the
+    // transport must be able to carry a budget of its own. Answering after
+    // 120 ms is instant by default and times out under a 40 ms budget.
+    fakeDaemon.onWrite = (socket) => {
+      const line = socket.written.splice(0)[0];
+      if (line === undefined) return;
+      const requestId = requestIdOf(line);
+      setTimeout(() => {
+        if (!socket.destroyed) answer(socket, requestId);
+      }, 120);
+    };
+    const started = Date.now();
+    const short = await callNative("status", {}, "req-deadline-short", undefined, 40);
+    expect(short.ok).toBe(false);
+    if (!short.ok) expect(short.error.code).toBe("unverifiable");
+    expect(Date.now() - started).toBeLessThan(5_000);
+    // The same delay is comfortably inside a longer per-call budget, so the
+    // parameter raises the bound as well as lowering it.
+    const long = await callNative("status", {}, "req-deadline-long", undefined, 5_000);
+    expect(long.ok).toBe(true);
+  });
+
   test("a burst grows the pool lazily to the cap, never one-per-request", async () => {
     const arrived: { socket: FakeSocket; requestId: string }[] = [];
     const total = NATIVE_POOL_MAX_CONNECTIONS + 4;

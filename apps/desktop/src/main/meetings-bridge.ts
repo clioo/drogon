@@ -24,11 +24,30 @@ import { callNative } from "./native-client";
 
 export const MEETINGS_IPC_CHANNEL = "drogon:meetings";
 
+/** The one knob the meetings surface needs from the shared native client. */
+type NativeCallOptions = { deadlineMs?: number };
+
 type NativeCall = (
   method: string,
   params: object,
-  requestId?: string,
+  options?: NativeCallOptions,
 ) => Promise<Result<unknown>>;
+
+/**
+ * How long the page waits for one analysis. `meeting.analyze` runs the user's
+ * configured Pi model to completion inside the daemon, whose own ceiling is
+ * `ANALYSIS_TIMEOUT` (240 s); the shared 15 s transport deadline would abort
+ * the page long before that, so this budget is that ceiling plus slack. The
+ * CLI already allows 300 s for the same call.
+ */
+export const MEETINGS_ANALYSIS_DEADLINE_MS = 250_000;
+
+/**
+ * Production seam: the shared client, with the per-call deadline the meetings
+ * surface asks for. Every other call keeps the client's 15 s default.
+ */
+const defaultCall: NativeCall = (method, params, options) =>
+  callNative(method, params, undefined, undefined, options?.deadlineMs);
 
 const invalid = (): Result<never> => ({
   ok: false,
@@ -53,7 +72,7 @@ const invalid = (): Result<never> => ({
  */
 export async function dispatchMeetingsRequest(
   input: unknown,
-  call: NativeCall = callNative,
+  call: NativeCall = defaultCall,
 ): Promise<Result<unknown>> {
   const envelope = meetingsRequestSchema.safeParse(input);
   if (!envelope.success) return invalid();
@@ -70,7 +89,9 @@ export async function dispatchMeetingsRequest(
       return revalidate(result.result, meetingReadSchema);
     }
     case "analyze": {
-      const result = await call("meeting.analyze", params);
+      const result = await call("meeting.analyze", params, {
+        deadlineMs: MEETINGS_ANALYSIS_DEADLINE_MS,
+      });
       if (!result.ok) return result;
       return revalidate(result.result, meetingAnalysisSchema);
     }
