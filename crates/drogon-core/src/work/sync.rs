@@ -2218,7 +2218,7 @@ impl Engine {
             let board = get_board(&conn, ticket.ext.board_id.as_deref().unwrap())?;
             let label = provider_label(&board.provider);
             match keep.as_str() {
-                "provider" | "theirs" | "remote" | "jira" | "linear" | "github" => {
+                "provider" | "theirs" | "remote" | "jira" | "linear" | "github" | "plane" => {
                     conn.execute(
                         "UPDATE work_tickets SET pending_status_id = NULL, status_conflict = 0, push_error = NULL WHERE id = ?1",
                         params![ticket.id],
@@ -2276,7 +2276,7 @@ impl Engine {
                 }
                 other => {
                     return Err(error::invalid_argument(format!(
-                        "keep must be theirs (the source's status; also jira, linear, github) or ours, not {other}"
+                        "keep must be theirs (the source's status; also jira, linear, github, plane) or ours, not {other}"
                     )));
                 }
             }

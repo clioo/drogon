@@ -24,6 +24,7 @@ import { createServer } from 'node:http'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { planeFixture } from './plane.mjs'
 
 const { values } = parseArgs({
   options: {
@@ -498,10 +499,12 @@ async function control(req, res, path) {
   return send(res, 404, { error: 'no such control' })
 }
 
+const plane = planeFixture({ send, readBody, log })
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://fixture.local')
   const path = url.pathname
   try {
+    if (await plane(req, res, url)) return
     if (path.startsWith('/__fixture/') && req.method === 'POST') return await control(req, res, path)
     const auth = req.headers.authorization ?? ''
     if (path.startsWith('/linear/')) {
