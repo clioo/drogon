@@ -7,7 +7,7 @@
    radix-jsdom-stubs pattern) instead of SSR: SSR never includes portal
    content. */
 import { afterEach, describe, expect, test } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Project } from "../../../../shared/session-contract";
 import { getRemoveProjectDialogCopy } from "./remove-project-dialog-copy";
 import { RemoveProjectDialog } from "./RemoveProjectDialog";
@@ -100,5 +100,82 @@ describe("RemoveProjectDialog", () => {
     expect(
       document.querySelector('[data-slot="dialog-content"]'),
     ).toBeTruthy();
+  });
+});
+
+describe("RemoveProjectDialog terminal evidence (issue #621 shape)", () => {
+  const provenLive =
+    "This project still has running terminals, so nothing was removed — still live: s-1. Delete with force to stop them first.";
+
+  test("the force checkbox is sent with the removal", async () => {
+    const calls: Array<{ id: string; force: boolean }> = [];
+    mount({
+      onSubmit: async (project, force) => {
+        calls.push({ id: project.id, force });
+        return null;
+      },
+    });
+    fireEvent.click(
+      screen.getByLabelText(/Also stop terminals running in this project/),
+    );
+    fireEvent.click(screen.getByText("Remove"));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls).toEqual([{ id: "p1", force: true }]);
+  });
+
+  test("an unforced removal sends force=false", async () => {
+    const calls: Array<{ id: string; force: boolean }> = [];
+    mount({
+      onSubmit: async (project, force) => {
+        calls.push({ id: project.id, force });
+        return null;
+      },
+    });
+    fireEvent.click(screen.getByText("Remove"));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls).toEqual([{ id: "p1", force: false }]);
+  });
+
+  test("a proven-live refusal offers the force retry and re-submits with force", async () => {
+    const calls: Array<{ id: string; force: boolean }> = [];
+    mount({
+      onSubmit: async (project, force) => {
+        calls.push({ id: project.id, force });
+        return force ? null : provenLive;
+      },
+    });
+    fireEvent.click(screen.getByText("Remove"));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(provenLive);
+    const retry = await screen.findByText("Stop terminals and remove");
+    fireEvent.click(retry);
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls).toEqual([
+      { id: "p1", force: false },
+      { id: "p1", force: true },
+    ]);
+  });
+
+  test("a failure that force cannot clear offers no retry", async () => {
+    mount({
+      onSubmit: async () => "Drogon could not confirm every terminal has exited",
+    });
+    fireEvent.click(screen.getByText("Remove"));
+    await screen.findByRole("alert");
+    expect(screen.queryByText("Stop terminals and remove")).toBeNull();
+  });
+
+  test("a Chat has no force checkbox: its copy already promises stopping", () => {
+    const chat: Project = {
+      ...project(),
+      id: "p2",
+      name: "Quick Session",
+      kind: "folder",
+      quickSession: true,
+    };
+    mount({ project: chat });
+    expect(
+      screen.queryByLabelText(/Also stop terminals running in this project/),
+    ).toBeNull();
   });
 });

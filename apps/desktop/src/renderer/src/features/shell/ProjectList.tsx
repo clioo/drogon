@@ -491,7 +491,10 @@ export function ProjectList({
     force: boolean,
   ) => Promise<string | null>;
   /** Removes the project registration (never files); resolves an error verbatim, or null. */
-  onSubmitRemoveProject: (project: Project) => Promise<string | null>;
+  onSubmitRemoveProject: (
+    project: Project,
+    force: boolean,
+  ) => Promise<string | null>;
   onSubmitRename: (worktree: Worktree, name: string) => Promise<string | null>;
   graphBridge?: GraphBridge | null;
 }) {
@@ -1522,7 +1525,7 @@ export function ProjectList({
         <RemoveProjectDialog
           project={removeProjectTarget}
           disabled={disabled}
-          onSubmit={onSubmitRemoveProject}
+          onSubmit={(force) => onSubmitRemoveProject(removeProjectTarget, force)}
           onClose={onCloseAction}
         />
       )}

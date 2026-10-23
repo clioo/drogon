@@ -24,6 +24,10 @@ export type ProjectBridge = {
     /** Also delete the folder — honoured only for folders the daemon created
      *  under its own projects home (`projectCreate`); refused elsewhere. */
     deleteFiles?: boolean;
+    /** Stop the project's running terminals first. Unforced, a removal whose
+     *  terminals are still live is refused with `session_live`; forcing is
+     *  the same acknowledgement `worktree.remove --force` takes. */
+    force?: boolean;
   }): Promise<Result<{ id: string; removed: boolean }>>;
   projectUpdate(input: {
     id: string;
@@ -201,7 +205,11 @@ const branchName = z
 export const projectBridgeSchemas = {
   projectAdd: z.object({ path: fsPath, name: displayName.optional() }),
   projectList: z.undefined(),
-  projectRemove: z.object({ id, deleteFiles: z.boolean().optional() }),
+  projectRemove: z.object({
+    id,
+    deleteFiles: z.boolean().optional(),
+    force: z.boolean().optional(),
+  }),
   projectUpdate: z.object({
     id,
     setupScript: z
