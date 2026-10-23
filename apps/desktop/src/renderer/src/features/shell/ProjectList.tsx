@@ -1525,7 +1525,9 @@ export function ProjectList({
         <RemoveProjectDialog
           project={removeProjectTarget}
           disabled={disabled}
-          onSubmit={(force) => onSubmitRemoveProject(removeProjectTarget, force)}
+          onSubmit={(_project, force) =>
+            onSubmitRemoveProject(removeProjectTarget, force)
+          }
           onClose={onCloseAction}
         />
       )}

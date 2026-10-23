@@ -95,8 +95,13 @@ export type SettingsPageProps = {
   initialSection?: SettingsPageSection;
   /** Per-project section model (R14-A); null hides the project section. */
   project?: Project | null;
-  /** Removes the project registration; the page closes on success. */
-  onRemoveProject?: (projectId: string) => void;
+  /** Removes the project registration; the page closes on success. `force`
+   *  stops the project's running terminals first, and the daemon's refusal
+   *  resolves verbatim so the section can arm that retry. */
+  onRemoveProject?: (
+    projectId: string,
+    force: boolean,
+  ) => Promise<string | null>;
   /** Persists Project Settings → Setup script; returns an error string or null. */
   onUpdateSetupScript?: (
     projectId: string,
@@ -269,8 +274,9 @@ export function SettingsPage(props: SettingsPageProps): React.JSX.Element {
                   <ProjectSettingsSectionChrome project={props.project}>
                     <ProjectSettingsSection
                       project={props.project}
-                      onRemoveProject={(projectId) =>
-                        props.onRemoveProject?.(projectId)
+                      onRemoveProject={(projectId, force) =>
+                        props.onRemoveProject?.(projectId, force) ??
+                        Promise.resolve(null)
                       }
                       onUpdateSetupScript={props.onUpdateSetupScript}
                     />
