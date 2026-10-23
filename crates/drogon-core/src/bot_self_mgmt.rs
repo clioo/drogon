@@ -1500,7 +1500,20 @@ fn tick_github_monitor(
                 return;
             }
         };
-        let seen = crate::bots::monitors::github::seen_for_monitor(&conn, &record.id);
+        // A seen set that could not be READ is not an empty set. Evaluating
+        // against one releases an already-released pull request, and the
+        // commit that follows rewrites the table — deleting the very rows
+        // the read missed, so later ticks replay the rest of the backlog.
+        // Fail the tick instead: cursor and rows untouched.
+        let seen = match crate::bots::monitors::github::seen_for_monitor(&conn, &record.id) {
+            Ok(seen) => seen,
+            Err(error) => {
+                drop(conn);
+                let (kind, message) = (error.error_kind(), error.message().to_string());
+                commit_github_error(engine, record, rev, kind, &message, now_ms, summary);
+                return;
+            }
+        };
         (token, seen)
     };
     let persisted = crate::bots::monitors::github::PersistedWatch {

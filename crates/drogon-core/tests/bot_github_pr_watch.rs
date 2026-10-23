@@ -366,6 +366,24 @@ impl Fixture {
         self.seen_pulls_by_id(&self.monitor_id)
     }
 
+    /// The stored rows exactly as sqlite holds them, so a row this build
+    /// cannot decode as a number is still visible to the test.
+    fn seen_rows_raw(&self) -> Vec<String> {
+        let conn = self.db();
+        let mut stmt = conn
+            .prepare(
+                "SELECT CAST(pull_number AS TEXT) FROM bot_monitor_github_seen
+                 WHERE monitor_id = ?1 ORDER BY pull_number",
+            )
+            .unwrap();
+        let rows: Vec<String> = stmt
+            .query_map([&self.monitor_id], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect();
+        rows
+    }
+
     fn seen_pulls_by_id(&self, monitor_id: &str) -> Vec<u64> {
         let conn = self.db();
         let mut stmt = conn
@@ -1281,4 +1299,108 @@ fn two_repositories_sharing_a_pull_number_never_collapse_into_one_worktree() {
         Vec::<String>::new(),
         "both review sessions are stopped too"
     );
+}
+
+/// A seen set the tick could not READ must fail the tick, never read as an
+/// empty (or short) set. The commit path rewrites the whole table, so one
+/// unreadable read plus one release deletes every row the read missed —
+/// and the ticks after that re-release the pull requests whose rows went
+/// with it, each one able to open another review session.
+///
+/// The injected failure is a stored row this build cannot decode; a locked
+/// or busy database (the reported case) comes back through the same read,
+/// pinned in `bots::monitors::github`'s unit tests.
+#[test]
+fn an_unreadable_seen_set_fails_the_tick_instead_of_replaying_the_backlog() {
+    let fx = Fixture::new(false);
+    let t0 = (Fixture::now_ms() / 60_000.0).floor() * 60_000.0;
+
+    // A healthy watch with a real history: five open PRs already handled.
+    let open = [
+        pull(41, &[LOGIN], &[]),
+        pull(42, &[LOGIN], &[]),
+        pull(43, &[LOGIN], &[]),
+        pull(44, &[LOGIN], &[]),
+        pull(45, &[LOGIN], &[]),
+    ];
+    fx.github.set_pulls(&open);
+    fx.tick(t0);
+    assert!(fx.events().is_empty(), "the first check seeds");
+    assert_eq!(fx.seen_pulls(), vec![41, 42, 43, 44, 45]);
+    let cursor_before = fx.monitor_view()["cursor"].clone();
+    assert!(!cursor_before.is_null(), "the seed stored a cursor");
+
+    // Two stored rows become unreadable: the shape a locked or corrupt
+    // database has from the tick's side — rows that exist and do not read.
+    for number in [42, 43] {
+        fx.db()
+            .execute(
+                "UPDATE bot_monitor_github_seen SET pull_number = ?2
+                 WHERE monitor_id = ?1 AND pull_number = ?3",
+                rusqlite::params![&fx.monitor_id, format!("x{number}"), number],
+            )
+            .unwrap();
+    }
+    let corrupted = vec!["41", "44", "45", "x42", "x43"];
+    assert_eq!(fx.seen_rows_raw(), corrupted);
+
+    // The tick refuses: nothing released, nothing rewritten. (Reading the
+    // short set instead would release 42 again and then DELETE 43's row.)
+    fx.tick(t0 + 61_000.0);
+    assert!(
+        fx.events().is_empty(),
+        "an unreadable seen set never re-releases a handled PR: {:?}",
+        fx.events()
+    );
+    assert_eq!(
+        fx.seen_rows_raw(),
+        corrupted,
+        "the rows the read missed are still there"
+    );
+    let view = fx.monitor_view();
+    assert_eq!(view["cursor"], cursor_before, "the cursor is retained");
+    assert!(
+        view["lastError"]
+            .as_str()
+            .is_some_and(|text| text.contains("IoError") && text.contains("seen set")),
+        "the refusal is an honest io_error: {view:?}"
+    );
+    assert_eq!(view["lastCheckOutcome"], "error", "{view:?}");
+
+    // Two more ticks while it stays unreadable: still no replay, and the
+    // refusal never decays into a seed that swallows the history.
+    fx.tick(t0 + 122_000.0);
+    fx.tick(t0 + 183_000.0);
+    assert!(fx.events().is_empty(), "{:?}", fx.events());
+    assert_eq!(fx.seen_rows_raw(), corrupted);
+
+    // Repaired: the watch picks up exactly where it was. The history it
+    // refused to overwrite is intact, so the old PRs stay quiet...
+    for number in [42, 43] {
+        fx.db()
+            .execute(
+                "UPDATE bot_monitor_github_seen SET pull_number = ?2
+                 WHERE monitor_id = ?1 AND pull_number = ?3",
+                rusqlite::params![&fx.monitor_id, number, format!("x{number}")],
+            )
+            .unwrap();
+    }
+    fx.tick(t0 + 244_000.0);
+    assert!(
+        fx.events().is_empty(),
+        "a repaired read releases nothing it had already released: {:?}",
+        fx.events()
+    );
+    assert_eq!(fx.seen_pulls(), vec![41, 42, 43, 44, 45]);
+    assert_eq!(fx.monitor_view()["lastError"], json!(null));
+
+    // ...and a genuinely new pull request still fires, once.
+    let mut with_new = open.to_vec();
+    with_new.push(pull(46, &[LOGIN], &[]));
+    fx.github.set_pulls(&with_new);
+    fx.tick(t0 + 305_000.0);
+    let events = fx.events();
+    assert_eq!(events.len(), 1, "the watch is alive: {events:?}");
+    assert_eq!(events[0]["resource"], "pull/46");
+    assert_eq!(fx.seen_pulls(), vec![41, 42, 43, 44, 45, 46]);
 }
