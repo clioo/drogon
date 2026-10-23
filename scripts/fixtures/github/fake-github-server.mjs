@@ -3,14 +3,7 @@
 // HARD RULE: this fixture never contacts github.com and never reads a real
 // token. It implements exactly the one endpoint a pull-request watch reads:
 //
-//   GET /repos/:owner/:repo/pulls   (state=open&sort=created&direction=asc&per_page=N&page=P)
-//
-// Paging is real: the server slices by `page`/`per_page` and sends GitHub's
-// `Link: <...>; rel="next"` header while more rows remain, so a watch that
-// reads only the first page fails its test instead of passing against a
-// one-page world. Set `"linkHeader": false` in the dataset to serve the
-// same pages with NO `Link` header, which is the harder case a client must
-// still get right (a full page is not proof of the end of the list).
+//   GET /repos/:owner/:repo/pulls   (state=open&sort=created&direction=asc&per_page=N)
 //
 // Auth: `Authorization: Bearer fixture-token` (or `token fixture-token`).
 // Anything else — including no header at all — gets GitHub's real 401 body,
@@ -78,6 +71,13 @@ function send(res, status, body, headers = {}) {
   res.end(text)
 }
 
+// Paging is real: a request is answered with its own `page`/`per_page`
+// window, plus GitHub's `Link: <...>; rel="next"` header while more rows
+// remain, so a watch that reads only the first page fails its test instead
+// of passing against a one-page world. A dataset carrying
+// `"linkHeader": false` serves the same windows with NO `Link` header at
+// all, which is the harder case a client must still get right: a full page
+// is not proof of the end of the list.
 function pageUrl(url, page) {
   const next = new URL(url)
   next.searchParams.set('page', String(page))

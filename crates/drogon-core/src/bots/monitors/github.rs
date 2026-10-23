@@ -86,7 +86,15 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 /// page of the open list (see [`read_open_items`]), so the newest item is
 /// seen even while older ones stay open. What this bound costs is memory of
 /// the OLDEST releases, never anything the watch can no longer see.
-pub const MAX_SEEN_PULLS: usize = 512;
+///
+/// It is deliberately AS LARGE AS one poll's reach. A baseline seed records
+/// every number it read, so a bound smaller than the reach would drop the
+/// oldest of them right back out of the set and leave them permanently
+/// unseen — a watch on a 600-item repository would then churn on its oldest
+/// item instead of waiting for a new one. (A seen set that overflows across
+/// TIME, as numbers open and close, still releases a long-closed number
+/// that reopens; that is the pre-existing bound above, not this equality.)
+pub const MAX_SEEN_PULLS: usize = GITHUB_MAX_PAGES as usize * GITHUB_PULLS_PER_PAGE as usize;
 
 /// Which GitHub collection a watch reads. A monitor has exactly one kind,
 /// so this is fixed for the life of a rule and rides inside its approval
@@ -523,7 +531,9 @@ pub enum GithubListError {
 ///
 /// `get` receives the 1-based page number and the URL to read, so a caller
 /// can spend one shared deadline across the walk (and so a test can drive
-/// it with no network at all). The walk stops on the first page that is
+/// it with no network at all). The rule's body bound stays a PER-RESPONSE
+/// bound; what the walk accumulates is the projection ([`GithubItemView`]),
+/// never the raw bodies, and the page cap bounds that. The walk stops on the first page that is
 /// SHORT, or whose `Link` header does not advertise a next page; a full page
 /// with no `Link` header at all is never assumed to be the last one. At
 /// [`GITHUB_MAX_PAGES`] with more still to read it returns
@@ -910,19 +920,10 @@ pub fn evaluate_with_token(
     let deadline = Instant::now() + Duration::from_millis(watch.timeout_ms);
     let views = match read_open_items(watch.target, api_base, watch.repo, |page, url| {
         let remaining = deadline.saturating_duration_since(Instant::now());
-        if page > 1 && remaining.is_zero() {
+        let Some(budget_ms) = page_budget_ms(page, watch.timeout_ms, remaining) else {
             return Err(GithubFetchError::Timeout);
-        }
-        fetch(
-            url,
-            auth.as_deref(),
-            if page == 1 {
-                watch.timeout_ms
-            } else {
-                remaining.as_millis() as u64
-            },
-            watch.max_body_bytes,
-        )
+        };
+        fetch(url, auth.as_deref(), budget_ms, watch.max_body_bytes)
     }) {
         Ok(views) => views,
         Err(error) => return list_error_outcome(watch, token, &error),
@@ -956,6 +957,22 @@ pub fn evaluate_with_token(
         },
         &decision,
     )
+}
+
+/// How many milliseconds one page of the walk may spend, given the rule's
+/// whole-poll budget and what is left of it. `None` means the budget is
+/// gone: the walk then stops with a `Timeout`, because a read cut short is
+/// never the end of the list.
+///
+/// Page one always gets the rule's full `timeout_ms`. A watch whose budget
+/// is a millisecond must still make the request it made before paging
+/// existed; only the pages AFTER the first share what is left.
+fn page_budget_ms(page: u32, timeout_ms: u64, remaining: Duration) -> Option<u64> {
+    if page == 1 {
+        return Some(timeout_ms);
+    }
+    let left = remaining.as_millis() as u64;
+    (left > 0).then_some(left)
 }
 
 /// The honest check-in for a list read that did not finish. Never a
@@ -1903,6 +1920,69 @@ mod tests {
         assert_eq!(asked, 0);
     }
 
+    /// A `Link` header is a SIGNAL, never an itinerary: whatever host it
+    /// names, the next request goes to the base the rule configured. The
+    /// `Authorization` header rides in that request, so following a
+    /// rewritten `Link` would be handing the token to another host.
+    #[test]
+    fn a_link_header_never_redirects_the_walk_to_another_host() {
+        let hostile = r#"<https://evil.example/steal?page=2>; rel="next""#;
+        let mut queue = vec![page_of(1, 100, Some(hostile)), page_of(101, 1, None)].into_iter();
+        let mut asked: Vec<String> = Vec::new();
+        let read = read_open_items(
+            GithubTarget::Pulls,
+            "https://api.github.com",
+            "clioo/drogon",
+            |_page, url| {
+                asked.push(url.to_string());
+                Ok(queue.next().expect("page"))
+            },
+        );
+        assert_eq!(read.expect("read").len(), 101);
+        assert!(
+            asked
+                .iter()
+                .all(|url| url.starts_with("https://api.github.com/repos/clioo/drogon/pulls?")),
+            "every request goes to the configured base: {asked:?}"
+        );
+        assert!(asked.iter().all(|url| !url.contains("evil.example")));
+    }
+
+    /// The whole poll shares one budget, and an exhausted budget is a
+    /// `Timeout`, never a short list quietly accepted as complete.
+    #[test]
+    fn the_page_budget_is_the_polls_budget_and_running_out_is_a_timeout() {
+        // Page one always gets the rule's full budget, even if the clock is
+        // already past the deadline: paging must not stop a watch from
+        // making the one request it always made.
+        assert_eq!(page_budget_ms(1, 30_000, Duration::ZERO), Some(30_000));
+        assert_eq!(page_budget_ms(1, 1, Duration::ZERO), Some(1));
+        // Later pages spend what is left...
+        assert_eq!(
+            page_budget_ms(2, 30_000, Duration::from_millis(4_500)),
+            Some(4_500)
+        );
+        // ...and nothing left is a refusal to read, which the walk reports
+        // as a timeout instead of returning the pages it already has.
+        assert_eq!(page_budget_ms(2, 30_000, Duration::ZERO), None);
+        assert_eq!(page_budget_ms(9, 30_000, Duration::from_micros(10)), None);
+
+        let read = read_open_items(
+            GithubTarget::Pulls,
+            "https://api.github.com",
+            "clioo/drogon",
+            |page, _url| match page_budget_ms(page, 30_000, Duration::ZERO) {
+                Some(_) => Ok(page_of(1, 100, Some(NEXT_LINK))),
+                None => Err(GithubFetchError::Timeout),
+            },
+        );
+        assert_eq!(
+            read,
+            Err(GithubListError::Fetch(GithubFetchError::Timeout)),
+            "a budget that ran out mid-walk is a timeout, not a 100-item list"
+        );
+    }
+
     #[test]
     fn the_next_relation_is_read_out_of_a_link_header() {
         assert!(link_has_next(NEXT_LINK));
@@ -1951,6 +2031,29 @@ mod tests {
         );
         assert!(!text.contains(canary));
         assert!(text.contains(crate::integrations::resolve::REDACTED));
+    }
+
+    /// The dedupe set must hold everything one poll can read. Otherwise a
+    /// baseline seed on a repository with more open items than the set
+    /// retains drops its oldest numbers, which then look unseen forever and
+    /// are released one per tick — a backlog replay dressed as new work.
+    #[test]
+    fn a_baseline_seed_of_the_widest_readable_list_keeps_every_number() {
+        let widest = GITHUB_MAX_PAGES as usize * GITHUB_PULLS_PER_PAGE as usize;
+        assert!(
+            MAX_SEEN_PULLS >= widest,
+            "the dedupe set ({MAX_SEEN_PULLS}) must hold a whole readable list ({widest})"
+        );
+        let numbers: Vec<u64> = (1..=widest as u64).collect();
+        let decision = decide("mon-1", &numbers, &BTreeSet::new(), true);
+        let seeded = seen_after(&decision, &numbers, &BTreeSet::new());
+        assert_eq!(seeded.len(), widest, "every number read is seeded");
+        // ...so the next poll of the same world has nothing unseen to
+        // release, instead of handing back the oldest item it just dropped.
+        assert_eq!(
+            decide("mon-1", &numbers, &seeded, false),
+            GithubDedupeDecision::Nothing
+        );
     }
 
     #[test]
