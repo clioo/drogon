@@ -2140,7 +2140,10 @@ impl Engine {
             let delivered = results
                 .iter()
                 .any(|r| matches!(r["action"].as_str(), Some("sent" | "resumed" | "started")));
-            if !delivered {
+            let failed = results
+                .iter()
+                .any(|r| matches!(r["action"].as_str(), Some("failed" | "unverifiable")));
+            if !delivered && !failed {
                 results.push(self.start_ticket_session(column, &ticket, &message));
             }
         }
@@ -2431,6 +2434,131 @@ fn pr_fingerprint(pull: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[derive(Debug)]
+    struct RetainedTestChild;
+
+    #[cfg(unix)]
+    impl portable_pty::ChildKiller for RetainedTestChild {
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+            Box::new(Self)
+        }
+    }
+
+    #[cfg(unix)]
+    impl portable_pty::Child for RetainedTestChild {
+        fn try_wait(&mut self) -> std::io::Result<Option<portable_pty::ExitStatus>> {
+            Ok(None)
+        }
+        fn wait(&mut self) -> std::io::Result<portable_pty::ExitStatus> {
+            Ok(portable_pty::ExitStatus::with_exit_code(0))
+        }
+        fn process_id(&self) -> Option<u32> {
+            None
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_or_partial_pty_delivery_never_starts_a_replacement() {
+        struct FailingWriter {
+            accept_body: bool,
+        }
+        impl std::io::Write for FailingWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.accept_body {
+                    self.accept_body = false;
+                    Ok(bytes.len())
+                } else {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "fixture write failure",
+                    ))
+                }
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        for partial in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let engine = Engine::open(dir.path()).unwrap();
+            let ticket = engine
+                .do_work_ticket_create(&json!({"title": "Write failure", "columnId": "Review"}))
+                .unwrap();
+            let id = ticket["id"].as_str().unwrap();
+            let column = {
+                let conn = engine.db.lock().unwrap();
+                conn.execute("INSERT INTO work_ticket_sessions (ticket_id, session_id, linked_at) VALUES (?1, 'failed-recipient', 0)", [id]).unwrap();
+                let mut column = get_column(&conn, "Review").unwrap();
+                column.message = "A prompt".into();
+                column
+            };
+            let pair = portable_pty::native_pty_system()
+                .openpty(portable_pty::PtySize::default())
+                .unwrap();
+            let handle = crate::session::SessionHandle::from_spawned(
+                "failed-recipient".into(),
+                "incarnation".into(),
+                "workspace".into(),
+                "/tmp".into(),
+                "local".into(),
+                "fixture".into(),
+                vec![],
+                None,
+                None,
+                None,
+                "now".into(),
+                80,
+                24,
+                pair.master,
+                Box::new(FailingWriter {
+                    accept_body: partial,
+                }),
+                Box::new(RetainedTestChild),
+                engine.db.clone(),
+            );
+            engine
+                .sessions
+                .lock()
+                .unwrap()
+                .insert("failed-recipient".into(), handle);
+            let sent = engine.deliver(&column, id, "manual", None).unwrap();
+            engine.sessions.lock().unwrap().remove("failed-recipient");
+            let results = sent["results"].as_array().unwrap();
+            assert_eq!(results.len(), 1, "{sent}");
+            assert_eq!(results[0]["action"], "failed", "{sent}");
+            assert_eq!(
+                results[0]["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("composer unsubmitted"),
+                partial
+            );
+
+            engine
+                .db
+                .lock()
+                .unwrap()
+                .execute(
+                    "DELETE FROM work_ticket_sessions WHERE ticket_id = ?1",
+                    [id],
+                )
+                .unwrap();
+            let no_recipient = engine.deliver(&column, id, "manual", None).unwrap();
+            assert_eq!(no_recipient["results"][0]["action"], "skipped");
+            assert!(
+                no_recipient["results"][0]["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("no workspace or project")
+            );
+        }
+    }
 
     #[test]
     fn a_v5_database_gains_the_ticket_workspaces_table() {
