@@ -7,10 +7,10 @@ use base64::engine::general_purpose::STANDARD;
 use crate::client::{
     AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary, BrowserSnapshot,
     BrowserTab, BrowserTabsList, HarnessCatalog, MeetingAnalysis, MeetingCommitment,
-    MeetingCommitmentPage, MeetingList, MeetingRead, MeetingSuggestion, MeetingTranscript,
-    MentuApproval, MentuOpenResult, MentuRun, MentuRunsResult, MentuStepRun, MethodResult, Project,
-    ProjectList, ReadResult, Removed, Session, SessionList, StatusResult, Workspace, WorkspaceList,
-    Worktree, WorktreeList,
+    MeetingCommitmentPage, MeetingCommitmentTracked, MeetingList, MeetingRead, MeetingSuggestion,
+    MeetingTranscript, MentuApproval, MentuOpenResult, MentuRun, MentuRunsResult, MentuStepRun,
+    MethodResult, Project, ProjectList, ReadResult, Removed, Session, SessionList, StatusResult,
+    Workspace, WorkspaceList, Worktree, WorktreeList,
 };
 use drogon_protocol::graph::{
     Graph, GraphCompileResult, GraphFailoverAttemptRecord, GraphNodeState, GraphRuntimeRef,
@@ -1183,7 +1183,7 @@ pub fn meeting_commitments(page: &MeetingCommitmentPage) -> String {
 
 pub fn meeting_commitment(commitment: &MeetingCommitment) -> String {
     format!(
-        "{} [{}] {}\n    {} · {}\n    line {}: {}\n    id {}",
+        "{} [{}] {}\n    {} · {}\n    line {}: {}\n    id {}{}",
         commitment.status,
         commitment.source,
         commitment.text,
@@ -1191,7 +1191,38 @@ pub fn meeting_commitment(commitment: &MeetingCommitment) -> String {
         commitment.meeting_title,
         commitment.line,
         commitment.quote,
-        commitment.id
+        commitment.id,
+        tracked_suffix(commitment)
+    )
+}
+
+/// ` · tracked as DRG-12` once the commitment became Work-board work, and
+/// nothing at all before that: accepted is not the same as tracked.
+fn tracked_suffix(commitment: &MeetingCommitment) -> String {
+    commitment
+        .ticket_key
+        .as_deref()
+        .map(|key| format!(" · tracked as {key}"))
+        .unwrap_or_default()
+}
+
+/// `meeting actions track`: the commitment and the ticket it became, named by
+/// the key the Work board gives it, so the owner can find the work.
+pub fn meeting_commitment_tracked(tracked: &MeetingCommitmentTracked) -> String {
+    format!(
+        "{}\n    {} on the Work board{}",
+        meeting_commitment(&tracked.commitment),
+        if tracked.created {
+            format!("Tracked as {}", tracked.ticket.key)
+        } else {
+            format!("Already tracked as {}", tracked.ticket.key)
+        },
+        tracked
+            .ticket
+            .project_id
+            .as_deref()
+            .map(|project| format!(" (project {project})"))
+            .unwrap_or_default()
     )
 }
 
@@ -1202,7 +1233,7 @@ fn commitment_line(commitment: &MeetingCommitment) -> String {
         .map(|owner| format!(" · owner {owner}"))
         .unwrap_or_default();
     format!(
-        "{} [{} {}] {}{}\n    {} · {} · line {}\n    {}\n    id {}",
+        "{} [{} {}] {}{}\n    {} · {} · line {}\n    {}\n    id {}{}",
         commitment.status,
         commitment.source,
         commitment.confidence,
@@ -1212,7 +1243,8 @@ fn commitment_line(commitment: &MeetingCommitment) -> String {
         commitment.meeting_title,
         commitment.line,
         commitment.quote,
-        commitment.id
+        commitment.id,
+        tracked_suffix(commitment)
     )
 }
 

@@ -158,9 +158,10 @@ Four capabilities connect the product's orchestration and review workflow:
   a watched PR opens a worktree and starts a review session, deduplicated per case, with
   new watches parked until approved.
 - **Meetings.** Markdown transcripts from a local note-taker, indexed read-only, with
-  search, filters and bounded reads at corpus scale; commitments can be extracted into
-  real tasks, each shown with the transcript line it came from. Analysis runs only when
-  requested and inherits the provider and model configured in Pi.
+  search, filters and bounded reads at corpus scale; commitments can be extracted, each
+  shown with the transcript line it came from, and an accepted one becomes a real Work
+  ticket whose body carries the meeting, the line number and the verbatim quote. Analysis
+  runs only when requested and inherits the provider and model configured in Pi.
 
 Installation is also no longer manual: `brew trust --tap clioo/drogon && brew tap
 clioo/drogon && brew install --cask clioo/drogon/drogon` installs the app, the daemon and the CLI

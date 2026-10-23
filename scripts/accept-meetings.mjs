@@ -436,6 +436,49 @@ try {
   report.checks.push("corpus-paginates-one-bounded-page-at-a-time");
   report.states.populated = `${CORPUS + 1} indexed, ${firstPageRows} rows per page`;
 
+  // The recording tool, offered exactly as far as the daemon can vouch for:
+  // the bundle it resolved, and the folder it can read. The environment decides
+  // what is true here, so both answers are asserted against the daemon's own
+  // availability payload instead of a hardcoded guess about this Mac.
+  const availability = JSON.parse(
+    (
+      await runAcceptanceProcess(
+        cliBin,
+        ["--data-dir", dataDir, "--json", "meeting", "list", "--limit", "1"],
+        { timeout: 10000 },
+      )
+    ).stdout,
+  ).result.availability;
+  const openTool = page.getByRole("button", { name: /Open Write That Down/ });
+  assert.equal(
+    await openTool.count(),
+    availability.installationPath === null ? 0 : 1,
+    `the page must offer the tool exactly when the daemon found one: ${JSON.stringify(availability)}`,
+  );
+  const reveal = page.getByRole("button", { name: /Reveal notes folder/ });
+  assert.equal(
+    await reveal.count(),
+    availability.transcriptRootState === "readable" ? 1 : 0,
+    `the folder is offered exactly when it can be read: ${availability.transcriptRootState}`,
+  );
+  if (availability.transcriptRootState === "readable") {
+    // Background instances never raise Finder over the developer; the reply is
+    // the shell's own verdict, and the page must show no failure.
+    await reveal.click();
+    await delay(200);
+    assert.equal(
+      await page.getByRole("alert").count(),
+      0,
+      "revealing a readable folder must not report a failure",
+    );
+    assert.ok(
+      (await page.locator("main").innerText()).includes("folder readable"),
+      "the folder line stays visible next to its actions",
+    );
+  }
+  report.states.tool = `${availability.installation} · ${availability.installationPath ?? "no bundle"}`;
+  report.checks.push("tool-and-folder-offered-exactly-when-the-daemon-resolves-them");
+
   // The populated page, both themes, all four widths.
   for (const theme of ["light", "dark"]) {
     await selectSettingsTheme(page, theme);
@@ -596,11 +639,66 @@ try {
   report.checks.push("accepted-action-lands-in-the-ledger-with-provenance");
   await shot("11-actions-light-1440.png");
 
+  // Tracked work: the accepted action becomes a real Drogon Work ticket. The
+  // page names the key the daemon gave it, and the daemon's own board is what
+  // proves the work exists — not the notice.
+  await openMeetings();
+  await page.getByRole("tab", { name: /My actions/ }).click();
+  await page.getByRole("button", { name: /Track as a Drogon task/ }).first().click();
+  await page.getByText(/Tracked as WRK-\d+ on the Drogon Work board/).waitFor();
+  const trackedText = await page.locator("main").innerText();
+  const ticketKey = trackedText.match(/WRK-\d+/)?.[0];
+  assert.ok(ticketKey, `the page must name the ticket key it created: ${trackedText.slice(0, 800)}`);
+  // The row stops offering the step and names the work instead.
+  assert.equal(
+    await page.getByRole("button", { name: /Track as a Drogon task/ }).count(),
+    0,
+    "an already tracked action must not offer to create a second ticket",
+  );
+  await shot("12-tracked-light-1440.png");
+
+  const board = JSON.parse(
+    (
+      await runAcceptanceProcess(cliBin, ["--data-dir", dataDir, "--json", "work", "board"], {
+        timeout: 10000,
+      })
+    ).stdout,
+  ).result;
+  assert.equal(board.tickets.length, 1, "one accepted action, one ticket");
+  assert.equal(board.tickets[0].key, ticketKey);
+  assert.equal(board.tickets[0].title, "Fixture action the note states");
+  assert.equal(
+    board.tickets[0].columnId,
+    board.columns[0].id,
+    "tracked work lands in the board's first column",
+  );
+  const ticket = JSON.parse(
+    (
+      await runAcceptanceProcess(
+        cliBin,
+        ["--data-dir", dataDir, "--json", "work", "ticket", "show", "--ticket", ticketKey],
+        { timeout: 10000 },
+      )
+    ).stdout,
+  ).result;
+  assert.ok(
+    TOKEN_LINES.some((line) => ticket.description.includes(`> ${line}`)),
+    `the ticket body must carry the note's own line as the brief: ${ticket.description}`,
+  );
+  assert.ok(
+    ticket.description.includes("From Write That Down"),
+    `the ticket body must name where the work came from: ${ticket.description}`,
+  );
+  report.checks.push("accepted-action-becomes-a-real-work-ticket");
+  report.states.tracked = `${ticketKey} · ${ticket.title}`;
+
   await selectSettingsTheme(page, "dark");
   await openMeetings();
   await page.getByRole("tab", { name: /My actions/ }).click();
   await page.getByText("Fixture action the note states").waitFor();
   await shot("11-actions-dark-1440.png");
+  await page.getByText(ticketKey, { exact: true }).waitFor();
+  await shot("12-tracked-dark-1440.png");
 
   await page.getByRole("button", { name: /Open transcript/ }).first().click();
   await page.getByRole("button", { name: /Back to meetings/ }).waitFor();
@@ -612,6 +710,11 @@ try {
   );
   assert.equal(ledger.commitments.length, 1, "one accepted action, one ledger row");
   assert.equal(ledger.commitments[0].status, "open");
+  assert.ok(
+    typeof ledger.commitments[0].ticketKey === "string" &&
+      ledger.commitments[0].ticketKey.startsWith("WRK-"),
+    `the ledger records the ticket it became: ${ledger.commitments[0].ticketKey}`,
+  );
   assert.ok(
     TOKEN_LINES.includes(ledger.commitments[0].quote),
     `the stored quote is the transcript line: ${ledger.commitments[0].quote}`,
@@ -631,13 +734,13 @@ try {
       })
     ).stdout,
   );
-  for (const capability of ["meetings.v1", "meetings.actions.v1"]) {
+  for (const capability of ["meetings.v1", "meetings.actions.v1", "meetings.work.v1"]) {
     assert.ok(
       status.result.capabilities.includes(capability),
       `status must advertise ${capability}: ${status.result.capabilities.join(",")}`,
     );
   }
-  report.checks.push("service-advertises-meetings-v1-and-actions-v1");
+  report.checks.push("service-advertises-meetings-v1-actions-v1-and-work-v1");
 
   report.status = "PASSED";
 } catch (error) {

@@ -355,6 +355,33 @@ pub enum CommitmentAction {
         #[arg(long, value_name = "ID", allow_hyphen_values = true)]
         id: String,
     },
+    /// Turn an accepted commitment into a real Drogon Work ticket. The ticket
+    /// goes through the Work board's own creation path (its key, its column,
+    /// the column's on-enter delivery), and its body carries the meeting, the
+    /// verbatim line and the line number, so the board and a column prompt
+    /// ({ticket.description}) hand a session the meeting's own evidence. The
+    /// note is re-read and the quote re-verified first: if the transcript no
+    /// longer contains it, nothing is created. Tracking again reports the same
+    /// ticket instead of making a duplicate; a ticket deleted from the board is
+    /// replaced rather than stranding the action.
+    #[command(
+        args_override_self = true,
+        override_usage = "drogon-cli meeting actions track --id <ID> [--column <ID>] [--project <ID>] [--workspace <ID>]\nValid flags: --column, --data-dir, --help, --id, --json, --project, --request-id, --retry-request, --workspace"
+    )]
+    Track {
+        /// The commitment id, exactly as `meeting actions list` printed it
+        #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+        id: String,
+        /// Column the ticket lands in (default: the board's first column)
+        #[arg(long, value_name = "ID")]
+        column: Option<String>,
+        /// Project the ticket belongs to
+        #[arg(long, value_name = "ID")]
+        project: Option<String>,
+        /// Workspace a session started from the ticket should use
+        #[arg(long, value_name = "ID")]
+        workspace: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1793,6 +1820,25 @@ impl Cli {
                     }
                     CommitmentAction::Done { id } | CommitmentAction::Dismiss { id } => {
                         require_nonempty("id", id)?;
+                    }
+                    CommitmentAction::Track {
+                        id,
+                        column,
+                        project,
+                        workspace,
+                    } => {
+                        require_nonempty("id", id)?;
+                        for (flag, value) in [
+                            ("column", column),
+                            ("project", project),
+                            ("workspace", workspace),
+                        ] {
+                            if let Some(value) = value
+                                && value.trim().is_empty()
+                            {
+                                return Err(CliError::Usage(format!("--{flag} must name an id")));
+                            }
+                        }
                     }
                 },
             },

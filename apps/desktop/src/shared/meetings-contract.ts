@@ -20,6 +20,13 @@ export const MEETINGS_CAPABILITY = "meetings.v1";
  * offering a button that cannot work.
  */
 export const MEETINGS_ACTIONS_CAPABILITY = "meetings.actions.v1";
+/**
+ * Turning one accepted commitment into a Drogon Work ticket is a third,
+ * additive capability: a service that only keeps the ledger still accepts and
+ * resolves actions, and a client that meets one says so instead of offering an
+ * action that would fail on a method it does not implement.
+ */
+export const MEETINGS_WORK_CAPABILITY = "meetings.work.v1";
 export const DEFAULT_MEETINGS_PAGE = 50;
 export const MAX_MEETINGS_PAGE = 200;
 /** Write That Down's own per-transcript cap. */
@@ -86,6 +93,8 @@ export type MeetingsAvailability = {
   platform: string;
   supported: boolean;
   installation: MeetingInstallation;
+  /** The bundle that produced `installed`; `null` in every other state. */
+  installationPath: string | null;
   configuration: MeetingConfiguration;
   configured: boolean;
   configPath: string;
@@ -224,9 +233,29 @@ export type MeetingCommitment = {
   source: MeetingCommitmentSource;
   confidence: "high" | "low";
   status: MeetingCommitmentStatus;
+  /** The Drogon Work ticket this became; `null` until it is tracked. */
+  ticketId: string | null;
+  /** That ticket's human key (`DRG-41`), written together with `ticketId`. */
+  ticketKey: string | null;
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
+};
+
+/** The Work ticket an accepted commitment became, as the ledger names it. */
+export type MeetingTrackedTicket = {
+  id: string;
+  key: string;
+  title: string;
+  columnId: string;
+  projectId: string | null;
+};
+
+export type MeetingCommitmentTracked = {
+  commitment: MeetingCommitment;
+  ticket: MeetingTrackedTicket;
+  /** `false` when the commitment already had a ticket (nothing new was made). */
+  created: boolean;
 };
 
 export type MeetingCommitmentPage = {
@@ -282,6 +311,17 @@ export interface MeetingsBridge {
     id: string;
     status: Exclude<MeetingCommitmentStatus, "open"> | "open";
   }): Promise<Result<MeetingCommitment>>;
+  /**
+   * Turns one accepted commitment into a real Work ticket through the board's
+   * own creation path. The daemon re-verifies the quote against the note
+   * first, so a transcript that no longer holds it creates nothing.
+   */
+  track(input: {
+    id: string;
+    columnId?: string;
+    projectId?: string;
+    workspaceId?: string;
+  }): Promise<Result<MeetingCommitmentTracked>>;
 }
 
 declare module "./session-contract" {
@@ -351,6 +391,8 @@ export const meetingCommitmentSchema = z
     source: z.enum(["suggested", "owner"]),
     confidence: z.enum(["high", "low"]),
     status: z.enum(["open", "done", "dismissed"]),
+    ticketId: z.string().min(1).nullable(),
+    ticketKey: z.string().min(1).nullable(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),
     resolvedAt: z.string().min(1).nullable(),
@@ -372,6 +414,50 @@ export const meetingCommitmentSchema = z
         code: "custom",
         message: "a resolved commitment must carry resolvedAt",
         path: ["resolvedAt"],
+      });
+    }
+    // Tracked work is both halves of the link or neither: a ticket id with no
+    // key (or a key with no id) is a row the page could not act on.
+    if ((commitment.ticketId === null) !== (commitment.ticketKey === null)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "a tracked commitment carries both ticketId and ticketKey",
+        path: ["ticketKey"],
+      });
+    }
+  });
+
+export const meetingTrackedTicketSchema = z
+  .object({
+    id: z.string().min(1),
+    key: z.string().min(1),
+    title: z.string().min(1),
+    columnId: z.string().min(1),
+    projectId: z.string().min(1).nullable(),
+  })
+  .strict();
+
+export const meetingCommitmentTrackSchema = z
+  .object({
+    commitment: meetingCommitmentSchema,
+    ticket: meetingTrackedTicketSchema,
+    created: z.boolean(),
+  })
+  .strict()
+  .superRefine((tracked, ctx) => {
+    // The ledger row and the ticket must agree about which work this is.
+    if (tracked.commitment.ticketId !== tracked.ticket.id) {
+      ctx.addIssue({
+        code: "custom",
+        message: "the commitment does not name the returned ticket",
+        path: ["ticket", "id"],
+      });
+    }
+    if (tracked.commitment.ticketKey !== tracked.ticket.key) {
+      ctx.addIssue({
+        code: "custom",
+        message: "the commitment does not carry the ticket key",
+        path: ["ticket", "key"],
       });
     }
   });
@@ -398,6 +484,7 @@ export const meetingsAvailabilitySchema = z
     platform: z.string(),
     supported: z.boolean(),
     installation: z.enum(["installed", "not-installed", "unsupported"]),
+    installationPath: z.string().min(1).nullable(),
     configuration: z.enum(["defaults", "configured", "invalid"]),
     configured: z.boolean(),
     configPath: z.string(),
@@ -408,7 +495,15 @@ export const meetingsAvailabilitySchema = z
     readOnly: z.boolean(),
     analysis: meetingAnalysisStatusSchema,
   })
-  .strict();
+  .strict()
+  .refine(
+    // A missing tool never invents a path to open, and an installed one
+    // always names the bundle that was actually found.
+    (availability) =>
+      (availability.installation === "installed") ===
+      (availability.installationPath !== null),
+    "installationPath must be present exactly when installation is installed",
+  );
 
 /**
  * The invariants the page relies on, enforced at the bridge: a failed
@@ -639,6 +734,17 @@ export const meetingCommitmentUpdateInputSchema = z
   })
   .strict();
 
+export const meetingCommitmentTrackInputSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    // Placement is optional: without a column the daemon uses the board's
+    // first one, exactly like a ticket created on the board by hand.
+    columnId: z.string().min(1).max(200).optional(),
+    projectId: z.string().min(1).max(200).optional(),
+    workspaceId: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+
 export const meetingsReadInputSchema = z
   .object({
     id: z.string().min(1).max(16_384),
@@ -652,7 +758,8 @@ export type MeetingsRequest =
   | { op: "analyze"; params: z.infer<typeof meetingsAnalyzeInputSchema> }
   | { op: "commitments"; params: z.infer<typeof meetingCommitmentsQuerySchema> }
   | { op: "accept"; params: z.infer<typeof meetingCommitmentCreateInputSchema> }
-  | { op: "resolve"; params: z.infer<typeof meetingCommitmentUpdateInputSchema> };
+  | { op: "resolve"; params: z.infer<typeof meetingCommitmentUpdateInputSchema> }
+  | { op: "track"; params: z.infer<typeof meetingCommitmentTrackInputSchema> };
 
 export const meetingsRequestSchema = z.discriminatedUnion("op", [
   z.object({
@@ -678,5 +785,9 @@ export const meetingsRequestSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("resolve"),
     params: meetingCommitmentUpdateInputSchema,
+  }),
+  z.object({
+    op: z.literal("track"),
+    params: meetingCommitmentTrackInputSchema,
   }),
 ]);

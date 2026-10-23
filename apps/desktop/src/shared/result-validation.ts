@@ -6,6 +6,7 @@ import {
   meetingAnalysisSchema,
   meetingCommitmentPageSchema,
   meetingCommitmentSchema,
+  meetingCommitmentTrackSchema,
   meetingReadSchema,
   meetingsPageSchema,
 } from "./meetings-contract";
@@ -239,4 +240,8 @@ export const resultSchemas: Record<string, z.ZodType> = {
   "meeting.commitment_list": meetingCommitmentPageSchema,
   "meeting.commitment_create": meetingCommitmentSchema,
   "meeting.commitment_update": meetingCommitmentSchema,
+  // Tracking creates Drogon work, so the reply must name the same ticket the
+  // ledger row does: a page that showed one key and a board that held another
+  // would be lying about what was created.
+  "meeting.commitment_track": meetingCommitmentTrackSchema,
 };

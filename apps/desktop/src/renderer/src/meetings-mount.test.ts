@@ -8,9 +8,11 @@ import {
   MEETINGS_CAPABILITY,
   MEETINGS_PAGE_HOST_TESTID,
   MEETINGS_ROUTE_ID,
+  MEETINGS_WORK_CAPABILITY,
   createGatedMeetingsBridge,
   isMeetingsActionsAvailable,
   isMeetingsAvailable,
+  isMeetingsWorkAvailable,
   windowMeetingsBridge,
 } from "./meetings-mount";
 import type { MeetingsBridge } from "../../shared/meetings-contract";
@@ -122,6 +124,38 @@ describe("meetings mount", () => {
     }
     expect(source.analyze).not.toHaveBeenCalled();
     expect(source.accept).not.toHaveBeenCalled();
+  });
+
+  it("gates tracked work on its own capability, without losing the ledger", async () => {
+    expect(isMeetingsWorkAvailable(["meetings.v1", "meetings.actions.v1"])).toBe(false);
+    expect(isMeetingsWorkAvailable(["meetings.v1", "meetings.actions.v1", "meetings.work.v1"])).toBe(
+      true,
+    );
+    expect(MEETINGS_WORK_CAPABILITY).toBe("meetings.work.v1");
+
+    // An older service keeps accepting and resolving; only the tracking step
+    // refuses, and it names the capability it is missing.
+    const source = bridgeFor();
+    const gated = createGatedMeetingsBridge(
+      source,
+      () => true,
+      () => true,
+      () => false,
+    );
+    expect((await gated.commitments()).ok).toBe(true);
+    const tracked = await gated.track({ id: "commitment-1" });
+    expect(tracked.ok).toBe(false);
+    if (!tracked.ok) expect(tracked.error.message).toContain("meetings.work.v1");
+    expect(source.track).not.toHaveBeenCalled();
+    expect(source.commitments).toHaveBeenCalledTimes(1);
+  });
+
+  it("tracks through the bridge when the service advertises the step", async () => {
+    const source = bridgeFor();
+    const gated = createGatedMeetingsBridge(source, () => true);
+    const tracked = await gated.track({ id: "commitment-1" });
+    expect(tracked.ok).toBe(true);
+    expect(source.track).toHaveBeenCalledWith({ id: "commitment-1" });
   });
 
   it("passes calls through and fails closed the moment the capability drops", async () => {

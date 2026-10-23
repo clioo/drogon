@@ -8,6 +8,7 @@ import type {
   MeetingAnalysis,
   MeetingCommitment,
   MeetingCommitmentPage,
+  MeetingCommitmentTracked,
   MeetingSuggestion,
   MeetingTranscript,
   MeetingsAvailability,
@@ -48,6 +49,7 @@ export function availability(
     platform: "macos",
     supported: true,
     installation: "installed",
+    installationPath: "/Applications/WriteThatDown.app",
     configuration: "configured",
     configured: true,
     configPath: "/home/carlos/Library/Application Support/WriteThatDown/config.json",
@@ -143,6 +145,8 @@ export function commitment(overrides: Partial<MeetingCommitment> = {}): MeetingC
     source: "suggested",
     confidence: "high",
     status: "open",
+    ticketId: null,
+    ticketKey: null,
     createdAt: "2026-09-11T10:00:00Z",
     updatedAt: "2026-09-11T10:00:00Z",
     resolvedAt: null,
@@ -161,6 +165,26 @@ export function commitmentPage(
     offset: 0,
     limit: 200,
     hasMore: false,
+    ...overrides,
+  };
+}
+
+export function tracked(
+  overrides: Partial<MeetingCommitmentTracked> = {},
+): MeetingCommitmentTracked {
+  return {
+    commitment: commitment({
+      ticketId: "ticket-1",
+      ticketKey: "DRG-41",
+    }),
+    ticket: {
+      id: "ticket-1",
+      key: "DRG-41",
+      title: "Fix the flaky login test",
+      columnId: "column-todo",
+      projectId: null,
+    },
+    created: true,
     ...overrides,
   };
 }
@@ -185,6 +209,10 @@ export function bridgeFor(overrides: Partial<MeetingsBridge> = {}): MeetingsBrid
     resolve: vi.fn(async () => ({
       ok: true as const,
       result: commitment({ status: "done", resolvedAt: "2026-09-11T11:00:00Z" }),
+    })),
+    track: vi.fn(async () => ({
+      ok: true as const,
+      result: tracked(),
     })),
     ...overrides,
   };
