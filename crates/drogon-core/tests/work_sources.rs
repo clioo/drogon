@@ -1441,6 +1441,21 @@ exec /usr/bin/curl "$@"
         assert_eq!(first.join().unwrap()["pushed"], true);
         second
     });
+    let remote = ctx.ok(
+        "work.import_preview",
+        json!({"provider": "linear", "externalBoardId": "team-eng"}),
+    );
+    let remote_status = &remote["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|issue| issue["key"] == "ENG-2")
+        .unwrap()["status"];
+    let acknowledged = ctx.ok("work.ticket_show", json!({"ticketId": id}));
+    assert_eq!(
+        &acknowledged["externalStatus"], remote_status,
+        "acknowledgement must agree with the completed remote writes"
+    );
     assert_eq!(second["pushed"], false, "{second}");
     assert!(second["error"].as_str().unwrap().contains("in progress"));
     assert_eq!(
