@@ -1261,6 +1261,15 @@ impl Engine {
                 ));
             }
             let target = workspaces_root.join(&dir_name);
+            // Issue #690: the directory name is slugified here, but the two
+            // segments above it are not this call's to trust -- a symlinked
+            // `workspaces/` or project segment would put the checkout
+            // outside the data directory just the same.
+            crate::worktree_rpc::refuse_escape_from_workspaces(
+                &self.data_dir,
+                &target,
+                "to create a workspace at",
+            )?;
             if target.exists() {
                 attempt += 1;
                 continue;

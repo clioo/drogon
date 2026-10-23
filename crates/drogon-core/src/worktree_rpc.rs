@@ -418,7 +418,141 @@ fn refuse_nested_registrations(
     Ok(())
 }
 
-fn delete_checkout_directory(project_path: &Path, worktree_path: &Path) -> Result<(), RpcError> {
+/// The one tree Drogon writes checkouts into and removes them from, and the
+/// boundary both halves of issue #690 are about.
+fn workspaces_tree(data_dir: &Path) -> PathBuf {
+    data_dir.join("workspaces")
+}
+
+/// Refuses a checkout path that reads as being inside `<data-dir>/workspaces`
+/// but would not land there, by walking it one component at a time with
+/// `symlink_metadata` and refusing the first symbolic link it meets.
+///
+/// A symlink is the only way out of that tree, and both directions are
+/// destructive: `git worktree add` writes a whole checkout *through* an
+/// intermediate link, and `remove_dir_all` deletes *through* one.
+/// `canonicalize` cannot be the guard here, because following the link is
+/// precisely what it does -- it hands back the escaped path as if it had
+/// always been the target and says nothing about how it got there.
+/// `symlink_metadata` resolves nothing, which is what makes it the right
+/// probe for the question "is this component a link?".
+///
+/// `data_dir` is the engine's own root: `Engine::open` canonicalizes it and
+/// `reject_unsafe_data_dir` refuses a symlinked one, so a walk that reaches
+/// the end has proved every component from there down -- `workspaces`
+/// itself, the per-project segment, and each segment of a caller-supplied
+/// name -- is a real directory inside it. A component that does not exist
+/// ends the walk: nothing below a missing directory exists either, and on
+/// the create path that missing directory is what is about to be made.
+fn refuse_symlinked_components(
+    data_dir: &Path,
+    path: &Path,
+    subject: &str,
+) -> Result<(), RpcError> {
+    let outside = || {
+        error::invalid_argument(format!(
+            "refusing {subject} \"{}\": it is outside \"{}\"",
+            path.display(),
+            workspaces_tree(data_dir).display()
+        ))
+    };
+    let Ok(relative) = path.strip_prefix(data_dir) else {
+        return Err(outside());
+    };
+    if !matches!(
+        relative.components().next(),
+        Some(std::path::Component::Normal(first)) if first == std::ffi::OsStr::new("workspaces")
+    ) {
+        return Err(outside());
+    }
+    let mut walked = data_dir.to_path_buf();
+    for component in relative.components() {
+        match component {
+            std::path::Component::Normal(segment) => walked.push(segment),
+            // `.` adds nothing. Any other form means the path was never
+            // relative to `data_dir` to begin with, whatever `strip_prefix`
+            // made of it.
+            std::path::Component::CurDir => continue,
+            _ => return Err(outside()),
+        }
+        match std::fs::symlink_metadata(&walked) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(error::invalid_argument(format!(
+                    "refusing {subject} \"{}\": \"{}\" is a symbolic link, and following it would leave \"{}\"",
+                    path.display(),
+                    walked.display(),
+                    workspaces_tree(data_dir).display()
+                )));
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(err) => {
+                return Err(error::io_error(format!(
+                    "could not inspect \"{}\": {err}",
+                    walked.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Defence in depth behind the component walk: the deepest ancestor of
+/// `path` that exists right now has to resolve back inside the workspaces
+/// tree. Here `canonicalize` is the right tool rather than the wrong one --
+/// the question is where that directory really is, not whether the path
+/// reached it honestly -- and it catches what a per-component link check
+/// cannot: a mount point, a bind mount, or a tree rearranged between the
+/// walk and the `git worktree add` that follows it.
+///
+/// Nothing existing is not a refusal. A workspaces tree that is not there at
+/// all has nothing to escape through, and refusing over it would stand a
+/// workspace back up that nothing can reach -- which is what #604 was.
+fn refuse_resolved_ancestor_outside_workspaces(
+    data_dir: &Path,
+    path: &Path,
+    subject: &str,
+) -> Result<(), RpcError> {
+    let workspaces = workspaces_tree(data_dir);
+    let mut ancestor = path;
+    while ancestor.starts_with(&workspaces) {
+        if let Ok(resolved) = std::fs::canonicalize(ancestor) {
+            if !resolved.starts_with(&workspaces) {
+                return Err(error::invalid_argument(format!(
+                    "refusing {subject} \"{}\": \"{}\" resolves to \"{}\", outside \"{}\"",
+                    path.display(),
+                    ancestor.display(),
+                    resolved.display(),
+                    workspaces.display()
+                )));
+            }
+            return Ok(());
+        }
+        match ancestor.parent() {
+            Some(parent) => ancestor = parent,
+            None => break,
+        }
+    }
+    Ok(())
+}
+
+/// Both guards, in the order their messages read best. Issue #690: every
+/// caller that is about to create a checkout at a path, or delete one at a
+/// path, runs this against that path first.
+pub(crate) fn refuse_escape_from_workspaces(
+    data_dir: &Path,
+    path: &Path,
+    subject: &str,
+) -> Result<(), RpcError> {
+    refuse_symlinked_components(data_dir, path, subject)?;
+    refuse_resolved_ancestor_outside_workspaces(data_dir, path, subject)
+}
+
+fn delete_checkout_directory(
+    data_dir: &Path,
+    project_path: &Path,
+    worktree_path: &Path,
+) -> Result<(), RpcError> {
     if !worktree_path.is_absolute() {
         return Err(error::invalid_argument(format!(
             "refusing to delete \"{}\": the recorded workspace path is not absolute",
@@ -461,6 +595,14 @@ fn delete_checkout_directory(project_path: &Path, worktree_path: &Path) -> Resul
             target.display()
         )));
     }
+    // Issue #690: the parent was just resolved, and `canonicalize` resolves
+    // a symlink as readily as a directory -- so a workspaces root renamed
+    // away and replaced by a link makes `target` any path on the machine,
+    // and the `remove_dir_all` below would take whatever is there. The
+    // recorded path has to lead into the workspaces tree through real
+    // directories; the final component is still never followed, so a
+    // symlinked workspace is unlinked exactly as before.
+    refuse_escape_from_workspaces(data_dir, parent, "to delete")?;
     let metadata = match std::fs::symlink_metadata(&target) {
         Ok(metadata) => metadata,
         // A path that is already gone is a success: the caller's next step is
@@ -508,6 +650,7 @@ fn git_worktree_remove_argv(worktree_path: &str, force: bool) -> Vec<String> {
 /// left for the caller to do but drop the rows. See
 /// `recovery_after_failed_git_remove` for what `force` has to mean here.
 fn remove_worktree_checkout(
+    data_dir: &Path,
     project_path: &Path,
     worktree_path: &str,
     force: bool,
@@ -531,7 +674,7 @@ fn remove_worktree_checkout(
             "git no longer registers a working tree at \"{worktree_path}\", so it cannot remove it. Use Force to delete the leftover directory and clear this workspace."
         ))),
         RemoveRecovery::DeleteCheckoutDirectory => {
-            delete_checkout_directory(project_path, Path::new(worktree_path))?;
+            delete_checkout_directory(data_dir, project_path, Path::new(worktree_path))?;
             // The directory is gone, but git may still hold the admin entry
             // that made `remove` refuse, and the name stays taken until that
             // entry goes. Retrying the same scoped remove retires exactly
@@ -974,6 +1117,12 @@ impl Engine {
         std::fs::create_dir_all(&workspaces_root)
             .map_err(|e| error::io_error(format!("cannot create workspaces directory: {e}")))?;
         let target = workspaces_root.join(&name);
+        // Issue #690: a name may carry a separator, so an intermediate
+        // component is caller-supplied, and `target.exists()` below follows
+        // every link in it. Left unchecked, `git worktree add` writes a
+        // whole checkout wherever that link points and the row records the
+        // canonicalized outside path -- which a later remove then deletes.
+        refuse_escape_from_workspaces(&self.data_dir, &target, "to create a workspace at")?;
         if target.exists() {
             return Err(error::invalid_argument(
                 "a worktree with this name already exists",
@@ -1538,6 +1687,7 @@ impl Engine {
             // being stopped would otherwise lose its files to this delete
             // and leave its rows dangling.
             remove_worktree_checkout(
+                &self.data_dir,
                 Path::new(&project_path),
                 &worktree_path,
                 force,
@@ -1828,29 +1978,44 @@ mod tests {
         );
     }
 
-    // --- Checkout-directory deletion guards (#604) --------------------------
+    // --- Checkout-directory deletion guards (#604, #690) -------------------
+
+    /// A canonical data directory holding the workspaces tree one Project
+    /// writes into. `Engine::open` canonicalizes the real one, so these do
+    /// too: the guards compare recorded paths against it by prefix.
+    fn data_dir_with_workspaces() -> (tempfile::TempDir, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = std::fs::canonicalize(root.path()).unwrap();
+        std::fs::create_dir_all(data_dir.join("workspaces").join("Proj")).unwrap();
+        (root, data_dir)
+    }
 
     #[test]
     fn checkout_delete_refuses_a_relative_or_project_owning_path() {
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("project");
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let workspaces_root = data_dir.join("workspaces").join("Proj");
+        // A Project whose own checkout sits in the workspaces tree -- adding
+        // a workspace directory as a Project of its own does exactly that --
+        // is the shape where this guard still has something to say now that
+        // every delete is confined to that tree.
+        let project = workspaces_root.join("project");
         std::fs::create_dir(&project).unwrap();
 
         assert_eq!(
-            delete_checkout_directory(&project, Path::new("workspaces/x"))
+            delete_checkout_directory(&data_dir, &project, Path::new("workspaces/x"))
                 .unwrap_err()
                 .code,
             "invalid_argument"
         );
         assert_eq!(
-            delete_checkout_directory(&project, &project)
+            delete_checkout_directory(&data_dir, &project, &project)
                 .unwrap_err()
                 .code,
             "invalid_argument",
             "the project checkout is never the orphan"
         );
         assert_eq!(
-            delete_checkout_directory(&project, root.path())
+            delete_checkout_directory(&data_dir, &project, &workspaces_root)
                 .unwrap_err()
                 .code,
             "invalid_argument",
@@ -1861,31 +2026,72 @@ mod tests {
 
     #[test]
     fn checkout_delete_removes_the_checkout_and_tolerates_one_already_gone() {
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("project");
-        let orphan = root.path().join("orphan");
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let project = data_dir.join("project");
+        let orphan = data_dir.join("workspaces").join("Proj").join("orphan");
         std::fs::create_dir(&project).unwrap();
         std::fs::create_dir_all(orphan.join("nested")).unwrap();
         std::fs::write(orphan.join("nested/file.txt"), "work").unwrap();
 
-        delete_checkout_directory(&project, &orphan).unwrap();
+        delete_checkout_directory(&data_dir, &project, &orphan).unwrap();
         assert!(!orphan.exists());
-        delete_checkout_directory(&project, &orphan)
+        delete_checkout_directory(&data_dir, &project, &orphan)
             .expect("a path that is already gone is a success, not a failure");
+    }
+
+    #[test]
+    fn checkout_delete_tolerates_a_workspaces_tree_that_is_gone_entirely() {
+        // #604's whole point: a workspace nothing can reach must still be
+        // deletable. The containment guard answers "there is nothing here to
+        // escape through", never "refused".
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let project = data_dir.join("project");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::remove_dir_all(data_dir.join("workspaces")).unwrap();
+
+        delete_checkout_directory(
+            &data_dir,
+            &project,
+            &data_dir.join("workspaces").join("Proj").join("orphan"),
+        )
+        .expect("a missing workspaces tree deletes nothing and refuses nothing");
     }
 
     #[test]
     fn checkout_delete_handles_a_path_that_is_not_a_directory() {
         // Whatever sits at the recorded path has to go, or the row it belongs
         // to becomes undeletable again -- the whole of #604.
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("project");
-        let stray = root.path().join("was-a-workspace");
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let project = data_dir.join("project");
+        let stray = data_dir
+            .join("workspaces")
+            .join("Proj")
+            .join("was-a-workspace");
         std::fs::create_dir(&project).unwrap();
         std::fs::write(&stray, "left behind").unwrap();
 
-        delete_checkout_directory(&project, &stray).unwrap();
+        delete_checkout_directory(&data_dir, &project, &stray).unwrap();
         assert!(!stray.exists());
+    }
+
+    #[test]
+    fn checkout_delete_refuses_a_path_outside_the_workspaces_tree() {
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let project = data_dir.join("project");
+        std::fs::create_dir(&project).unwrap();
+        let elsewhere = data_dir.join("elsewhere");
+        std::fs::create_dir_all(elsewhere.join("checkout")).unwrap();
+
+        assert_eq!(
+            delete_checkout_directory(&data_dir, &project, &elsewhere.join("checkout"))
+                .unwrap_err()
+                .code,
+            "invalid_argument"
+        );
+        assert!(
+            elsewhere.join("checkout").exists(),
+            "nothing outside the workspaces tree is deleted"
+        );
     }
 
     // Unix-only: Windows CI compiles this lib test target (it runs
@@ -1894,21 +2100,99 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn checkout_delete_unlinks_a_symlinked_checkout_without_following_it() {
-        let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("project");
-        let elsewhere = root.path().join("elsewhere");
-        let link = root.path().join("linked-workspace");
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let project = data_dir.join("project");
+        let elsewhere = data_dir.join("elsewhere");
+        let link = data_dir
+            .join("workspaces")
+            .join("Proj")
+            .join("linked-workspace");
         std::fs::create_dir(&project).unwrap();
         std::fs::create_dir(&elsewhere).unwrap();
         std::fs::write(elsewhere.join("keep.txt"), "not this workspace's").unwrap();
         std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
 
-        delete_checkout_directory(&project, &link).unwrap();
-        assert!(!link.exists(), "the link itself is removed");
+        delete_checkout_directory(&data_dir, &project, &link).unwrap();
+        assert!(
+            std::fs::symlink_metadata(&link).is_err(),
+            "the link itself is removed"
+        );
         assert!(
             elsewhere.join("keep.txt").exists(),
             "whatever it pointed at is left alone"
         );
+    }
+
+    /// Issue #690: the final component is deliberately not followed, but the
+    /// parent always was -- so swapping a workspaces root for a link to some
+    /// other directory aimed `remove_dir_all` at whatever was inside it.
+    #[cfg(unix)]
+    #[test]
+    fn checkout_delete_refuses_a_parent_swapped_for_a_symlink() {
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let project = data_dir.join("project");
+        std::fs::create_dir(&project).unwrap();
+        let recorded = data_dir.join("workspaces").join("Proj").join("feature");
+        std::fs::create_dir(&recorded).unwrap();
+
+        let victim = data_dir.join("victim");
+        std::fs::create_dir_all(victim.join("feature")).unwrap();
+        std::fs::write(victim.join("feature").join("secret.txt"), "not Drogon's").unwrap();
+
+        std::fs::rename(
+            data_dir.join("workspaces").join("Proj"),
+            data_dir.join("workspaces").join("Proj.bak"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&victim, data_dir.join("workspaces").join("Proj")).unwrap();
+
+        assert_eq!(
+            delete_checkout_directory(&data_dir, &project, &recorded)
+                .unwrap_err()
+                .code,
+            "invalid_argument"
+        );
+        assert!(
+            victim.join("feature").join("secret.txt").exists(),
+            "the directory the link pointed at is untouched"
+        );
+        assert!(
+            data_dir
+                .join("workspaces")
+                .join("Proj.bak")
+                .join("feature")
+                .exists(),
+            "and so is the checkout the row was really about"
+        );
+    }
+
+    /// A link that lands back inside the workspaces tree is refused too: it
+    /// would delete another Project's checkout, which is the same harm as
+    /// deleting something outside it.
+    #[cfg(unix)]
+    #[test]
+    fn checkout_delete_refuses_a_parent_linked_to_a_sibling_project() {
+        let (_root, data_dir) = data_dir_with_workspaces();
+        let project = data_dir.join("project");
+        std::fs::create_dir(&project).unwrap();
+        let sibling = data_dir.join("workspaces").join("Other");
+        std::fs::create_dir_all(sibling.join("feature")).unwrap();
+        std::fs::write(sibling.join("feature").join("work.txt"), "someone else's").unwrap();
+
+        std::fs::remove_dir_all(data_dir.join("workspaces").join("Proj")).unwrap();
+        std::os::unix::fs::symlink(&sibling, data_dir.join("workspaces").join("Proj")).unwrap();
+
+        assert_eq!(
+            delete_checkout_directory(
+                &data_dir,
+                &project,
+                &data_dir.join("workspaces").join("Proj").join("feature")
+            )
+            .unwrap_err()
+            .code,
+            "invalid_argument"
+        );
+        assert!(sibling.join("feature").join("work.txt").exists());
     }
 
     /// Issue #621: settling a workspace's terminals is worth nothing if a
