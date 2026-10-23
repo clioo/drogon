@@ -724,10 +724,46 @@ fn a_jira_board_is_imported_synced_and_pushed_from_the_cli() {
     );
     assert!(shown.contains("drogon key: DRG-"), "{shown}");
     assert!(shown.contains("· Sprint 24 — carried over"), "{shown}");
+    // No card hides the button here: the push itself holds a known conflict
+    // back, by ticket and from the board, until it is settled.
+    let held = stdout(&fx.command(&["work", "push", "--ticket", "APP-128"]));
+    assert!(
+        held.contains("keep Jira's status or push ours") && held.contains("work resolve"),
+        "{held}"
+    );
+    let board_push = stdout(&fx.command(&["work", "push", "--board", "7"]));
+    assert!(board_push.contains("Pushed 0, refused 1."), "{board_push}");
+    assert_eq!(
+        fx.json(&["work", "ticket", "show", "--ticket", "APP-128"])["sync"],
+        "conflict",
+        "the conflict is still the user's to settle"
+    );
     let bad = fx.command(&[
         "work", "ticket", "resolve", "--ticket", "APP-128", "--keep", "both",
     ]);
     assert_eq!(bad.status.code(), Some(2));
+    // A refused "push ours" keeps the conflict, and says why.
+    fx.text(&[
+        "work", "ticket", "move", "--ticket", "APP-128", "--column", "Blocked",
+    ]);
+    jira.control("issue/APP-128", "{\"status\":\"In Progress\"}");
+    assert!(
+        fx.text(&["work", "sync", "--board", "7"])
+            .contains("1 conflict(s)"),
+        "Jira moved it while the move to Blocked was unsynced"
+    );
+    let ours = stdout(&fx.command(&[
+        "work", "ticket", "resolve", "--ticket", "APP-128", "--keep", "ours",
+    ]));
+    assert!(ours.contains("no transition"), "{ours}");
+    let still = fx.json(&["work", "ticket", "show", "--ticket", "APP-128"]);
+    assert_eq!(still["sync"], "conflict", "{still}");
+    assert_eq!(still["statusConflict"], true);
+    assert!(
+        fx.text(&["work", "ticket", "show", "--ticket", "APP-128"])
+            .contains("last push refused:"),
+        "the refusal that kept the conflict is visible"
+    );
     let resolved = fx.json(&[
         "work", "ticket", "resolve", "--ticket", "APP-128", "--keep", "jira",
     ]);

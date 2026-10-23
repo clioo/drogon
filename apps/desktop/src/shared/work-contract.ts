@@ -301,6 +301,8 @@ export type WorkPushResult = {
   key: string;
   pushed: boolean;
   error: string | null;
+  /** Drogon held the push back: a status conflict only `ticketResolve` settles. */
+  conflict?: boolean;
   nothing?: boolean;
   ticket?: WorkTicket;
 };
@@ -416,7 +418,8 @@ export interface WorkBridge {
   boardDelete(input: { boardId: string }): Promise<Result<{ deleted: string; name: string; tickets: number }>>;
   boardUpdate(input: { boardId: string; autoImportMine?: boolean; projectId?: string | null }): Promise<Result<WorkBoardSummary>>;
   ticketPush(input: { ticketId: string }): Promise<Result<WorkPushResult>>;
-  ticketResolve(input: { ticketId: string; keep: "theirs" | "ours" }): Promise<Result<WorkTicket>>;
+  /** `ours` pushes the local move; `push` carries that push's result. */
+  ticketResolve(input: { ticketId: string; keep: "theirs" | "ours" }): Promise<Result<WorkTicket & { push?: WorkPushResult }>>;
   ticketSprint(input: { ticketId: string; to: string }): Promise<Result<WorkTicket>>;
   ticketSessionStart(input: { ticketId: string; harnessId?: string; prompt?: string }): Promise<Result<WorkTicket & { session: WorkSession }>>;
   ticketSessionRename(input: { ticketId: string; sessionId: string; title: string }): Promise<Result<WorkTicket>>;

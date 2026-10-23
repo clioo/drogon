@@ -25,6 +25,7 @@ import { defaultChosen, groupIssues } from "./WorkImportDialog";
 import { initials, priorityLevel, sprintDates, syncHeadline } from "./work-sources";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+import { toast } from "sonner";
 
 beforeAll(() => installRadixJsdomStubs());
 afterEach(() => {
@@ -178,6 +179,8 @@ function activeTickets(): WorkTicket[] {
       columnId: "review",
       sync: "conflict",
       statusConflict: true,
+      // A refused "Push ours": the conflict stays, with the reason it stayed.
+      pushError: "Jira has no transition from Done to In Review",
       pendingStatus: { id: STATUSES.review.id, name: "In Review" },
       externalStatus: { id: STATUSES.done.id, name: "Done", category: "done" },
     }),
@@ -532,6 +535,7 @@ describe("Jira boards on the Work page", () => {
     const conflict = screen.getByRole("article", { name: /APP-135/ });
     expect(within(conflict).getByText("Jira: Done")).toBeTruthy();
     expect(within(conflict).getByText("Yours: In Review")).toBeTruthy();
+    expect(within(conflict).getByText("Jira has no transition from Done to In Review")).toBeTruthy();
     fireEvent.click(within(conflict).getByRole("button", { name: "Use Jira's" }));
     await waitFor(() => expect(bridge.ticketResolve).toHaveBeenCalledWith({ ticketId: "t135", keep: "theirs" }));
     fireEvent.click(within(conflict).getByRole("button", { name: "Push ours" }));
@@ -589,6 +593,35 @@ describe("Jira boards on the Work page", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Import more issues…" }));
     await screen.findByText("Columns: To Do · Review");
     expect(bridge.importPreview).toHaveBeenCalledWith({ externalBoardId: "7", provider: "jira", assignee: "me", open: true });
+  });
+
+  test("a refused Push ours says why and leaves the conflict on the card", async () => {
+    const bridge = fakeBridge();
+    const resolve = bridge.ticketResolve.getMockImplementation()!;
+    // The daemon keeps the conflict when the resolving push is refused, so
+    // the card's state alone cannot say the move landed: the push result does.
+    bridge.ticketResolve.mockImplementation((async (input: { ticketId: string; keep: string }) => {
+      const answer = await resolve({ ticketId: input.ticketId });
+      if (!answer.ok || input.keep !== "ours") return answer;
+      return ok({
+        ...answer.result,
+        sync: "conflict",
+        statusConflict: true,
+        push: {
+          ticketId: input.ticketId,
+          key: "APP-135",
+          pushed: false,
+          error: "Jira's workflow has no transition from this issue's status to that one",
+        },
+      });
+    }) as never);
+    await openPlatform(bridge);
+    const conflict = screen.getByRole("article", { name: /APP-135/ });
+    fireEvent.click(within(conflict).getByRole("button", { name: "Push ours" }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Jira's workflow has no transition from this issue's status to that one"),
+    );
+    expect(within(conflict).getByRole("button", { name: "Use Jira's" })).toBeTruthy();
   });
 
   test("removing the board returns to My work", async () => {
