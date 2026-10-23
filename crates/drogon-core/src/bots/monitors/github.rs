@@ -65,6 +65,12 @@ const MAX_ERROR_CHARS: usize = 512;
 /// the open list may be released again — bounded, honest, and never
 /// unbounded growth.
 ///
+/// Below the retained window the watch goes QUIET instead: a number the
+/// committed set could not hold is never released, because a release the
+/// set cannot record is a release that marks nothing and repeats forever
+/// (see [`retained_after_prune`]). Raising this bound moves the window; it
+/// does not change the shape.
+///
 /// This bounds the DEDUPE SET, not the watch's reach: one poll reads a
 /// single page of [`GITHUB_PULLS_PER_PAGE`] oldest-first, so a repository
 /// with more than that many open items does not see the newest ones until
@@ -266,6 +272,27 @@ fn prune(seen: &mut BTreeSet<u64>) {
     }
 }
 
+/// Whether `number`, inserted into `seen`, is still there after [`prune`].
+///
+/// A release only marks ONE number seen, so the committed set must contain
+/// that number. When the set is at capacity and the candidate is older than
+/// everything in it, [`prune`] drops the very number just inserted: the set
+/// is unchanged, [`cursor_for_seen`] is unchanged, and
+/// [`crate::bots::monitors::commit::decide_commit`] reads an unchanged
+/// cursor as `NoChange` — a release that marks nothing. Worse, the same
+/// candidate is the smallest unseen number on every later tick, so newer
+/// open numbers behind it never get their turn. [`decide`] therefore skips
+/// a candidate this rejects.
+///
+/// `drops` is how many numbers [`prune`] removes when one is added, so a
+/// legacy set read back over capacity is handled by the same arithmetic as
+/// the ordinary full set. A candidate survives when at least that many of
+/// the set's numbers are below it.
+fn retained_after_prune(seen: &BTreeSet<u64>, number: u64) -> bool {
+    let drops = seen.len().saturating_add(1).saturating_sub(MAX_SEEN_PULLS);
+    drops == 0 || seen.range(..number).count() >= drops
+}
+
 /// Decide now, given the current state. Pure.
 ///
 /// The RELEASED set is what gets committed, never "every pull I can see":
@@ -286,10 +313,14 @@ pub fn decide(
             cursor: cursor_for_seen(&baseline),
         };
     }
+    // Oldest first among the numbers the commit can actually record: a
+    // candidate `prune` would drop is older than the retained window, so it
+    // is passed over silently and the next unseen number gets this tick.
     let unseen = numbers
         .iter()
         .copied()
         .filter(|number| !seen.contains(number))
+        .filter(|number| retained_after_prune(seen, *number))
         .min();
     match unseen {
         None => GithubDedupeDecision::Nothing,
@@ -297,6 +328,10 @@ pub fn decide(
             let mut released = seen.clone();
             released.insert(number);
             prune(&mut released);
+            debug_assert!(
+                released.contains(&number),
+                "a release must be recorded in the set it commits"
+            );
             GithubDedupeDecision::Release {
                 number,
                 cursor: cursor_for_seen(&released),
@@ -809,6 +844,9 @@ pub fn resource_for_number(target: GithubTarget, number: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bots::monitors::commit::{
+        CommitDecision, CommitInput, RetainReason, StoredMonitorState, decide_commit,
+    };
     use crate::bots::monitors::rule::{
         GithubIssueFilter, GithubIssueRule, GithubPrFilter, GithubPrRule,
     };
@@ -1188,5 +1226,179 @@ mod tests {
         };
         let expected: BTreeSet<u64> = wide.iter().copied().rev().take(MAX_SEEN_PULLS).collect();
         assert_eq!(cursor, cursor_for_seen(&expected));
+    }
+
+    /// One whole tick of the dedupe path, wired exactly as the daemon wires
+    /// it: `decide` -> `result_for` -> `decide_commit`. Returns what the
+    /// tick committed and the state the NEXT tick would read — the seen set
+    /// only when the commit actually writes one (a retained tick does not,
+    /// which is precisely how a no-op release loops forever).
+    fn tick(
+        numbers: &[u64],
+        seen: &BTreeSet<u64>,
+        cursor_before: Option<&str>,
+    ) -> (CommitDecision, BTreeSet<u64>, Option<String>) {
+        let decision = decide("mon-1", numbers, seen, false);
+        let outcome = result_for(
+            &PollContext {
+                target: GithubTarget::Pulls,
+                monitor_id: "mon-1",
+                monitor_version: 3,
+                numbers,
+                seen,
+                cursor_before,
+                observed_at_ms: 100.0,
+            },
+            &decision,
+        );
+        let GithubPollOutcome::Emit {
+            result,
+            resource,
+            seen: next_seen,
+        } = outcome
+        else {
+            panic!("a non-seeding poll emits");
+        };
+        let stored = StoredMonitorState {
+            monitor_id: "mon-1".to_string(),
+            version: 3,
+            cursor: cursor_before.map(str::to_string),
+            last_event_id: None,
+            enabled: true,
+        };
+        let commit = decide_commit(
+            &stored,
+            "host-1",
+            "proj-1",
+            &resource,
+            Some("bot-1"),
+            &result,
+            &CommitInput {
+                expected_version: 3,
+            },
+        );
+        match &commit {
+            // Only an advancing commit writes the seen set (the quiet path
+            // passes `seen: None`), so a retained tick leaves both the set
+            // and the cursor exactly as they were.
+            CommitDecision::Advance { new_cursor, .. } => {
+                let next_cursor = new_cursor.clone();
+                (commit, next_seen, Some(next_cursor))
+            }
+            _ => {
+                let kept = cursor_before.map(str::to_string);
+                (commit, seen.clone(), kept)
+            }
+        }
+    }
+
+    /// A seen set at capacity used to wedge: the smallest unseen number was
+    /// older than everything retained, so `prune` dropped the very number
+    /// the release named, the cursor did not move, and the commit retained.
+    /// Every later tick repeated it, and genuinely newer numbers waited
+    /// behind one re-opened old one.
+    #[test]
+    fn a_full_seen_set_still_releases_a_newer_number() {
+        let mut seen: BTreeSet<u64> = (2..=(MAX_SEEN_PULLS as u64 + 1)).collect();
+        assert_eq!(seen.len(), MAX_SEEN_PULLS, "exactly at capacity");
+        let low = seen.iter().next().copied().expect("non-empty") - 1;
+        let high = seen.iter().next_back().copied().expect("non-empty") + 1;
+        let open = [low, high];
+
+        let mut cursor = Some(cursor_for_seen(&seen));
+        let mut released = Vec::new();
+        let mut retained = 0usize;
+        for _ in 0..4 {
+            let (commit, next_seen, next_cursor) = tick(&open, &seen, cursor.as_deref());
+            match commit {
+                CommitDecision::Advance { intent, .. } => {
+                    let (_, number) =
+                        case_from_resource(&intent.resource).expect("a pull resource");
+                    released.push(number);
+                }
+                CommitDecision::Retain { reason } => {
+                    assert_eq!(reason, RetainReason::NoChange);
+                    retained += 1;
+                }
+                other => panic!("unexpected commit: {other:?}"),
+            }
+            seen = next_seen;
+            cursor = next_cursor;
+        }
+
+        assert_eq!(
+            released,
+            vec![high],
+            "the newer number is released once; the number below the \
+             retained window is passed over, never released twice"
+        );
+        assert_eq!(retained, 3, "the watch is quiet once the burst is drained");
+        assert!(
+            seen.contains(&high),
+            "the released number must be in the committed set"
+        );
+        assert!(
+            !seen.contains(&low),
+            "a number the set cannot hold is not pretended to be held"
+        );
+    }
+
+    /// The property behind the fix, over the whole shape rather than one
+    /// case: whatever `decide` releases is in the set that release commits,
+    /// so its cursor always differs from the cursor of the set it read.
+    #[test]
+    fn a_release_is_always_recorded_in_the_set_it_commits() {
+        let full: BTreeSet<u64> = (2..=(MAX_SEEN_PULLS as u64 + 1)).collect();
+        let roomy: BTreeSet<u64> = (2..=40).collect();
+        let over_capacity: BTreeSet<u64> = (2..=(MAX_SEEN_PULLS as u64 + 9)).collect();
+        for seen in [&full, &roomy, &over_capacity] {
+            let min = seen.iter().next().copied().expect("non-empty");
+            let max = seen.iter().next_back().copied().expect("non-empty");
+            for open in [
+                vec![1],
+                vec![min - 1],
+                vec![min - 1, max + 1],
+                vec![1, min - 1, min, max, max + 1, max + 2],
+                vec![max + 1],
+            ] {
+                let before = cursor_for_seen(seen);
+                let decision = decide("mon-1", &open, seen, false);
+                let GithubDedupeDecision::Release { number, ref cursor } = decision else {
+                    continue;
+                };
+                let committed = seen_after(&decision, &open, seen);
+                assert!(
+                    committed.contains(&number),
+                    "released #{number} is missing from the committed set \
+                     (seen len {}, open {open:?})",
+                    seen.len()
+                );
+                assert_eq!(cursor, &cursor_for_seen(&committed));
+                assert_ne!(
+                    cursor, &before,
+                    "a release whose cursor does not move commits nothing"
+                );
+            }
+        }
+    }
+
+    /// The bound still bites: a set over capacity sheds its oldest numbers
+    /// down to [`MAX_SEEN_PULLS`] on the tick that writes it.
+    #[test]
+    fn committing_a_release_keeps_the_set_bounded() {
+        let seen: BTreeSet<u64> = (2..=(MAX_SEEN_PULLS as u64 + 1)).collect();
+        let high = MAX_SEEN_PULLS as u64 + 2;
+        let decision = decide("mon-1", &[1, high], &seen, false);
+        assert!(matches!(
+            decision,
+            GithubDedupeDecision::Release { number, .. } if number == high
+        ));
+        let committed = seen_after(&decision, &[1, high], &seen);
+        assert_eq!(committed.len(), MAX_SEEN_PULLS);
+        assert_eq!(
+            committed.iter().next().copied(),
+            Some(3),
+            "the oldest retained number is the one that made room"
+        );
     }
 }
