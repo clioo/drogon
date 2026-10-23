@@ -27,6 +27,11 @@ describe("preload work bridge", () => {
     }
   });
 
+  it("asks for an imported board's create options on its op", async () => {
+    await work.createOptions({ boardId: "b7" });
+    expect(invoke).toHaveBeenLastCalledWith("drogon:work", { op: "createOptions", params: { boardId: "b7" } });
+  });
+
   it("defaults the optional inputs to empty params", async () => {
     await work.board();
     expect(invoke).toHaveBeenLastCalledWith("drogon:work", { op: "board", params: {} });

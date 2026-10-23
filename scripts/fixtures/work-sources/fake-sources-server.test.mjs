@@ -134,3 +134,69 @@ test("DrogonLinearAssigned lists the viewer's open assigned issues with their te
     .sort();
   assert.deepEqual(teams, ["team-eng", "team-ops"]);
 });
+
+async function graphql(port, service, auth, query, variables) {
+  const res = await fetch(`http://127.0.0.1:${port}/${service}/graphql`, {
+    method: "POST",
+    headers: { authorization: auth, "content-type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+  });
+  assert.equal(res.status, 200);
+  return res.json();
+}
+
+test("DrogonLinearCreate keeps a new issue in its team: numbered, in its state, assigned to the viewer", async (t) => {
+  const data = JSON.parse(readFileSync(path.join(here, "data", "sources-site.json"), "utf8"));
+  const port = await listen(t, data);
+  const eng = data.linear.teams.find((team) => team.id === "team-eng");
+  const started = eng.states.find((state) => state.type === "started");
+  const create = (input) =>
+    graphql(port, "linear", data.linear.apiKey, "mutation DrogonLinearCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success } }", { input });
+  const highest = Math.max(
+    ...data.linear.issues.filter((issue) => issue.team === "team-eng").map((issue) => Number(issue.identifier.split("-")[1]) || 0),
+  );
+
+  const made = await create({ teamId: "team-eng", title: "From the board", description: "Body", stateId: started.id, assigneeId: data.linear.viewer.id });
+  const issue = made.data.issueCreate.issue;
+  assert.equal(made.data.issueCreate.success, true);
+  assert.equal(issue.identifier, `ENG-${highest + 1}`);
+  assert.equal(issue.state.id, started.id);
+  assert.equal(issue.assignee.name, data.linear.viewer.name);
+  // No state: Linear's default, the team's first unstarted one; nobody assigned.
+  const plain = (await create({ teamId: "team-eng", title: "Plain" })).data.issueCreate.issue;
+  assert.equal(plain.identifier, `ENG-${highest + 2}`);
+  assert.equal(plain.state.type, "unstarted");
+  assert.equal(plain.assignee, null);
+
+  assert.match((await create({ teamId: "team-nope", title: "x" })).errors[0].message, /Team/);
+  assert.match((await create({ teamId: "team-eng", title: "" })).errors[0].message, /title/);
+  const foreign = data.linear.teams.find((team) => team.id === "team-ops").states[0];
+  assert.match((await create({ teamId: "team-eng", title: "x", stateId: foreign.id })).errors[0].message, /workflow state/);
+});
+
+test("GitHub creates a repository issue over REST and DrogonGhAddItem puts it on a project", async (t) => {
+  const data = JSON.parse(readFileSync(path.join(here, "data", "sources-site.json"), "utf8"));
+  const port = await listen(t, data);
+  const auth = `Bearer ${data.github.token}`;
+  const post = (repo, body) =>
+    fetch(`http://127.0.0.1:${port}/github/repos/${repo}/issues`, {
+      method: "POST",
+      headers: { authorization: auth, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const highest = Math.max(...data.github.issues.filter((issue) => issue.repo === "clioo/drogon").map((issue) => issue.number));
+
+  const res = await post("clioo/drogon", { title: "From the board", body: "Body", assignees: [data.github.viewer.login ?? "octo-fixture"] });
+  assert.equal(res.status, 201);
+  const issue = await res.json();
+  assert.equal(issue.number, highest + 1);
+  assert.equal(issue.node_id, `I_clioo/drogon_${highest + 1}`);
+  assert.equal((await post("clioo/drogon", { body: "no title" })).status, 422);
+  assert.equal((await post("someone/else", { title: "x" })).status, 404);
+
+  const add = (content) =>
+    graphql(port, "github", auth, "mutation DrogonGhAddItem($project: ID!, $content: ID!) { addProjectV2ItemById { item { id } } }", { project: "PVT_roadmap", content });
+  const added = await add(issue.node_id);
+  assert.match(added.data.addProjectV2ItemById.item.id, /^PVTI_new_/);
+  assert.match((await add("I_clioo/drogon_99999")).errors[0].message, /Could not resolve/);
+});

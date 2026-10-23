@@ -107,7 +107,8 @@ describe("work bridge", () => {
     await dispatchWorkRequest({ op: "importPreview", params: { externalBoardId: "t" } }, fast, slow);
     expect(slow).toHaveBeenCalledWith("work.import_preview", { externalBoardId: "t" });
     expect(fast).toHaveBeenCalledTimes(1);
-    for (const op of ["providerBoards", "boardImport", "boardSync", "boardPush", "ticketPush", "sourceConnect"]) {
+    // createOptions reads Jira issue types or a Project's repositories.
+    for (const op of ["providerBoards", "boardImport", "boardSync", "boardPush", "ticketPush", "sourceConnect", "createOptions"]) {
       expect(WORK_SLOW_OPS.has(op)).toBe(true);
     }
   });
