@@ -4,7 +4,10 @@
 // operations reach the daemon, a malformed daemon answer is refused instead
 // of rendered, and a daemon refusal is passed through unchanged.
 import { describe, expect, it, vi } from "vitest";
-import { dispatchMeetingsRequest } from "./meetings-bridge";
+import {
+  MEETINGS_ANALYSIS_DEADLINE_MS,
+  dispatchMeetingsRequest,
+} from "./meetings-bridge";
 
 const TRANSCRIPT = {
   id: "write-that-down:/Users/meetings-fixture/Transcripts/2026-09-10/08-05_42min.md",
@@ -238,7 +241,11 @@ describe("dispatchMeetingsRequest", () => {
       { op: "analyze", params: { id: TRANSCRIPT.id } },
       call,
     );
-    expect(call).toHaveBeenCalledWith("meeting.analyze", { id: TRANSCRIPT.id });
+    expect(call).toHaveBeenCalledWith(
+      "meeting.analyze",
+      { id: TRANSCRIPT.id },
+      { deadlineMs: MEETINGS_ANALYSIS_DEADLINE_MS },
+    );
     expect(result).toEqual({ ok: true, result: ANALYSIS });
 
     // A finding without a verified line never reaches the renderer.
