@@ -14,10 +14,12 @@
 
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDate};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 
 use super::provider::{
     CreateOptions, ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope,
-    NewIssue, ProviderError, ProviderResult, WorkProvider,
+    NewIssue, ProviderError, ProviderResult, WorkProvider, complete_connection,
+    incomplete_collection, page_cursor,
 };
 use crate::jira::client::{HttpRequest, JiraRequestError, REQUEST_TIMEOUT, http_json};
 
@@ -244,7 +246,7 @@ impl GithubProvider {
                  ... on ProjectV2IterationField { id name configuration {
                    iterations { id title startDate duration }
                    completedIterations { id title startDate duration } } }
-               } } } } }",
+               } pageInfo { hasNextPage } } } } }",
             json!({ "id": id }),
         )?;
         let node = &data["node"];
@@ -254,6 +256,7 @@ impl GithubProvider {
                 format!("GitHub project {id} not found"),
             ));
         }
+        complete_connection(&node["fields"], 50, "GitHub", "project fields")?;
         let fields = node["fields"]["nodes"]
             .as_array()
             .cloned()
@@ -412,7 +415,7 @@ impl GithubProvider {
           assignees(first: 5) { nodes { login name } } } }
       fieldValues(first: 30) { nodes { __typename
         ... on ProjectV2ItemFieldSingleSelectValue { optionId name field { ... on ProjectV2SingleSelectField { id } } }
-        ... on ProjectV2ItemFieldIterationValue { iterationId title startDate duration field { ... on ProjectV2IterationField { id } } } } }";
+        ... on ProjectV2ItemFieldIterationValue { iterationId title startDate duration field { ... on ProjectV2IterationField { id } } } } pageInfo { hasNextPage } }";
 
     fn project_items(&self, id: &str, fields: &ProjectFields) -> ProviderResult<Vec<ExtIssue>> {
         let query = format!(
@@ -422,21 +425,26 @@ impl GithubProvider {
         );
         let mut out = Vec::new();
         let mut after: Option<String> = None;
-        for _ in 0..100 {
+        let mut seen = HashSet::new();
+        for page_number in 0..100 {
             let data = self.gql(&query, json!({ "id": id, "after": after }))?;
             let page = &data["node"]["items"];
             for raw in page["nodes"].as_array().cloned().unwrap_or_default() {
                 if raw["isArchived"] == true {
                     continue;
                 }
+                complete_connection(&raw["fieldValues"], 30, "GitHub", "item fields")?;
                 if let Some(issue) = self.map_item(&raw, fields) {
                     out.push(issue);
                 }
             }
-            if page["pageInfo"]["hasNextPage"] != true {
+            after = page_cursor(page, &mut seen, "GitHub", "project items")?;
+            if after.is_none() {
                 break;
             }
-            after = page["pageInfo"]["endCursor"].as_str().map(str::to_owned);
+            if page_number == 99 {
+                return Err(incomplete_collection("GitHub", "project items"));
+            }
         }
         Ok(out)
     }
@@ -466,6 +474,17 @@ impl GithubProvider {
             project: Some(repo.to_string()),
             updated: text(&raw["updated_at"]),
         }
+    }
+
+    fn unattached_issue(&self, repo: &str, raw: &Value) -> ExtIssue {
+        let mut issue = self.map_rest_issue(repo, raw);
+        issue.id = format!("unattached:{}", issue.key);
+        issue.status = ExtStatus {
+            id: NO_STATUS.into(),
+            name: "No Status".into(),
+            category: "new".into(),
+        };
+        issue
     }
 
     fn set_field(
@@ -500,7 +519,7 @@ impl GithubProvider {
         issue: IssueRef,
         fields: &ProjectFields,
     ) -> ProviderResult<String> {
-        if let Some(id) = issue.id {
+        if let Some(id) = issue.id.filter(|id| !id.starts_with("unattached:")) {
             return Ok(id.to_string());
         }
         self.project_items(project, fields)?
@@ -575,10 +594,10 @@ impl WorkProvider for GithubProvider {
         let projects = self.gql(
             "query DrogonGhProjects { viewer { login
                projectsV2(first: 50) { nodes { id number title closed owner { ... on User { login } ... on Organization { login } }
-                 fields(first: 30) { nodes { __typename } } } }
+                 fields(first: 30) { nodes { __typename } pageInfo { hasNextPage } } } pageInfo { hasNextPage } }
                organizations(first: 50) { nodes { login
                  projectsV2(first: 50) { nodes { id number title closed owner { ... on User { login } ... on Organization { login } }
-                   fields(first: 30) { nodes { __typename } } } } } } } }",
+                   fields(first: 30) { nodes { __typename } pageInfo { hasNextPage } } } pageInfo { hasNextPage } } } pageInfo { hasNextPage } } } }",
             json!({}),
         );
         let data = match projects {
@@ -591,6 +610,12 @@ impl WorkProvider for GithubProvider {
             }
         };
         let viewer = &data["viewer"];
+        if viewer.get("projectsV2").is_some() {
+            complete_connection(&viewer["projectsV2"], 50, "GitHub", "projects")?;
+        }
+        if viewer.get("organizations").is_some() {
+            complete_connection(&viewer["organizations"], 50, "GitHub", "organizations")?;
+        }
         let mut projects: Vec<Value> = viewer["projectsV2"]["nodes"]
             .as_array()
             .cloned()
@@ -600,12 +625,16 @@ impl WorkProvider for GithubProvider {
             .cloned()
             .unwrap_or_default()
         {
+            complete_connection(&org["projectsV2"], 50, "GitHub", "organization projects")?;
             projects.extend(
                 org["projectsV2"]["nodes"]
                     .as_array()
                     .cloned()
                     .unwrap_or_default(),
             );
+        }
+        for project in &projects {
+            complete_connection(&project["fields"], 30, "GitHub", "project fields")?;
         }
         let mut boards: Vec<ExtBoard> = projects
             .iter()
@@ -646,6 +675,9 @@ impl WorkProvider for GithubProvider {
             }));
             if repos.len() < 100 {
                 break;
+            }
+            if page == 5 {
+                return Err(incomplete_collection("GitHub", "repositories"));
             }
         }
         Ok(boards)
@@ -746,6 +778,9 @@ impl WorkProvider for GithubProvider {
                     if items.len() < 100 {
                         break;
                     }
+                    if page == 20 {
+                        return Err(incomplete_collection("GitHub", "repository issues"));
+                    }
                 }
                 out
             }
@@ -768,6 +803,21 @@ impl WorkProvider for GithubProvider {
         match board_ref(board_id)? {
             BoardRef::Project(project) => {
                 let fields = self.project(project)?;
+                if issue.id.is_some_and(|id| id.starts_with("unattached:")) {
+                    if let Some(attached) = self
+                        .project_items(project, &fields)?
+                        .into_iter()
+                        .find(|i| i.key == issue.key)
+                    {
+                        return Ok(Some(attached));
+                    }
+                    let (repo, number) = split_key(issue.key)?;
+                    return match self.rest("GET", &format!("/repos/{repo}/issues/{number}"), None) {
+                        Ok(raw) => Ok(Some(self.unattached_issue(repo, &raw))),
+                        Err(e) if e.code == "not_found" => Ok(None),
+                        Err(e) => Err(e),
+                    };
+                }
                 let Some(item) = issue.id else {
                     return Ok(self
                         .project_items(project, &fields)?
@@ -780,7 +830,15 @@ impl WorkProvider for GithubProvider {
                 );
                 match self.gql(&query, json!({ "id": item })) {
                     Ok(data) if data["node"].is_null() => Ok(None),
-                    Ok(data) => Ok(self.map_item(&data["node"], &fields)),
+                    Ok(data) => {
+                        complete_connection(
+                            &data["node"]["fieldValues"],
+                            30,
+                            "GitHub",
+                            "item fields",
+                        )?;
+                        Ok(self.map_item(&data["node"], &fields))
+                    }
                     Err(e) if e.code == "not_found" => Ok(None),
                     Err(e) => Err(e),
                 }
@@ -900,6 +958,15 @@ impl WorkProvider for GithubProvider {
         board_id: &str,
         new: &NewIssue,
     ) -> ProviderResult<(ExtIssue, Vec<String>)> {
+        self.create_issue_confirmed(board_id, new, &mut |_| Ok(()))
+    }
+
+    fn create_issue_confirmed(
+        &self,
+        board_id: &str,
+        new: &NewIssue,
+        confirmed: &mut dyn FnMut(&ExtIssue) -> ProviderResult<()>,
+    ) -> ProviderResult<(ExtIssue, Vec<String>)> {
         let repo = match board_ref(board_id)? {
             BoardRef::Repo(repo) => repo.to_string(),
             BoardRef::Project(_) => new.repo.map(str::to_owned).ok_or_else(|| {
@@ -919,40 +986,78 @@ impl WorkProvider for GithubProvider {
             body["assignees"] = json!([me]);
         }
         let created = self.rest("POST", &format!("/repos/{repo}/issues"), Some(body))?;
+        let mut receipt = match board_ref(board_id)? {
+            BoardRef::Repo(_) => self.map_rest_issue(&repo, &created),
+            BoardRef::Project(_) => self.unattached_issue(&repo, &created),
+        };
+        confirmed(&receipt)?;
         let mut warnings = Vec::new();
         match board_ref(board_id)? {
             BoardRef::Repo(repo) => {
                 let issue = self.map_rest_issue(repo, &created);
                 if new.status_id == Some("closed") {
-                    self.set_status(
+                    if let Err(e) = self.set_status(
                         board_id,
                         IssueRef {
                             key: &issue.key,
                             id: None,
                         },
                         "closed",
-                    )?;
-                    let closed = self
-                        .get_issue(
-                            board_id,
-                            IssueRef {
-                                key: &issue.key,
-                                id: None,
-                            },
-                        )?
-                        .unwrap_or(issue);
+                    ) {
+                        warnings.push(format!(
+                            "Created {}, but could not close it: {}",
+                            issue.url, e.message
+                        ));
+                        return Ok((issue, warnings));
+                    }
+                    let closed = self.get_issue(
+                        board_id,
+                        IssueRef {
+                            key: &issue.key,
+                            id: None,
+                        },
+                    );
+                    let closed = match closed {
+                        Ok(Some(closed)) => closed,
+                        other => {
+                            warnings.push(format!(
+                                "Created {}, but could not read it back: {}",
+                                issue.url,
+                                other
+                                    .err()
+                                    .map(|e| e.message)
+                                    .unwrap_or_else(|| "not visible".into())
+                            ));
+                            issue
+                        }
+                    };
                     return Ok((closed, warnings));
                 }
                 Ok((issue, warnings))
             }
             BoardRef::Project(project) => {
                 let content = text(&created["node_id"]);
-                let added = self.gql(
+                let added = match self.gql(
                     "mutation DrogonGhAddItem($project: ID!, $content: ID!) {
                        addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } } }",
                     json!({ "project": project, "content": content }),
-                )?;
+                ) {
+                    Ok(added) => added,
+                    Err(e) => {
+                        warnings.push(format!("Created {}, but could not add it to the project: {}. Add this existing issue to the project; do not create it again.", receipt.url, e.message));
+                        return Ok((receipt, warnings));
+                    }
+                };
                 let item = text(&added["addProjectV2ItemById"]["item"]["id"]);
+                if item.is_empty() {
+                    warnings.push(format!(
+                        "Created {}, but project attachment returned no item id",
+                        receipt.url
+                    ));
+                    return Ok((receipt, warnings));
+                }
+                receipt.id = item.clone();
+                confirmed(&receipt)?;
                 let key = format!("{repo}#{}", created["number"].as_i64().unwrap_or_default());
                 let issue = IssueRef {
                     key: &key,
@@ -968,12 +1073,20 @@ impl WorkProvider for GithubProvider {
                 {
                     warnings.push(format!("Created with no iteration: {}", error.message));
                 }
-                let fresh = self.get_issue(board_id, issue)?.ok_or_else(|| {
-                    ProviderError::new(
-                        "github_error",
-                        format!("{key} was added but cannot be read back"),
-                    )
-                })?;
+                let fresh = match self.get_issue(board_id, issue) {
+                    Ok(Some(fresh)) => fresh,
+                    other => {
+                        warnings.push(format!(
+                            "Created {}, but could not read project details: {}",
+                            receipt.url,
+                            other
+                                .err()
+                                .map(|e| e.message)
+                                .unwrap_or_else(|| "not visible".into())
+                        ));
+                        receipt
+                    }
+                };
                 Ok((fresh, warnings))
             }
         }

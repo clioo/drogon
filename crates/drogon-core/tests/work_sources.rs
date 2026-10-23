@@ -1276,3 +1276,284 @@ fn github_creates_issues_in_a_repository_board_and_a_project() {
     assert_eq!(issue["externalKey"], "clioo/drogon#17");
     assert_eq!(issue["externalStatus"]["name"], "Open");
 }
+
+#[test]
+fn a_failed_github_project_attachment_keeps_the_confirmed_issue() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "github", "apiKey": "ghp_fixture", "apiUrl": fx.url("github")}),
+    );
+    let imported = ctx.ok("work.board_import", json!({"provider": "github", "externalBoardId": "project:PVT_roadmap", "issueKeys": ["clioo/drogon#10"]}));
+    let board = imported["board"]["id"].as_str().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("curl");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    @*)
+      if /usr/bin/grep -q DrogonGhAddItem "${{arg#@}}"; then
+        touch '{root}/waiting'
+        n=0
+        while [ ! -f '{root}/release' ] && [ $n -lt 500 ]; do sleep 0.01; n=$((n + 1)); done
+        exit 7
+      fi
+      ;;
+  esac
+done
+exec /usr/bin/curl "$@"
+"#,
+            root = dir.path().display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    struct ResetCurl;
+    impl Drop for ResetCurl {
+        fn drop(&mut self) {
+            drogon_core::jira::client::set_curl_bin_override(None);
+        }
+    }
+    let _reset = ResetCurl;
+    drogon_core::jira::client::set_curl_bin_override(Some(script));
+    let (persisted_before_attachment, response) = std::thread::scope(|scope| {
+        let create = scope.spawn(|| ctx.call("work.ticket_create", json!({"boardId": board, "columnId": "In Progress", "title": "Keep my remote identity", "repo": "clioo/drogon"})));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
+        while !dir.path().join("waiting").exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            dir.path().join("waiting").exists(),
+            "attachment must reach the response barrier"
+        );
+        assert!(
+            !create.is_finished(),
+            "creation must still be waiting for attachment"
+        );
+        let persisted = ctx
+            .call("work.ticket_show", json!({"ticketId": "clioo/drogon#16"}))
+            .ok;
+        std::fs::write(dir.path().join("release"), "").unwrap();
+        (persisted, create.join().unwrap())
+    });
+    assert!(
+        persisted_before_attachment,
+        "confirmed issue must be durable before project attachment"
+    );
+    assert!(response.ok, "{:?}", response.error);
+    let created = response.result.unwrap();
+    assert_eq!(created["externalKey"], "clioo/drogon#16");
+    assert!(
+        created["externalUrl"]
+            .as_str()
+            .unwrap()
+            .ends_with("/issues/16")
+    );
+    assert!(
+        !created["warnings"].as_array().unwrap().is_empty(),
+        "{created}"
+    );
+    drop(_reset);
+    ctx.ok("work.board_sync", json!({"boardId": board}));
+    let kept = ctx.ok("work.ticket_show", json!({"ticketId": created["id"]}));
+    assert_eq!(kept["removed"], false, "{kept}");
+}
+
+#[test]
+fn overlapping_pushes_are_refused_until_the_first_acknowledgement_finishes() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "linear", "apiKey": "lin_api_fixture", "apiUrl": fx.url("linear")}),
+    );
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"provider": "linear", "externalBoardId": "team-eng", "issueKeys": ["ENG-2"]}),
+    );
+    let id = ctx.ok("work.ticket_show", json!({"ticketId": "ENG-2"}))["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let view = ctx.ok("work.board", json!({"boardId": imported["board"]["id"]}));
+    ctx.ok(
+        "work.ticket_move",
+        json!({"ticketId": id, "columnId": column_id(&view, "In Progress")}),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("curl");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+mutation=0
+for arg in "$@"; do
+  case "$arg" in @*) /usr/bin/grep -q DrogonLinearUpdate "${{arg#@}}" && mutation=1 ;; esac
+done
+if [ "$mutation" = 1 ] && mkdir '{root}/first' 2>/dev/null; then
+  /usr/bin/curl "$@" > '{root}/response'
+  status=$?
+  touch '{root}/waiting'
+  n=0
+  while [ ! -f '{root}/release' ] && [ $n -lt 1000 ]; do sleep 0.01; n=$((n + 1)); done
+  [ -f '{root}/release' ] || exit 124
+  cat '{root}/response'
+  exit $status
+fi
+exec /usr/bin/curl "$@"
+"#,
+            root = dir.path().display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            drogon_core::jira::client::set_curl_bin_override(None);
+        }
+    }
+    let _reset = Reset;
+    drogon_core::jira::client::set_curl_bin_override(Some(script));
+    let second = std::thread::scope(|scope| {
+        let first = scope.spawn(|| ctx.ok("work.ticket_push", json!({"ticketId": id})));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        while !dir.path().join("waiting").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "first push never reached the barrier"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!first.is_finished());
+        ctx.ok(
+            "work.ticket_move",
+            json!({"ticketId": id, "columnId": column_id(&view, "Done")}),
+        );
+        let second = ctx.ok("work.ticket_push", json!({"ticketId": id}));
+        std::fs::write(dir.path().join("release"), "").unwrap();
+        assert_eq!(first.join().unwrap()["pushed"], true);
+        second
+    });
+    let remote = ctx.ok(
+        "work.import_preview",
+        json!({"provider": "linear", "externalBoardId": "team-eng"}),
+    );
+    let remote_status = &remote["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|issue| issue["key"] == "ENG-2")
+        .unwrap()["status"];
+    let acknowledged = ctx.ok("work.ticket_show", json!({"ticketId": id}));
+    assert_eq!(
+        &acknowledged["externalStatus"], remote_status,
+        "acknowledgement must agree with the completed remote writes"
+    );
+    assert_eq!(second["pushed"], false, "{second}");
+    assert!(second["error"].as_str().unwrap().contains("in progress"));
+    assert_eq!(
+        ctx.ok("work.ticket_show", json!({"ticketId": id}))["pendingStatus"]["name"],
+        "Done"
+    );
+    assert_eq!(
+        ctx.ok("work.ticket_push", json!({"ticketId": id}))["pushed"],
+        true
+    );
+    ctx.ok(
+        "work.board_sync",
+        json!({"boardId": imported["board"]["id"]}),
+    );
+    let final_ticket = ctx.ok("work.ticket_show", json!({"ticketId": id}));
+    assert_eq!(final_ticket["externalStatus"]["name"], "Done");
+    assert_eq!(final_ticket["pendingStatus"], Value::Null);
+}
+
+#[test]
+fn incomplete_provider_collections_are_errors_in_preview_and_import() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let jira = support::FixtureServer::with_data("agile-site.json");
+    let ctx = TestContext::open();
+    ctx.connect(&jira);
+    for (provider, token) in [("linear", "lin_api_fixture"), ("github", "ghp_fixture")] {
+        ctx.ok(
+            "work.source_connect",
+            json!({"provider": provider, "apiKey": token, "apiUrl": fx.url(provider)}),
+        );
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let js = dir.path().join("curl.mjs");
+    std::fs::write(&js, r#"
+import { readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+const args = process.argv.slice(2);
+const value = (flag) => args[args.indexOf(flag) + 1];
+const url = args.at(-1);
+const input = args.includes('--data-binary') ? JSON.parse(readFileSync(value('--data-binary').slice(1), 'utf8')) : {};
+let body;
+if (url.includes('/board/7/issue')) body = { issues: [{ id: '30001', key: 'APP-142', fields: { summary: 'More pages', status: { id: '1', name: 'To Do', statusCategory: { key: 'new' } } } }], total: 100000, isLast: false };
+if (url.includes('/repos/clioo/drogon/issues?')) body = Array.from({length: 100}, () => ({ number: 10, id: 10, title: 'More pages', state: 'open', html_url: 'https://github.com/clioo/drogon/issues/10', body: '', labels: [], assignees: [] }));
+if (input.query?.includes('DrogonLinearIssues')) body = { data: { team: { issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'repeated' } } } } };
+if (input.query?.includes('DrogonGhItems')) body = { data: { node: { items: { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'repeated' } } } } };
+if (!body) { const result = spawnSync('/usr/bin/curl', args, { stdio: 'inherit' }); process.exit(result.status ?? 1); }
+writeFileSync(value('-o'), JSON.stringify(body));
+writeFileSync(value('-D'), 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n');
+process.stdout.write('200');
+"#).unwrap();
+    let script = dir.path().join("curl");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nexec \"${{DROGON_TEST_NODE:-node}}\" '{}' \"$@\"\n",
+            js.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    struct ResetCurl;
+    impl Drop for ResetCurl {
+        fn drop(&mut self) {
+            drogon_core::jira::client::set_curl_bin_override(None);
+        }
+    }
+    let _reset = ResetCurl;
+    drogon_core::jira::client::set_curl_bin_override(Some(script));
+    let mut observed = Vec::new();
+    for (provider, external) in [
+        ("jira", "7"),
+        ("linear", "team-ops"),
+        ("github", "repo:clioo/drogon"),
+        ("github", "project:PVT_roadmap"),
+    ] {
+        for method in ["work.import_preview", "work.board_import"] {
+            let mut params = json!({"provider": provider, "externalBoardId": external});
+            if method == "work.board_import" {
+                params["all"] = json!(true);
+            }
+            observed.push((provider, method, ctx.call(method, params)));
+        }
+    }
+    let accepted: Vec<_> = observed
+        .iter()
+        .filter(|(_, _, response)| response.ok)
+        .map(|(provider, method, _)| format!("{provider} {method}"))
+        .collect();
+    assert!(
+        accepted.is_empty(),
+        "accepted incomplete collections: {accepted:?}"
+    );
+    for (provider, method, response) in observed {
+        assert!(
+            !response.ok,
+            "{provider} {method} accepted an incomplete collection"
+        );
+        assert_eq!(response.error.unwrap().code, "incomplete_collection");
+    }
+}

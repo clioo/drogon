@@ -202,6 +202,181 @@ impl Board {
     }
 }
 
+/// Hold a completed provider write before its response reaches the engine.
+/// Drop also releases a waiting child when an assertion unwinds.
+struct PausedPush {
+    dir: tempfile::TempDir,
+}
+
+impl PausedPush {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("curl");
+        std::fs::write(
+            &script,
+            format!(
+                r#"#!/bin/sh
+/usr/bin/curl "$@" > '{root}/response-'$$
+status=$?
+case " $* " in
+  *POST*)
+    touch '{root}/waiting'
+    n=0
+    while [ ! -f '{root}/release' ] && [ $n -lt 1000 ]; do
+      sleep 0.01
+      n=$((n + 1))
+    done
+    [ -f '{root}/release' ] || exit 124
+    ;;
+esac
+cat '{root}/response-'$$
+exit $status
+"#,
+                root = dir.path().display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        drogon_core::jira::client::set_curl_bin_override(Some(script));
+        Self { dir }
+    }
+
+    fn wait(&self) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        while !self.dir.path().join("waiting").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "provider write never arrived"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    fn release(&self) {
+        std::fs::write(self.dir.path().join("release"), "").unwrap();
+    }
+}
+
+impl Drop for PausedPush {
+    fn drop(&mut self) {
+        self.release();
+        drogon_core::jira::client::set_curl_bin_override(None);
+    }
+}
+
+#[test]
+fn push_acknowledges_only_the_status_and_sprint_that_were_sent() {
+    let b = Board::imported();
+    let id = b.ticket_id("APP-142");
+    for column in b.view(None)["columns"].as_array().unwrap() {
+        b.ctx.ok(
+            "work.column_update",
+            json!({"columnId": column["id"], "sendOnEnter": false}),
+        );
+    }
+    b.move_to("APP-142", "QA");
+    let pause = PausedPush::new();
+    std::thread::scope(|scope| {
+        let push = scope.spawn(|| b.ctx.ok("work.ticket_push", json!({"ticketId": id})));
+        pause.wait();
+        assert!(!push.is_finished(), "push must remain held until release");
+        b.move_to("APP-142", "Done");
+        // Even returning to the same target is a newer local decision (ABA).
+        b.move_to("APP-142", "QA");
+        pause.release();
+        assert_eq!(push.join().unwrap()["pushed"], true);
+    });
+    drop(pause);
+    let ticket = b.ticket("APP-142");
+    assert_eq!(ticket["pendingStatus"]["name"], "QA", "{ticket}");
+    assert_eq!(ticket["externalStatus"]["name"], "QA");
+
+    b.sync();
+    assert_eq!(b.ticket("APP-142")["pendingStatus"], Value::Null);
+    b.move_to("APP-142", "In Progress");
+    let pause = PausedPush::new();
+    std::thread::scope(|scope| {
+        let push = scope.spawn(|| b.ctx.ok("work.ticket_push", json!({"ticketId": id})));
+        pause.wait();
+        assert!(!push.is_finished(), "push must remain held until release");
+        // Cancelling against the cached remote QA must remain a QA move
+        // after the older request changes the actual remote to In Progress.
+        b.move_to("APP-142", "QA");
+        pause.release();
+        assert_eq!(push.join().unwrap()["pushed"], true);
+    });
+    drop(pause);
+    assert_eq!(b.ticket("APP-142")["externalStatus"]["name"], "In Progress");
+    assert_eq!(b.ticket("APP-142")["pendingStatus"]["name"], "QA");
+    b.ctx.ok("work.ticket_push", json!({"ticketId": id}));
+    b.ctx.ok(
+        "work.ticket_sprint",
+        json!({"ticketId": id, "to": "backlog"}),
+    );
+    let pause = PausedPush::new();
+    std::thread::scope(|scope| {
+        let push = scope.spawn(|| b.ctx.ok("work.ticket_push", json!({"ticketId": id})));
+        pause.wait();
+        assert!(!push.is_finished(), "push must remain held until release");
+        b.ctx.ok(
+            "work.ticket_sprint",
+            json!({"ticketId": id, "to": "active"}),
+        );
+        pause.release();
+        assert_eq!(push.join().unwrap()["pushed"], true);
+    });
+    drop(pause);
+    let ticket = b.ticket("APP-142");
+    assert_eq!(ticket["externalSprintId"], Value::Null, "{ticket}");
+    assert_eq!(ticket["sprintPending"], true, "{ticket}");
+}
+
+#[test]
+fn board_push_refuses_known_conflicts_until_explicit_resolution() {
+    let b = Board::imported();
+    b.move_to("APP-142", "QA");
+    b.server
+        .control("issue/APP-142", json!({"status": "In Progress"}));
+    b.sync();
+    assert_eq!(b.ticket("APP-142")["sync"], "conflict");
+    let pushed = b.ctx.ok("work.board_push", json!({"boardId": b.board_id}));
+    assert_eq!(pushed["pushed"], 0, "{pushed}");
+    assert_eq!(pushed["failed"], 1, "{pushed}");
+    assert_eq!(b.ticket("APP-142")["sync"], "conflict");
+    assert_eq!(b.jira_issue("APP-142")["status"]["name"], "In Progress");
+    let direct = b.ctx.ok(
+        "work.ticket_push",
+        json!({"ticketId": b.ticket_id("APP-142")}),
+    );
+    assert_eq!(direct["pushed"], false, "{direct}");
+    let resolved = b.ctx.ok(
+        "work.ticket_resolve",
+        json!({"ticketId": b.ticket_id("APP-142"), "keep": "ours"}),
+    );
+    assert_eq!(resolved["push"]["pushed"], true, "{resolved}");
+    assert_eq!(b.jira_issue("APP-142")["status"]["name"], "QA");
+}
+
+#[test]
+fn board_push_does_not_count_a_cancelled_move_as_a_failure() {
+    let b = Board::imported();
+    b.move_to("APP-142", "QA");
+    b.move_to("APP-128", "QA");
+    let pause = PausedPush::new();
+    let pushed = std::thread::scope(|scope| {
+        let push = scope.spawn(|| b.ctx.ok("work.board_push", json!({"boardId": b.board_id})));
+        pause.wait();
+        assert!(!push.is_finished());
+        b.move_to("APP-128", "Review");
+        pause.release();
+        push.join().unwrap()
+    });
+    assert_eq!(pushed["results"].as_array().unwrap().len(), 2, "{pushed}");
+    assert_eq!(pushed["results"][1]["nothing"], true, "{pushed}");
+    assert_eq!(pushed["failed"], 0, "{pushed}");
+    assert_eq!(pushed["pushed"], 1, "{pushed}");
+}
+
 #[test]
 fn import_lists_boards_and_brings_only_the_chosen_issues() {
     let path = fake_claude_on_path();
@@ -1137,6 +1312,10 @@ fn jira_changes_move_cards_fire_prompts_and_flag_conflicts_unmapped_and_removed(
     assert_eq!(t["sync"], "synced");
     assert_eq!(b.column_name_of(&t), "Blocked");
     // Mapping moves a status between columns (one home per status).
+    b.server
+        .control("issue/APP-130", json!({"status": "Blocked"}));
+    b.sync();
+    b.move_to("APP-130", "QA");
     let review = b.column("Review");
     b.ctx.ok(
         "work.column_update",
@@ -1144,6 +1323,12 @@ fn jira_changes_move_cards_fire_prompts_and_flag_conflicts_unmapped_and_removed(
     );
     assert_eq!(b.column("Blocked")["statuses"], json!([]));
     assert_eq!(b.column("Review")["statuses"].as_array().unwrap().len(), 2);
+    assert_eq!(b.column_name_of(&b.ticket("APP-128")), "Review");
+    assert_eq!(b.column_name_of(&b.ticket("APP-130")), "QA");
+    assert_eq!(b.ticket("APP-130")["pendingStatus"]["name"], "QA");
+    b.sync();
+    assert_eq!(b.column_name_of(&b.ticket("APP-128")), "Review");
+    assert_eq!(b.ticket("APP-128")["sync"], "synced");
 
     // Jira wins for the fields it owns.
     b.server.control(

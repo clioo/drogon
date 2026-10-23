@@ -29,6 +29,7 @@
 //! that, like a status move, waits to be pushed.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use super::provider::{
     ExtBoard, ExtIssue, ExtSprint, IssueRef, IssueScope, NewIssue, WorkProvider,
@@ -39,6 +40,24 @@ pub(super) const LOCAL_BOARD: &str = "local";
 pub(crate) const SYNC_INTERVAL_MS: i64 = 5 * 60_000;
 /// What the import picker's issue rows may take of the 1 MB reply.
 pub(super) const PREVIEW_BUDGET_BYTES: usize = 700 * 1024;
+
+struct ActivePush(&'static Mutex<HashSet<String>>, String);
+
+impl Drop for ActivePush {
+    fn drop(&mut self) {
+        self.0.lock().unwrap().remove(&self.1);
+    }
+}
+
+fn claim_push(ticket_id: &str) -> Option<ActivePush> {
+    static PUSHES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let active = PUSHES.get_or_init(|| Mutex::new(HashSet::new()));
+    active
+        .lock()
+        .unwrap()
+        .insert(ticket_id.to_owned())
+        .then(|| ActivePush(active, ticket_id.to_owned()))
+}
 
 #[derive(Clone, Debug)]
 pub(super) struct Board {
@@ -299,10 +318,6 @@ pub(super) fn map_column_statuses(
             mapped.push(status);
         }
     }
-    let was_mapped: HashSet<String> = columns
-        .iter()
-        .flat_map(|c| c.statuses.iter().map(|s| s.id.clone()))
-        .collect();
     for other in columns.iter().filter(|c| c.id != column.id) {
         let kept: Vec<&BoardStatus> = other
             .statuses
@@ -326,9 +341,9 @@ pub(super) fn map_column_statuses(
         ],
     )
     .map_err(error::from_sqlite)?;
-    // Unmapped cards with a newly mapped status and no pending move go home.
+    // Reconcile every changed home; explicit pending local moves stay put.
     let mut adopted = Vec::new();
-    for status in mapped.iter().filter(|s| !was_mapped.contains(&s.id)) {
+    for status in &mapped {
         let mut stmt = conn
             .prepare(&format!(
                 "{TICKET_SELECT} WHERE board_id = ?1 AND ext_status_id = ?2 AND pending_status_id IS NULL"
@@ -438,7 +453,7 @@ pub(super) fn record_local_move(
         )
     };
     conn.execute(
-        "UPDATE work_tickets SET pending_status_id = ?2, status_conflict = 0, push_error = NULL WHERE id = ?1",
+        "UPDATE work_tickets SET pending_status_id = ?2, status_revision = status_revision + 1, status_conflict = 0, push_error = NULL WHERE id = ?1",
         params![ticket.id, pending],
     )
     .map_err(error::from_sqlite)?;
@@ -1166,7 +1181,9 @@ fn apply_issue(
         .map(|c| c.name.clone())
         .unwrap_or_default();
     let status = &issue.status;
-    if ticket.ext.status_id.as_deref() != Some(status.id.as_str()) {
+    if ticket.ext.status_id.as_deref() != Some(status.id.as_str())
+        || ticket.ext.pending_status_id.as_deref() == Some(status.id.as_str())
+    {
         let previous = ticket.ext.status_name.clone().unwrap_or_else(|| "?".into());
         match &ticket.ext.pending_status_id {
             Some(pending) if *pending == status.id => {
@@ -1904,8 +1921,30 @@ impl Engine {
             (board, column, sprint)
         };
         let provider = self.board_provider(&board)?;
+        let mut confirmed_ticket: Option<String> = None;
+        let mut persist_confirmation = |issue: &ExtIssue| {
+            let persist = || -> Result<String, RpcError> {
+                let mut conn = self.db.lock().unwrap();
+                let tx = conn.transaction().map_err(error::from_sqlite)?;
+                let mut board = get_board(&tx, &board.id)?;
+                let columns = list_columns(&tx, Some(&board.id))?;
+                let id = if let Some(id) = &confirmed_ticket {
+                    let ticket = get_ticket(&tx, id)?;
+                    apply_issue(&tx, &mut board, &columns, &ticket, issue)?;
+                    id.clone()
+                } else {
+                    insert_issue(&tx, &mut board, &columns, issue)?
+                };
+                tx.commit().map_err(error::from_sqlite)?;
+                Ok(id)
+            };
+            confirmed_ticket = Some(persist().map_err(|e| super::provider::ProviderError::new(
+                "creation_unverifiable", format!("Created {} at {}, but could not save its local record: {}. Do not create it again.", issue.key, issue.url, e.message)
+            ))?);
+            Ok(())
+        };
         let (issue, warnings) = provider
-            .create_issue(
+            .create_issue_confirmed(
                 &board.external_id,
                 &NewIssue {
                     title: &title,
@@ -1916,6 +1955,7 @@ impl Engine {
                     issue_type: str_field(params, "issueType")?.filter(|s| !s.trim().is_empty()),
                     repo: str_field(params, "repo")?.filter(|s| !s.trim().is_empty()),
                 },
+                &mut persist_confirmation,
             )
             .map_err(provider_error)?;
         let label = provider_label(&board.provider);
@@ -1927,7 +1967,13 @@ impl Engine {
             if let Some(sprint) = &issue.sprint {
                 ensure_sprint(&tx, &board.id, sprint)?;
             }
-            let id = insert_issue(&tx, &mut board, &columns, &issue)?;
+            let id = if let Some(id) = confirmed_ticket {
+                let ticket = get_ticket(&tx, &id)?;
+                apply_issue(&tx, &mut board, &columns, &ticket, &issue)?;
+                id
+            } else {
+                insert_issue(&tx, &mut board, &columns, &issue)?
+            };
             // A Drogon-only column keeps the card it was created in.
             if column.statuses.is_empty() {
                 let ticket = get_ticket(&tx, &id)?;
@@ -2046,10 +2092,15 @@ impl Engine {
         self.push_ticket_resolving(ticket_id, false)
     }
 
-    /// `resolving` is the explicit "push ours" settlement of a status
-    /// conflict (`work.ticket_resolve`), the one caller allowed to overwrite
-    /// the provider status a conflict is holding.
+    /// Only explicit resolution may overwrite a conflicted status.
     fn push_ticket_resolving(&self, ticket_id: &str, resolving: bool) -> Result<Value, RpcError> {
+        let Some(_push) = claim_push(ticket_id) else {
+            let conn = self.db.lock().unwrap();
+            let ticket = get_ticket(&conn, ticket_id)?;
+            return Ok(
+                json!({"ticketId": ticket.id, "key": ticket.ext.key, "pushed": false, "error": "A push for this ticket is already in progress; wait for its result before retrying"}),
+            );
+        };
         let (ticket, board, columns) = {
             let conn = self.db.lock().unwrap();
             let ticket = get_ticket(&conn, ticket_id)?;
@@ -2115,10 +2166,26 @@ impl Engine {
                         .find(|s| s.id == *pending)
                         .map(|s| s.category.clone());
                     let conn = self.db.lock().unwrap();
+                    let fresh = get_ticket(&conn, &ticket.id)?;
+                    let unchanged = fresh.ext.status_revision == ticket.ext.status_revision;
+                    let pending_after = if unchanged {
+                        None
+                    } else if fresh.ext.pending_status_id.is_some() {
+                        fresh.ext.pending_status_id.clone()
+                    } else {
+                        // A newer move may have cancelled pending by matching
+                        // the old remote status. Rebase it onto the status sent.
+                        let column = get_column(&conn, &fresh.column_id)?;
+                        if column.statuses.iter().any(|s| s.id == *pending) {
+                            None
+                        } else {
+                            column.statuses.first().map(|s| s.id.clone())
+                        }
+                    };
                     conn.execute(
                         "UPDATE work_tickets SET ext_status_id = ?2, ext_status_name = ?3, ext_status_category = ?4,
-                           pending_status_id = NULL, status_conflict = 0, push_error = NULL WHERE id = ?1",
-                        params![ticket.id, pending, name, category],
+                           pending_status_id = ?5, status_conflict = ?6, push_error = NULL WHERE id = ?1",
+                        params![ticket.id, pending, name, category, pending_after, !unchanged && fresh.ext.status_conflict],
                     )
                     .map_err(error::from_sqlite)?;
                     log_activity(
@@ -2141,8 +2208,8 @@ impl Engine {
                 Ok(()) => {
                     let conn = self.db.lock().unwrap();
                     conn.execute(
-                        "UPDATE work_tickets SET ext_sprint_id = sprint_id, push_error = NULL WHERE id = ?1",
-                        params![ticket.id],
+                        "UPDATE work_tickets SET ext_sprint_id = ?2, push_error = NULL WHERE id = ?1",
+                        params![ticket.id, ticket.ext.sprint_id],
                     )
                     .map_err(error::from_sqlite)?;
                     let target = match &ticket.ext.sprint_id {
@@ -2225,8 +2292,12 @@ impl Engine {
         for id in ids {
             results.push(self.push_ticket(&id)?);
         }
-        let failed = results.iter().filter(|r| r["pushed"] == false).count();
-        Ok(json!({ "results": results, "pushed": results.len() - failed, "failed": failed }))
+        let failed = results
+            .iter()
+            .filter(|r| r["pushed"] == false && r["nothing"] != true)
+            .count();
+        let pushed = results.iter().filter(|r| r["pushed"] == true).count();
+        Ok(json!({ "results": results, "pushed": pushed, "failed": failed }))
     }
 
     /// `work.ticket_resolve`: settles a status conflict — keep the
@@ -2254,7 +2325,7 @@ impl Engine {
             match keep.as_str() {
                 "provider" | "theirs" | "remote" | "jira" | "linear" | "github" => {
                     conn.execute(
-                        "UPDATE work_tickets SET pending_status_id = NULL, status_conflict = 0, push_error = NULL WHERE id = ?1",
+                        "UPDATE work_tickets SET pending_status_id = NULL, status_revision = status_revision + 1, status_conflict = 0, push_error = NULL WHERE id = ?1",
                         params![ticket.id],
                     )
                     .map_err(error::from_sqlite)?;

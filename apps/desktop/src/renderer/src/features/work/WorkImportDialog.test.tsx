@@ -377,4 +377,19 @@ describe("board picker", () => {
       expect.objectContaining({ open: true }),
     );
   });
+  test("a failed filtered preview cannot import the previous successful selection", async () => {
+    const bridge = mount([team("ops", "Operations", "OPS")]);
+    bridge.importPreview.mockResolvedValueOnce({ ok: true, result: {
+      provider: "linear", board: { id: "ops", name: "Operations", kind: "kanban" }, columns: [], sprints: [],
+      me: "me", facets: { mine: 1, unassigned: 0, noProject: 1, people: [], projects: [], statuses: [] },
+      issues: [{ id: "one", key: "OPS-1", title: "Previous result", description: "", status: { id: "todo", name: "Todo", category: "new" }, assigneeId: "me", assignee: "Me", sprint: null, importedTicketId: null }],
+    } } as never);
+    bridge.importPreview.mockResolvedValue({ ok: false, error: { code: "incomplete_collection", message: "Linear returned an incomplete issues collection. No partial import was applied." } } as never);
+    fireEvent.click(await screen.findByRole("button", { name: "Choose Operations" }));
+    expect((await screen.findByRole("button", { name: "Import 1 issue" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByRole("combobox", { name: "Assigned to" }), { target: { value: "any" } });
+    expect(await screen.findByText(/Linear returned an incomplete issues collection/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Import 1 issue" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
 });

@@ -35,7 +35,7 @@ const UPGRADE_MATRIX: &[(&str, i64, ComponentFixtures)] = &[
     ("orchestration_attempts", 1, &[]),
     (
         "work",
-        6,
+        8,
         &[
             ("work-v1", 1),
             ("work-v2", 2),
@@ -762,10 +762,94 @@ fn fresh_install_backfill_is_a_no_op_with_no_pre_existing_workspaces() {
 }
 
 #[test]
+fn work_v6_and_v7_upgrade_once_preserving_moves_and_delivery_history() {
+    for version in [6, 7] {
+        let dir = temp_dir(&format!("work-v{version}"));
+        seed(&dir, "work-v5");
+        let conn = read_db(&dir);
+        conn.execute_batch("CREATE TABLE work_ticket_workspaces (ticket_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL);
+            UPDATE work_tickets SET pending_status_id = 'next' WHERE id = 'tkt-jira';
+            UPDATE work_sends SET results = '[{\"action\":\"sent\",\"sessionId\":\"old\"}]';").unwrap();
+        if version == 7 {
+            conn.execute_batch(
+                "ALTER TABLE work_tickets ADD COLUMN status_revision INTEGER NOT NULL DEFAULT 0;
+                UPDATE work_tickets SET status_revision = 17 WHERE id = 'tkt-jira';",
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "UPDATE schema_versions SET version = ?1 WHERE component = 'work'",
+            [version],
+        )
+        .unwrap();
+        drop(conn);
+        for _ in 0..2 {
+            let reopened = Engine::open(dir.path()).unwrap();
+            let conn = read_db(&dir);
+            assert_eq!(version_of(&conn, "work"), 8);
+            let moved: (String, i64) = conn
+                .query_row(
+                    "SELECT pending_status_id, status_revision FROM work_tickets WHERE id = 'tkt-jira'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(moved, ("next".into(), if version == 6 { 0 } else { 17 }));
+            let send: (String, Option<String>, i64) = conn
+                .query_row(
+                    "SELECT results, event_id, delivery_pending FROM work_sends",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                send,
+                (
+                    "[{\"action\":\"sent\",\"sessionId\":\"old\"}]".into(),
+                    None,
+                    0
+                )
+            );
+            assert_eq!(
+                conn.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = 'work_sends_event'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+            drop(conn);
+            drop(reopened);
+        }
+    }
+}
+
+#[test]
+fn a_newer_work_schema_is_refused_without_rewriting_the_database() {
+    let dir = temp_dir("work-future");
+    drop(Engine::open(dir.path()).unwrap());
+    let conn = read_db(&dir);
+    conn.execute_batch("UPDATE schema_versions SET version = 9 WHERE component = 'work'; ALTER TABLE work_sends ADD COLUMN future_data TEXT DEFAULT 'keep';").unwrap();
+    drop(conn);
+    let before = std::fs::read(db_path(&dir)).unwrap();
+    let error = Engine::open(dir.path())
+        .err()
+        .expect("newer Work schema must be refused");
+    assert!(
+        error.message.contains("work") && error.message.contains("newer"),
+        "{}",
+        error.message
+    );
+    assert_eq!(std::fs::read(db_path(&dir)).unwrap(), before);
+    assert_eq!(version_of(&read_db(&dir), "work"), 9);
+}
+
+#[test]
 fn work_v1_board_survives_the_imported_boards_step() {
     let (dir, engine) = open_seeded("work-v1-rows", "work-v1");
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "work"), 6);
+    assert_eq!(version_of(&conn, "work"), 8);
     // The v1 rows are intact and land on My work (board_id NULL).
     let (key, board, column): (String, Option<String>, String) = conn
         .query_row(
@@ -830,7 +914,7 @@ fn work_v1_board_survives_the_imported_boards_step() {
 fn work_v2_imported_board_survives_the_sources_step() {
     let (dir, engine) = open_seeded("work-v2-rows", "work-v2");
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "work"), 6);
+    assert_eq!(version_of(&conn, "work"), 8);
     let (ext_key, board): (String, String) = conn
         .query_row(
             "SELECT ext_key, board_id FROM work_tickets WHERE id = 'tkt-jira'",
@@ -875,7 +959,7 @@ fn work_v2_imported_board_survives_the_sources_step() {
 fn work_v3_boards_gain_auto_import_off_and_keep_their_sources() {
     let (dir, engine) = open_seeded("work-v3-rows", "work-v3");
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "work"), 6);
+    assert_eq!(version_of(&conn, "work"), 8);
     let auto: i64 = conn
         .query_row(
             "SELECT auto_import_mine FROM work_boards WHERE id = 'board-seed'",
@@ -912,7 +996,7 @@ fn work_v3_boards_gain_auto_import_off_and_keep_their_sources() {
 fn work_v4_columns_gain_collapsed_off_and_boards_keep_auto_import() {
     let (dir, _engine) = open_seeded("work-v4-rows", "work-v4");
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "work"), 6);
+    assert_eq!(version_of(&conn, "work"), 8);
     let collapsed: i64 = conn
         .query_row(
             "SELECT collapsed FROM work_columns WHERE id = 'col-jira-review'",
@@ -935,7 +1019,25 @@ fn work_v4_columns_gain_collapsed_off_and_boards_keep_auto_import() {
 fn work_v5_gains_ticket_workspaces_and_keeps_collapsed_columns() {
     let (dir, _engine) = open_seeded("work-v5-rows", "work-v5");
     let conn = read_db(&dir);
-    assert_eq!(version_of(&conn, "work"), 6);
+    assert_eq!(version_of(&conn, "work"), 8);
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM work_tickets WHERE status_revision != 0",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM work_sends WHERE event_id IS NOT NULL OR delivery_pending != 0",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
     let tables: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'work_ticket_workspaces'",

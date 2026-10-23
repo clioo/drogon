@@ -73,6 +73,7 @@ import {
 import { useWorkBoard } from "./use-work-board";
 import {
   columnTriggerLabel,
+  deliveryHasFailures,
   deliverySummary,
   formatClock,
   isLiveSession,
@@ -441,7 +442,7 @@ export function WorkPage({
     );
     if (!result.ok) notice(result.error, "error");
     else if (result.value.delivery)
-      notice(`${ticketDisplayKey(result.value)}: ${deliverySummary(result.value.delivery.results)}`);
+      notice(`${ticketDisplayKey(result.value)}: ${deliverySummary(result.value.delivery.results)}`, deliveryHasFailures(result.value.delivery.results) ? "error" : "success");
   };
 
   const panelColumn = panel?.kind === "column" ? board?.columns.find((c) => c.id === panel.id) : undefined;

@@ -16,6 +16,8 @@ import type {
 } from "../../../../shared/work-contract";
 import { columnDropIndex, resetWorkViewMemoryForTests, WorkPage } from "./WorkPage";
 import { TooltipProvider } from "../../components/ui/tooltip";
+import { WorkColumnPanel } from "./WorkColumnPanel";
+import { useWorkBoard } from "./use-work-board";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
@@ -461,6 +463,21 @@ describe("Work board", () => {
     expect((message as HTMLTextAreaElement).value).toBe("Check {ticket.id} now");
     fireEvent.click(within(review).getByRole("button", { name: "Send now" }));
     await waitFor(() => expect(bridge.columnSend).toHaveBeenCalledWith({ columnId: "review" }));
+  });
+
+  test("an unverifiable prompt delivery is surfaced as an error", async () => {
+    const bridge = fakeBridge();
+    bridge.columnSend.mockResolvedValue({ ok: true, result: { columnId: "review", sends: [{ ticketId: "t2", ticketKey: "DRG-42", columnId: "review", trigger: "manual", message: "m", results: [{ sessionId: null, action: "unverifiable", error: "Interrupted delivery" }], at: 1 }] } } as never);
+    const onNotice = vi.fn();
+    function PromptPanel() {
+      const state = useWorkBoard(bridge as unknown as WorkBridge, true);
+      const board = boardFixture();
+      return <WorkColumnPanel column={board.columns[2]} board={board} state={state} bridge={bridge as unknown as WorkBridge} onNotice={onNotice} onClose={vi.fn()} />;
+    }
+    render(<TooltipProvider><PromptPanel /></TooltipProvider>);
+    const panel = await screen.findByRole("complementary", { name: "Review prompt" });
+    fireEvent.click(within(panel).getByRole("button", { name: "Send now" }));
+    await waitFor(() => expect(onNotice).toHaveBeenCalledWith(expect.stringContaining("unverifiable"), "error"));
   });
 
   test("a live session on a ticket opens directly in its workspace", async () => {

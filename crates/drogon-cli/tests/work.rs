@@ -712,6 +712,66 @@ fn a_jira_board_is_imported_synced_and_pushed_from_the_cli() {
     assert_eq!(folded["collapsed"], true);
 
     fx.text(&[
+        "work", "ticket", "move", "--ticket", "APP-128", "--column", "Blocked",
+    ]);
+    let refused = fx.command(&["work", "push", "--ticket", "APP-128"]);
+    assert_eq!(refused.status.code(), Some(1), "{}", stdout(&refused));
+    assert!(stdout(&refused).contains("provider refused"));
+    let refused = fx.command(&["--json", "work", "push", "--board", "7"]);
+    assert_eq!(refused.status.code(), Some(1), "{}", stdout(&refused));
+    let envelope: Value = serde_json::from_str(&stdout(&refused)).unwrap();
+    assert_eq!(envelope["result"]["failed"], 1);
+    let refused = fx.command(&[
+        "--json", "work", "ticket", "resolve", "--ticket", "APP-128", "--keep", "ours",
+    ]);
+    assert_eq!(refused.status.code(), Some(1), "{}", stdout(&refused));
+    let envelope: Value = serde_json::from_str(&stdout(&refused)).unwrap();
+    assert_eq!(envelope["result"]["push"]["pushed"], false);
+    assert!(
+        fx.command(&["work", "push", "--ticket", "APP-142"])
+            .status
+            .success()
+    );
+    for json in [false, true] {
+        for args in [
+            vec!["work", "push", "--ticket", "APP-128"],
+            vec!["work", "push", "--board", "7"],
+            vec![
+                "work", "ticket", "resolve", "--ticket", "APP-128", "--keep", "ours",
+            ],
+        ] {
+            let mut command = if json { vec!["--json"] } else { vec![] };
+            command.extend(args);
+            let refused = fx.command(&command);
+            assert_eq!(
+                refused.status.code(),
+                Some(1),
+                "{command:?}: {}",
+                stdout(&refused)
+            );
+            if json {
+                let envelope: Value = serde_json::from_str(&stdout(&refused)).unwrap();
+                assert_eq!(envelope["ok"], true, "preserve the structured RPC result");
+            } else {
+                assert!(stdout(&refused).contains("refused"), "{}", stdout(&refused));
+            }
+        }
+        let mut command = if json { vec!["--json"] } else { vec![] };
+        command.extend(["work", "push", "--ticket", "APP-142"]);
+        let nothing = fx.command(&command);
+        assert_eq!(
+            nothing.status.code(),
+            Some(0),
+            "{command:?}: {}",
+            stdout(&nothing)
+        );
+        if json {
+            let envelope: Value = serde_json::from_str(&stdout(&nothing)).unwrap();
+            assert_eq!(envelope["result"]["nothing"], true);
+        }
+    }
+
+    fx.text(&[
         "work", "ticket", "move", "--ticket", "APP-128", "--column", "QA",
     ]);
     jira.control("issue/APP-128", "{\"status\":\"Done\"}");
@@ -768,6 +828,20 @@ fn a_jira_board_is_imported_synced_and_pushed_from_the_cli() {
         "work", "ticket", "resolve", "--ticket", "APP-128", "--keep", "jira",
     ]);
     assert_eq!(resolved["sync"], "synced");
+
+    for json in [false, true] {
+        let mut command = if json { vec!["--json"] } else { vec![] };
+        command.extend(["work", "push", "--board", "7"]);
+        let nothing = fx.command(&command);
+        assert_eq!(nothing.status.code(), Some(0), "{}", stdout(&nothing));
+        if json {
+            let envelope: Value = serde_json::from_str(&stdout(&nothing)).unwrap();
+            assert_eq!(envelope["result"]["pushed"], 0);
+            assert_eq!(envelope["result"]["failed"], 0);
+        } else {
+            assert!(stdout(&nothing).contains("Nothing to push"));
+        }
+    }
 
     // Sessions from the ticket, named on it.
     let started = fx.json(&[

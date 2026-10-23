@@ -115,6 +115,7 @@ export function WorkImportDialog({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [external, setExternal] = useState<string | null>(null);
   const [preview, setPreview] = useState<WorkImportPreview | null>(null);
+  const [previewReady, setPreviewReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<WorkImportFilter>({ assignee: "me", open: true });
@@ -130,6 +131,7 @@ export function WorkImportDialog({
     if (!open) return;
     setError(null);
     setPreview(null);
+    setPreviewReady(false);
     setChosen(new Set());
     setFilter({ assignee: "me", open: true });
     setQuery("");
@@ -165,6 +167,7 @@ export function WorkImportDialog({
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setPreviewReady(false);
     const input: Parameters<WorkBridge["importPreview"]>[0] = { externalBoardId: external, provider };
     for (const [key, value] of Object.entries(filter)) {
       if (value && value !== "any") (input as Record<string, unknown>)[key] = value;
@@ -184,6 +187,7 @@ export function WorkImportDialog({
         return;
       }
       setPreview(answer);
+      setPreviewReady(true);
       if (seeded.current !== external) {
         seeded.current = external;
         setChosen(defaultChosen(answer));
@@ -207,7 +211,7 @@ export function WorkImportDialog({
     });
 
   const importNow = async () => {
-    if (!external || (chosen.size === 0 && !autoMine)) return;
+    if (!external || !previewReady || loading || busy || (chosen.size === 0 && !autoMine)) return;
     setBusy(true);
     setError(null);
     try {
@@ -445,7 +449,7 @@ export function WorkImportDialog({
             Cancel
           </Button>
           {preview ? (
-            <Button disabled={busy || (chosen.size === 0 && !autoMine)} onClick={() => void importNow()}>
+            <Button disabled={busy || loading || !previewReady || (chosen.size === 0 && !autoMine)} onClick={() => void importNow()}>
               {busy ? <Loader2 className="animate-spin" /> : null}
               Import {chosen.size} {chosen.size === 1 ? "issue" : "issues"}
             </Button>

@@ -46,8 +46,9 @@ pub(crate) const SCHEMA_COMPONENT: &str = "work";
 /// sources the owner allows and their connections (Linear, GitHub). v4: a
 /// board can keep importing new issues assigned to the owner. v5: columns
 /// can be collapsed. v6: the workspace made for a ticket, where its New
-/// session starts.
-pub(crate) const SCHEMA_VERSION: i64 = 6;
+/// session starts. v7: a revision fences acknowledgement of local status moves.
+/// v8: durable delivery intents and deduplicated schedule/PR events.
+pub(crate) const SCHEMA_VERSION: i64 = 8;
 
 /// How often a watched pull request is re-read (`gh pr view`).
 pub(crate) const PR_POLL_MS: i64 = 5 * 60_000;
@@ -119,7 +120,7 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
         ));
     }
     if existing == Some(SCHEMA_VERSION) {
-        return Ok(());
+        return recover_delivery_intents(tx);
     }
     if existing.unwrap_or(0) < 1 {
         apply_v1(tx)?;
@@ -154,12 +155,76 @@ pub(crate) fn apply_pending_steps_in_tx(tx: &Transaction) -> rusqlite::Result<()
             );",
         )?;
     }
+    if existing.unwrap_or(0) < 7 {
+        add_column(
+            tx,
+            "work_tickets",
+            "status_revision",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+    }
+    if existing.unwrap_or(0) < 8 {
+        add_column(tx, "work_sends", "event_id", "TEXT")?;
+        add_column(
+            tx,
+            "work_sends",
+            "delivery_pending",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        tx.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS work_sends_event ON work_sends(event_id);",
+        )?;
+    }
+    recover_delivery_intents(tx)?;
     tx.execute(
         "INSERT INTO schema_versions (component, version) VALUES (?1, ?2)
          ON CONFLICT(component) DO UPDATE SET version = excluded.version",
         params![SCHEMA_COMPONENT, SCHEMA_VERSION],
     )?;
     Ok(())
+}
+
+fn recover_delivery_intents(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE work_sends SET delivery_pending = 0, results = ?1 WHERE delivery_pending = 1",
+        [json!([{"sessionId": null, "action": "unverifiable", "error": "Delivery was interrupted before its result was saved. Input may have reached a session; inspect it before sending again."}]).to_string()],
+    )?;
+    Ok(())
+}
+
+fn delivery_message(
+    conn: &Connection,
+    column: &Column,
+    ticket: &Ticket,
+    template: Option<&str>,
+) -> String {
+    let project = ticket
+        .project_id
+        .as_deref()
+        .and_then(|p| project_name(conn, p).ok());
+    render_message(
+        template.unwrap_or(&column.message),
+        ticket,
+        Some(column),
+        project.as_deref(),
+    )
+    .replace("{column.next}", &next_column_name(conn, column))
+}
+
+fn delivery_intent(
+    conn: &Connection,
+    column: &Column,
+    ticket: &Ticket,
+    trigger: &str,
+    event: Option<&str>,
+    template: Option<&str>,
+) -> Result<Option<i64>, RpcError> {
+    let inserted = conn.execute(
+        "INSERT INTO work_sends (column_id, ticket_id, trigger, message, results, at, event_id, delivery_pending)
+         VALUES (?1, ?2, ?3, ?4, '[]', ?5, ?6, 1) ON CONFLICT(event_id) DO NOTHING",
+        params![column.id, ticket.id, trigger, delivery_message(conn, column, ticket, template), crate::now_unix_ms() as i64, event],
+    ).map_err(error::from_sqlite)?;
+    Ok((inserted == 1).then(|| conn.last_insert_rowid()))
 }
 
 fn apply_v1(tx: &Transaction) -> rusqlite::Result<()> {
@@ -424,10 +489,11 @@ struct TicketExt {
     ext_sprint_id: Option<String>,
     push_error: Option<String>,
     removed_at: Option<i64>,
+    status_revision: i64,
 }
 
 const COLUMN_SELECT: &str = "SELECT id, name, icon, position, send_on_enter, cron, pr_watch, message, recipients, harness_id, next_run_at, board_id, statuses, collapsed FROM work_columns";
-const TICKET_SELECT: &str = "SELECT id, key, project_id, workspace_id, column_id, position, title, description, pr_url, pr_number, source_url, next_step, pr_fingerprint, pr_checked_at, created_at, updated_at, board_id, ext_id, ext_key, ext_url, issue_type, priority, assignee, ext_status_id, ext_status_name, ext_status_category, pending_status_id, status_conflict, sprint_id, ext_sprint_id, push_error, removed_at FROM work_tickets";
+const TICKET_SELECT: &str = "SELECT id, key, project_id, workspace_id, column_id, position, title, description, pr_url, pr_number, source_url, next_step, pr_fingerprint, pr_checked_at, created_at, updated_at, board_id, ext_id, ext_key, ext_url, issue_type, priority, assignee, ext_status_id, ext_status_name, ext_status_category, pending_status_id, status_conflict, sprint_id, ext_sprint_id, push_error, removed_at, status_revision FROM work_tickets";
 
 fn column_from_row(r: &rusqlite::Row) -> rusqlite::Result<Column> {
     Ok(Column {
@@ -483,6 +549,7 @@ fn ticket_from_row(r: &rusqlite::Row) -> rusqlite::Result<Ticket> {
             ext_sprint_id: r.get(29)?,
             push_error: r.get(30)?,
             removed_at: r.get(31)?,
+            status_revision: r.get(32)?,
         },
     })
 }
@@ -1054,7 +1121,7 @@ fn column_json(conn: &Connection, column: &Column) -> Result<Value, RpcError> {
                 .iter()
                 .filter_map(|raw| serde_json::from_str::<Vec<Value>>(raw).ok())
                 .flatten()
-                .filter(|r| r["action"] != "failed" && r["action"] != "skipped")
+                .filter(|r| matches!(r["action"].as_str(), Some("sent" | "resumed" | "started")))
                 .count();
             (Some(latest_at), delivered as i64)
         }
@@ -1274,7 +1341,7 @@ impl Engine {
         };
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT s.id, s.column_id, s.ticket_id, t.key, s.trigger, s.message, s.results, s.at
+                "SELECT s.id, s.column_id, s.ticket_id, t.key, s.trigger, s.message, s.results, s.at, s.event_id
                  FROM work_sends s LEFT JOIN work_tickets t ON t.id = s.ticket_id
                  WHERE s.{filter} ORDER BY s.at DESC, s.id DESC LIMIT {limit}"
             ))
@@ -1291,6 +1358,7 @@ impl Engine {
                     "message": r.get::<_, String>(5)?,
                     "results": serde_json::from_str::<Value>(&results).unwrap_or(json!([])),
                     "at": r.get::<_, i64>(7)?,
+                    "eventId": r.get::<_, Option<String>>(8)?,
                 }))
             })
             .map_err(error::from_sqlite)?
@@ -2100,26 +2168,35 @@ impl Engine {
         trigger: &str,
         template: Option<&str>,
     ) -> Result<Value, RpcError> {
+        self.deliver_intent(column, ticket_id, trigger, template, None)
+    }
+
+    fn deliver_intent(
+        &self,
+        column: &Column,
+        ticket_id: &str,
+        trigger: &str,
+        template: Option<&str>,
+        receipt: Option<i64>,
+    ) -> Result<Value, RpcError> {
         let _serial = DELIVERY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let (ticket, project, ids, next) = {
+        let (ticket, ids, message, receipt, stale) = {
             let conn = self.db.lock().unwrap();
             let ticket = get_ticket(&conn, ticket_id)?;
-            let project = ticket
-                .project_id
-                .as_deref()
-                .and_then(|p| project_name(&conn, p).ok());
             let ids = linked_session_ids(&conn, &ticket.id)?;
-            (ticket, project, ids, next_column_name(&conn, column))
+            let message = delivery_message(&conn, column, &ticket, template);
+            let receipt = match receipt {
+                Some(id) => id,
+                None => delivery_intent(&conn, column, &ticket, trigger, None, template)?.unwrap(),
+            };
+            let stale = matches!(trigger, "enter" | "schedule" | "pr_change")
+                && (ticket.column_id != column.id || !sync::prompts_live(&conn, &ticket)?);
+            (ticket, ids, message, receipt, stale)
         };
-        let message = render_message(
-            template.unwrap_or(&column.message),
-            &ticket,
-            Some(column),
-            project.as_deref(),
-        )
-        .replace("{column.next}", &next);
         let mut results = Vec::new();
-        if message.trim().is_empty() {
+        if stale {
+            results.push(json!({"sessionId": null, "action": "skipped", "error": "Ticket left the column or active sprint before delivery"}));
+        } else if message.trim().is_empty() {
             results
                 .push(json!({ "sessionId": null, "action": "skipped", "error": "empty message" }));
         } else {
@@ -2130,7 +2207,10 @@ impl Engine {
             let delivered = results
                 .iter()
                 .any(|r| matches!(r["action"].as_str(), Some("sent" | "resumed" | "started")));
-            if !delivered {
+            let failed = results
+                .iter()
+                .any(|r| matches!(r["action"].as_str(), Some("failed" | "unverifiable")));
+            if !delivered && !failed {
                 results.push(self.start_ticket_session(column, &ticket, &message));
             }
         }
@@ -2138,8 +2218,8 @@ impl Engine {
         {
             let conn = self.db.lock().unwrap();
             conn.execute(
-                "INSERT INTO work_sends (column_id, ticket_id, trigger, message, results, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![column.id, ticket.id, trigger, message, Value::Array(results.clone()).to_string(), at],
+                "UPDATE work_sends SET message = ?2, results = ?3, at = ?4, delivery_pending = 0 WHERE id = ?1",
+                params![receipt, message, Value::Array(results.clone()).to_string(), at],
             )
             .map_err(error::from_sqlite)?;
         }
@@ -2259,6 +2339,101 @@ impl Engine {
 
     // ---------------------------------------------------------- tick --
 
+    fn schedule_intents(
+        &self,
+        column: &Column,
+        due: i64,
+        next: Option<i64>,
+    ) -> Result<Vec<(String, i64)>, RpcError> {
+        let mut conn = self.db.lock().unwrap();
+        let tx = conn.transaction().map_err(error::from_sqlite)?;
+        if get_column(&tx, &column.id)?.next_run_at != Some(due) {
+            return Ok(Vec::new());
+        }
+        let mut planned = Vec::new();
+        if !column.message.trim().is_empty() {
+            for ticket in live_tickets(&tx, &column.id)? {
+                let event = format!("schedule:{}:{due}:{}", column.id, ticket.id);
+                if let Some(receipt) =
+                    delivery_intent(&tx, column, &ticket, "schedule", Some(&event), None)?
+                {
+                    planned.push((ticket.id, receipt));
+                }
+            }
+        }
+        tx.execute(
+            "UPDATE work_columns SET next_run_at = ?2 WHERE id = ?1",
+            params![column.id, next],
+        )
+        .map_err(error::from_sqlite)?;
+        tx.commit().map_err(error::from_sqlite)?;
+        Ok(planned)
+    }
+
+    fn pr_change_intent(
+        &self,
+        column: &Column,
+        ticket: &Ticket,
+        fingerprint: &str,
+        now: i64,
+    ) -> Result<Option<i64>, RpcError> {
+        use sha2::Digest;
+        let mut conn = self.db.lock().unwrap();
+        let tx = conn.transaction().map_err(error::from_sqlite)?;
+        let fresh = get_ticket(&tx, &ticket.id)?;
+        if fresh.pr_fingerprint != ticket.pr_fingerprint
+            || fresh.pr_checked_at != ticket.pr_checked_at
+            || fresh.pr_url != ticket.pr_url
+            || fresh.pr_number != ticket.pr_number
+        {
+            return Ok(None);
+        }
+        let receipt = if ticket
+            .pr_fingerprint
+            .as_deref()
+            .is_some_and(|old| old != fingerprint)
+        {
+            let digest = sha2::Sha256::digest(
+                json!([ticket.pr_fingerprint, ticket.pr_checked_at, fingerprint])
+                    .to_string()
+                    .as_bytes(),
+            );
+            let event = format!("pr:{}:{}:{digest:x}", column.id, ticket.id);
+            delivery_intent(&tx, column, &fresh, "pr_change", Some(&event), None)?
+        } else {
+            None
+        };
+        tx.execute(
+            "UPDATE work_tickets SET pr_fingerprint = ?2, pr_checked_at = ?3 WHERE id = ?1",
+            params![
+                ticket.id,
+                fingerprint,
+                now.max(fresh.pr_checked_at.unwrap_or(0).saturating_add(1))
+            ],
+        )
+        .map_err(error::from_sqlite)?;
+        tx.commit().map_err(error::from_sqlite)?;
+        Ok(receipt)
+    }
+
+    fn deliver_planned(&self, column: &Column, ticket: &str, trigger: &str, receipt: i64) {
+        if let Err(err) = self.deliver_intent(column, ticket, trigger, None, Some(receipt)) {
+            let conn = self.db.lock().unwrap();
+            let _ = conn.execute(
+                "UPDATE work_sends SET delivery_pending = 0, results = ?2 WHERE id = ?1",
+                params![
+                    receipt,
+                    json!([{"sessionId": null, "action": "unverifiable", "error": err.message}])
+                        .to_string()
+                ],
+            );
+            eprintln!(
+                "[work] {trigger} delivery for {ticket} is unverifiable: {}",
+                err.message
+            );
+        }
+    }
+
     /// Scheduled column sends and pull-request watches. Best-effort: runs on
     /// the automation scheduler's tick and never fails it.
     pub(crate) fn tick_work(&self, now_ms: f64) {
@@ -2281,23 +2456,16 @@ impl Engine {
                 && due <= now
             {
                 let next = crate::automations::scheduler::next_fire_ms(cron, now_ms);
-                let tickets = {
-                    let conn = self.db.lock().unwrap();
-                    let _ = conn.execute(
-                        "UPDATE work_columns SET next_run_at = ?2 WHERE id = ?1",
-                        params![column.id, next],
-                    );
-                    live_tickets(&conn, &column.id).unwrap_or_default()
-                };
-                if !column.message.trim().is_empty() {
-                    for ticket in tickets {
-                        if let Err(err) = self.deliver(column, &ticket.id, "schedule", None) {
-                            eprintln!(
-                                "[work] scheduled send for {} failed: {}",
-                                ticket.key, err.message
-                            );
+                match self.schedule_intents(column, due, next) {
+                    Ok(planned) => {
+                        for (ticket, receipt) in planned {
+                            self.deliver_planned(column, &ticket, "schedule", receipt);
                         }
                     }
+                    Err(err) => eprintln!(
+                        "[work] cannot save scheduled delivery intent: {}",
+                        err.message
+                    ),
                 }
             }
             if column.pr_watch && !column.message.trim().is_empty() {
@@ -2335,21 +2503,13 @@ impl Engine {
                     continue;
                 }
             };
-            {
-                let conn = self.db.lock().unwrap();
-                let _ = conn.execute(
-                    "UPDATE work_tickets SET pr_fingerprint = ?2, pr_checked_at = ?3 WHERE id = ?1",
-                    params![ticket.id, fingerprint, now],
-                );
-            }
-            if let Some(previous) = &ticket.pr_fingerprint
-                && *previous != fingerprint
-                && let Err(err) = self.deliver(column, &ticket.id, "pr_change", None)
-            {
-                eprintln!(
-                    "[work] PR-change send for {} failed: {}",
-                    ticket.key, err.message
-                );
+            match self.pr_change_intent(column, &ticket, &fingerprint, now) {
+                Ok(Some(receipt)) => self.deliver_planned(column, &ticket.id, "pr_change", receipt),
+                Ok(None) => {}
+                Err(err) => eprintln!(
+                    "[work] cannot save PR-change delivery intent: {}",
+                    err.message
+                ),
             }
         }
     }
@@ -2423,6 +2583,365 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_pr_poll_cannot_record_a_baseline_after_the_link_changes() {
+        for (old_link, new_link) in [
+            (
+                "https://github.com/clioo/drogon/pull/1",
+                "https://github.com/clioo/another/pull/1",
+            ),
+            ("1", "2"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let engine = Engine::open(dir.path()).unwrap();
+            let created = engine
+                .do_work_ticket_create(
+                    &json!({"title": "Changed PR", "columnId": "Review", "prUrl": old_link}),
+                )
+                .unwrap();
+            let id = created["id"].as_str().unwrap();
+            let column = get_column(&engine.db.lock().unwrap(), "Review").unwrap();
+            let old = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
+            engine
+                .do_work_ticket_update(&json!({"ticketId": id, "prUrl": new_link}))
+                .unwrap();
+            engine
+                .pr_change_intent(&column, &old, "old PR response", 1)
+                .unwrap();
+            let fresh = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
+            assert_eq!(
+                fresh.pr_fingerprint, None,
+                "an old PR response must not seed the new link's baseline"
+            );
+            assert_eq!(fresh.pr_checked_at, None);
+        }
+    }
+
+    #[test]
+    fn recurring_pr_transitions_get_distinct_intents_and_stale_polls_cannot_replay() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open(dir.path()).unwrap();
+        let created = engine
+            .do_work_ticket_create(&json!({"title": "PR events", "columnId": "Review"}))
+            .unwrap();
+        let id = created["id"].as_str().unwrap();
+        let column = get_column(&engine.db.lock().unwrap(), "Review").unwrap();
+        let initial = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
+        assert!(
+            engine
+                .pr_change_intent(&column, &initial, "A", 1)
+                .unwrap()
+                .is_none()
+        );
+        let at_first_a = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
+        for (at, fingerprint) in [(2, "B"), (3, "A"), (4, "B")] {
+            let ticket = get_ticket(&engine.db.lock().unwrap(), id).unwrap();
+            assert!(
+                engine
+                    .pr_change_intent(&column, &ticket, fingerprint, at)
+                    .unwrap()
+                    .is_some(),
+                "event {at} must be admitted"
+            );
+            assert!(
+                engine
+                    .pr_change_intent(&column, &ticket, fingerprint, at)
+                    .unwrap()
+                    .is_none(),
+                "same poll is stale"
+            );
+            if at == 3 {
+                assert!(
+                    engine
+                        .pr_change_intent(&column, &at_first_a, "stale observation", at)
+                        .unwrap()
+                        .is_none(),
+                    "a poll from the first A must not overwrite the second A"
+                );
+            }
+        }
+        assert!(
+            engine
+                .pr_change_intent(&column, &initial, "A", 5)
+                .unwrap()
+                .is_none(),
+            "an old baseline must not roll back the current PR state"
+        );
+        let sends = engine.work_sends(&json!({"ticketId": id})).unwrap();
+        assert_eq!(sends["sends"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_schedule_is_not_consumed_when_its_delivery_intent_cannot_be_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open(dir.path()).unwrap();
+        engine
+            .do_work_ticket_create(&json!({"title": "Scheduled", "columnId": "Review"}))
+            .unwrap();
+        let column = engine
+            .do_work_column_update(
+                &json!({"columnId": "Review", "cron": "15m", "message": "Check {ticket.key}"}),
+            )
+            .unwrap();
+        let due = column["nextRunAt"].as_i64().unwrap();
+        engine.db.lock().unwrap().execute_batch("CREATE TRIGGER reject_delivery BEFORE INSERT ON work_sends BEGIN SELECT RAISE(ABORT, 'fixture storage failure'); END;").unwrap();
+        engine.tick_work(due as f64);
+        assert_eq!(
+            get_column(&engine.db.lock().unwrap(), "Review")
+                .unwrap()
+                .next_run_at,
+            Some(due)
+        );
+        engine
+            .db
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER reject_delivery;")
+            .unwrap();
+        engine.tick_work(due as f64);
+        engine.tick_work(due as f64);
+        let sends = engine.work_sends(&json!({"columnId": "Review"})).unwrap();
+        assert_eq!(sends["sends"].as_array().unwrap().len(), 1, "{sends}");
+    }
+
+    #[test]
+    fn interrupted_schedule_and_pr_intents_are_durable_and_never_replayed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ticket_id, due) = {
+            let engine = Engine::open(dir.path()).unwrap();
+            let created = engine
+                .do_work_ticket_create(&json!({"title": "Interrupted", "columnId": "Review"}))
+                .unwrap();
+            let id = created["id"].as_str().unwrap().to_owned();
+            let updated = engine
+                .do_work_column_update(
+                    &json!({"columnId": "Review", "cron": "15m", "message": "Check {ticket.key}"}),
+                )
+                .unwrap();
+            let due = updated["nextRunAt"].as_i64().unwrap();
+            let column = get_column(&engine.db.lock().unwrap(), "Review").unwrap();
+            let intents = engine
+                .schedule_intents(&column, due, Some(due + 900_000))
+                .unwrap();
+            assert_eq!(intents.len(), 1);
+            assert!(
+                engine
+                    .schedule_intents(&column, due, Some(due + 900_000))
+                    .unwrap()
+                    .is_empty()
+            );
+            engine
+                .db
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE work_tickets SET pr_fingerprint = 'old' WHERE id = ?1",
+                    [&id],
+                )
+                .unwrap();
+            let ticket = get_ticket(&engine.db.lock().unwrap(), &id).unwrap();
+            engine.db.lock().unwrap().execute_batch("CREATE TRIGGER reject_delivery BEFORE INSERT ON work_sends BEGIN SELECT RAISE(ABORT, 'fixture storage failure'); END;").unwrap();
+            assert!(
+                engine
+                    .pr_change_intent(&column, &ticket, "new", due)
+                    .is_err()
+            );
+            assert_eq!(
+                get_ticket(&engine.db.lock().unwrap(), &id)
+                    .unwrap()
+                    .pr_fingerprint
+                    .as_deref(),
+                Some("old")
+            );
+            engine
+                .db
+                .lock()
+                .unwrap()
+                .execute_batch("DROP TRIGGER reject_delivery;")
+                .unwrap();
+            assert!(
+                engine
+                    .pr_change_intent(&column, &ticket, "new", due)
+                    .unwrap()
+                    .is_some()
+            );
+            (id, due)
+        };
+        // Restart after durable admission, before a durable delivery result.
+        let engine = Engine::open(dir.path()).unwrap();
+        engine.tick_work(due as f64);
+        let sends = engine.work_sends(&json!({"ticketId": ticket_id})).unwrap();
+        let rows = sends["sends"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "{sends}");
+        for send in rows {
+            assert_eq!(send["results"][0]["action"], "unverifiable", "{send}");
+            assert!(send["eventId"].as_str().unwrap().starts_with(
+                if send["trigger"] == "schedule" {
+                    "schedule:"
+                } else {
+                    "pr:"
+                }
+            ));
+        }
+        let column = get_column(&engine.db.lock().unwrap(), "Review").unwrap();
+        let ticket = get_ticket(&engine.db.lock().unwrap(), &ticket_id).unwrap();
+        assert!(
+            engine
+                .pr_change_intent(&column, &ticket, "new", due)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            column_json(&engine.db.lock().unwrap(), &column).unwrap()["lastSentCount"],
+            0
+        );
+        drop(engine);
+        let second_restart = Engine::open(dir.path()).unwrap();
+        second_restart.tick_work(due as f64);
+        assert_eq!(
+            second_restart
+                .work_sends(&json!({"ticketId": ticket_id}))
+                .unwrap(),
+            sends
+        );
+    }
+
+    #[cfg(unix)]
+    #[derive(Debug)]
+    struct RetainedTestChild;
+
+    #[cfg(unix)]
+    impl portable_pty::ChildKiller for RetainedTestChild {
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+            Box::new(Self)
+        }
+    }
+
+    #[cfg(unix)]
+    impl portable_pty::Child for RetainedTestChild {
+        fn try_wait(&mut self) -> std::io::Result<Option<portable_pty::ExitStatus>> {
+            Ok(None)
+        }
+        fn wait(&mut self) -> std::io::Result<portable_pty::ExitStatus> {
+            Ok(portable_pty::ExitStatus::with_exit_code(0))
+        }
+        fn process_id(&self) -> Option<u32> {
+            None
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_or_partial_pty_delivery_never_starts_a_replacement() {
+        assert_failed_delivery(&[false, true]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_partial_pty_write_alone_never_starts_a_replacement() {
+        assert_failed_delivery(&[true]);
+    }
+
+    #[cfg(unix)]
+    fn assert_failed_delivery(partials: &[bool]) {
+        struct FailingWriter {
+            accept_body: bool,
+        }
+        impl std::io::Write for FailingWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.accept_body {
+                    self.accept_body = false;
+                    Ok(bytes.len())
+                } else {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "fixture write failure",
+                    ))
+                }
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        for &partial in partials {
+            let dir = tempfile::tempdir().unwrap();
+            let engine = Engine::open(dir.path()).unwrap();
+            let ticket = engine
+                .do_work_ticket_create(&json!({"title": "Write failure", "columnId": "Review"}))
+                .unwrap();
+            let id = ticket["id"].as_str().unwrap();
+            let column = {
+                let conn = engine.db.lock().unwrap();
+                conn.execute("INSERT INTO work_ticket_sessions (ticket_id, session_id, linked_at) VALUES (?1, 'failed-recipient', 0)", [id]).unwrap();
+                let mut column = get_column(&conn, "Review").unwrap();
+                column.message = "A prompt".into();
+                column
+            };
+            let pair = portable_pty::native_pty_system()
+                .openpty(portable_pty::PtySize::default())
+                .unwrap();
+            let handle = crate::session::SessionHandle::from_spawned(
+                "failed-recipient".into(),
+                "incarnation".into(),
+                "workspace".into(),
+                "/tmp".into(),
+                "local".into(),
+                "fixture".into(),
+                vec![],
+                None,
+                None,
+                None,
+                "now".into(),
+                80,
+                24,
+                pair.master,
+                Box::new(FailingWriter {
+                    accept_body: partial,
+                }),
+                Box::new(RetainedTestChild),
+                engine.db.clone(),
+            );
+            engine
+                .sessions
+                .lock()
+                .unwrap()
+                .insert("failed-recipient".into(), handle);
+            let sent = engine.deliver(&column, id, "manual", None).unwrap();
+            engine.sessions.lock().unwrap().remove("failed-recipient");
+            let results = sent["results"].as_array().unwrap();
+            assert_eq!(results.len(), 1, "{sent}");
+            assert_eq!(results[0]["action"], "failed", "{sent}");
+            assert_eq!(
+                results[0]["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("composer unsubmitted"),
+                partial
+            );
+
+            engine
+                .db
+                .lock()
+                .unwrap()
+                .execute(
+                    "DELETE FROM work_ticket_sessions WHERE ticket_id = ?1",
+                    [id],
+                )
+                .unwrap();
+            let no_recipient = engine.deliver(&column, id, "manual", None).unwrap();
+            assert_eq!(no_recipient["results"][0]["action"], "skipped");
+            assert!(
+                no_recipient["results"][0]["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("no workspace or project")
+            );
+        }
+    }
+
+    #[test]
     fn a_v5_database_gains_the_ticket_workspaces_table() {
         let mut conn = Connection::open_in_memory().unwrap();
         let has_table = |conn: &Connection| -> bool {
@@ -2462,7 +2981,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, SCHEMA_VERSION);
         conn.execute(
             "INSERT INTO work_ticket_workspaces (ticket_id, workspace_id) VALUES ('t', 'w')",
             [],
