@@ -1050,11 +1050,14 @@ fn column_json(conn: &Connection, column: &Column) -> Result<Value, RpcError> {
                 .map_err(error::from_sqlite)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(error::from_sqlite)?;
+            // "Reached" is the same set `deliver` calls delivered, named
+            // positively: an action that is not one of these -- a failed
+            // write, an uncertain one -- is not a session this prompt got to.
             let delivered = rows
                 .iter()
                 .filter_map(|raw| serde_json::from_str::<Vec<Value>>(raw).ok())
                 .flatten()
-                .filter(|r| r["action"] != "failed" && r["action"] != "skipped")
+                .filter(|r| matches!(r["action"].as_str(), Some("sent" | "resumed" | "started")))
                 .count();
             (Some(latest_at), delivered as i64)
         }
@@ -2585,6 +2588,9 @@ mod tests {
                     ["live-recipient"],
                     "the ticket keeps the session it had, and gains none"
                 );
+                // And the column does not claim it reached anybody.
+                let column = column_json(&conn, &get_column(&conn, "Review").unwrap()).unwrap();
+                assert_eq!(column["lastSentCount"], 0, "{column}");
             }
 
             // The legitimate fresh branch is untouched: with nothing linked,
