@@ -1066,6 +1066,19 @@ mod tests {
         );
     }
 
+    /// The other half of the missing-table escape hatch: the WRITE refuses
+    /// instead of pretending. A watch whose table does not exist reads as
+    /// empty and then cannot commit, so the hatch can never turn into a
+    /// silent release against a set nobody ever stored.
+    #[test]
+    fn a_missing_seen_table_refuses_the_write_rather_than_losing_it() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let tx = conn.transaction().unwrap();
+        let error = record_seen_in_tx(&tx, "mon_1", &BTreeSet::from([41]), 1.0)
+            .expect_err("there is no table to write into");
+        assert!(seen_table_missing(&error), "{error}");
+    }
+
     /// The classifier itself, on every shape that decides the answer.
     /// Getting this wrong in the permissive direction is the whole bug:
     /// "missing" means the empty set, and the empty set deletes rows.
