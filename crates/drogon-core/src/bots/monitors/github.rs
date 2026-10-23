@@ -684,7 +684,14 @@ pub fn seen_for_monitor(
         // shrink the set silently, which the rewrite then makes permanent.
         let mut numbers = BTreeSet::new();
         for row in rows {
-            numbers.insert(row? as u64);
+            let number = row?;
+            // A pull request number is never negative: a row that says so
+            // is corruption, and reading it as `u64::MAX` would both
+            // survive pruning and move the cursor. Fail the read instead.
+            if number < 0 {
+                return Err(rusqlite::Error::IntegralValueOutOfRange(0, number));
+            }
+            numbers.insert(number as u64);
         }
         Ok(numbers)
     };
@@ -692,7 +699,7 @@ pub fn seen_for_monitor(
         Ok(numbers) => Ok(numbers),
         Err(e) if seen_table_missing(&e) => Ok(BTreeSet::new()),
         Err(e) => Err(SeenReadError {
-            message: format!("the watch's seen set could not be read: {e}"),
+            message: truncate(&format!("the watch's seen set could not be read: {e}")),
         }),
     }
 }
@@ -993,6 +1000,24 @@ mod tests {
         assert_eq!(error.error_kind(), MonitorErrorKind::IoError);
     }
 
+    /// A stored number no pull request can have is corruption, not a
+    /// member of the set: reading it as `u64::MAX` would prune a real
+    /// number out of the set and move the cursor.
+    #[test]
+    fn a_number_no_pull_request_can_have_fails_the_read() {
+        let conn = Connection::open_in_memory().unwrap();
+        seen_schema(&conn);
+        insert_seen(&conn, "mon_1", &[10, 11]);
+        conn.execute(
+            "INSERT INTO bot_monitor_github_seen (monitor_id, pull_number, seen_at_ms)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params!["mon_1", -1i64, 1.0f64],
+        )
+        .unwrap();
+        let error = seen_for_monitor(&conn, "mon_1").expect_err("a negative number is corruption");
+        assert_eq!(error.error_kind(), MonitorErrorKind::IoError);
+    }
+
     /// "The table is gone" is the ONLY swallowed failure. A table that
     /// exists but does not answer this query is unreadable state.
     #[test]
@@ -1041,7 +1066,9 @@ mod tests {
         );
     }
 
-    /// The classifier itself, on the two shapes that decide the answer.
+    /// The classifier itself, on every shape that decides the answer.
+    /// Getting this wrong in the permissive direction is the whole bug:
+    /// "missing" means the empty set, and the empty set deletes rows.
     #[test]
     fn only_this_tables_absence_reads_as_never_released() {
         let conn = Connection::open_in_memory().unwrap();
@@ -1054,6 +1081,26 @@ mod tests {
             .prepare("SELECT 1 FROM some_other_table")
             .expect_err("that table is not there either");
         assert!(!seen_table_missing(&elsewhere), "{elsewhere}");
+
+        // An error that NAMES this table without being its absence: schema
+        // drift, not a watch that never released anything.
+        seen_schema(&conn);
+        let drifted = conn
+            .prepare("INSERT INTO bot_monitor_github_seen (nope) VALUES (1)")
+            .expect_err("that column is not there");
+        assert!(
+            drifted.to_string().contains(SEEN_TABLE),
+            "the message names the table: {drifted}"
+        );
+        assert!(!seen_table_missing(&drifted), "{drifted}");
+
+        // The sqlite result code decides, never the text alone: a busy
+        // database is unreadable state whatever its message says.
+        let busy = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some(format!("no such table: {SEEN_TABLE}")),
+        );
+        assert!(!seen_table_missing(&busy), "{busy}");
     }
 
     fn rule(filter: GithubPrFilter, login: Option<&str>) -> GithubPrRule {
