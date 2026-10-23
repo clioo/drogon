@@ -11,6 +11,7 @@
 import {
   MEETINGS_ACTIONS_CAPABILITY,
   MEETINGS_CAPABILITY,
+  MEETINGS_WORK_CAPABILITY,
   type MeetingsBridge,
 } from "../../shared/meetings-contract";
 import { routeId } from "./route-panel-contract";
@@ -18,7 +19,7 @@ import { routeId } from "./route-panel-contract";
 /** Branded form of the "meetings" route id SidebarNav already routes to. */
 export const MEETINGS_ROUTE_ID = routeId("meetings");
 
-export { MEETINGS_ACTIONS_CAPABILITY, MEETINGS_CAPABILITY };
+export { MEETINGS_ACTIONS_CAPABILITY, MEETINGS_CAPABILITY, MEETINGS_WORK_CAPABILITY };
 
 /** The keep-alive host section's test id (App.tsx and the Escape hook share it). */
 export const MEETINGS_PAGE_HOST_TESTID = "meetings-page-host";
@@ -38,6 +39,15 @@ export function isMeetingsActionsAvailable(capabilities: readonly string[]): boo
 }
 
 /**
+ * True when the service can turn an accepted commitment into a Work ticket.
+ * Additive on top of the actions capability, so a ledger-only service keeps
+ * its ledger and reports the missing step as unavailable.
+ */
+export function isMeetingsWorkAvailable(capabilities: readonly string[]): boolean {
+  return capabilities.includes(MEETINGS_WORK_CAPABILITY);
+}
+
+/**
  * The granted `window.drogon.meetings` namespace. DesktopBridge declares it
  * optionally (a build without the meetings bridge has no namespace at all),
  * so the page renders the honest "no bridge" failure rather than guessing.
@@ -53,16 +63,18 @@ export function windowMeetingsBridge(): MeetingsBridge | null {
  * time, so a mid-life loss refuses on the very next call and the page never
  * shows stale or invented meetings.
  *
- * Two predicates, not one: listing and reading the notes is `meetings.v1`,
- * while extracting and recording actions is `meetings.actions.v1`. An
- * index-only service therefore stays fully usable — the page browses and
- * searches, and the actions refuse with their own capability message instead
- * of a shape that cannot work.
+ * Three predicates, not one: listing and reading the notes is `meetings.v1`,
+ * while extracting and recording actions is `meetings.actions.v1`, and turning
+ * one of them into a Work ticket is `meetings.work.v1`. An index-only service
+ * therefore stays fully usable — the page browses and searches, and the
+ * actions refuse with their own capability message instead of a shape that
+ * cannot work.
  */
 export function createGatedMeetingsBridge(
   source: MeetingsBridge,
   isAllowed: () => boolean,
   isActionsAllowed: () => boolean = isAllowed,
+  isWorkAllowed: () => boolean = isActionsAllowed,
 ): MeetingsBridge {
   const refused = () =>
     Promise.resolve({
@@ -83,6 +95,15 @@ export function createGatedMeetingsBridge(
         retryable: true,
       },
     });
+  const workRefused = () =>
+    Promise.resolve({
+      ok: false as const,
+      error: {
+        code: "unsupported_capability",
+        message: "meetings.work.v1 capability is not advertised by the service",
+        retryable: true,
+      },
+    });
   return {
     list: (input) => (isAllowed() ? source.list(input) : refused()),
     read: (input) => (isAllowed() ? source.read(input) : refused()),
@@ -91,5 +112,6 @@ export function createGatedMeetingsBridge(
       isActionsAllowed() ? source.commitments(input) : actionsRefused(),
     accept: (input) => (isActionsAllowed() ? source.accept(input) : actionsRefused()),
     resolve: (input) => (isActionsAllowed() ? source.resolve(input) : actionsRefused()),
+    track: (input) => (isWorkAllowed() ? source.track(input) : workRefused()),
   };
 }

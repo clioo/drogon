@@ -15,7 +15,8 @@ type MeetingsRequest =
   | { op: "analyze"; params: object }
   | { op: "commitments"; params: object }
   | { op: "accept"; params: object }
-  | { op: "resolve"; params: object };
+  | { op: "resolve"; params: object }
+  | { op: "track"; params: object };
 
 const call = (op: MeetingsRequest["op"], params: object): Promise<unknown> =>
   ipcRenderer.invoke(MEETINGS_IPC_CHANNEL, { op, params });
@@ -30,4 +31,5 @@ export const meetings: MeetingsBridge = {
     call("commitments", input ?? {}) as ReturnType<MeetingsBridge["commitments"]>,
   accept: (input) => call("accept", input) as ReturnType<MeetingsBridge["accept"]>,
   resolve: (input) => call("resolve", input) as ReturnType<MeetingsBridge["resolve"]>,
+  track: (input) => call("track", input) as ReturnType<MeetingsBridge["track"]>,
 };

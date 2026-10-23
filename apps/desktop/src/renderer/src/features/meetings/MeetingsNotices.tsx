@@ -4,7 +4,7 @@
 // are the fork's; the folder line is additive so the resolved notes folder,
 // where that answer came from and its state are always visible, even while
 // the headline reason is something else.
-import { ExternalLink } from "lucide-react";
+import { AppWindow, ExternalLink, FolderOpen } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import type { MeetingsPage } from "../../../../shared/meetings-contract";
 import {
@@ -25,18 +25,61 @@ function Notice({ title, description }: { title: string; description: string }) 
 export function MeetingsNotices({
   page,
   error,
+  toolError,
   onOpenSetup,
+  onOpenTool,
+  onRevealNotes,
 }: {
   page: MeetingsPage | null;
   error: string | null;
+  /** A failed "open the tool" / "reveal the folder" attempt, said out loud. */
+  toolError: string | null;
   onOpenSetup: () => void;
+  onOpenTool: () => void;
+  onRevealNotes: () => void;
 }): React.JSX.Element {
   const availability = page ? meetingsAvailabilityCopy(page) : null;
   return (
     <div className="space-y-3">
       {page ? (
-        <p className="truncate text-xs text-muted-foreground" title={meetingsFolderLine(page)}>
-          {meetingsFolderLine(page)}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p
+            className="min-w-0 truncate text-xs text-muted-foreground"
+            title={meetingsFolderLine(page)}
+          >
+            {meetingsFolderLine(page)}
+          </p>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {page.availability.installationPath !== null ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-xs"
+                title="Write That Down opens in the menu bar; start the recording there. Drogon only reads the notes it writes."
+                onClick={onOpenTool}
+              >
+                <AppWindow className="size-3.5" />
+                Open Write That Down
+              </Button>
+            ) : null}
+            {page.availability.transcriptRootState === "readable" ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-xs"
+                title="Show the resolved notes folder in Finder (Drogon never edits it)"
+                onClick={onRevealNotes}
+              >
+                <FolderOpen className="size-3.5" />
+                Reveal notes folder
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {toolError !== null ? (
+        <p role="alert" className="text-xs text-destructive">
+          {toolError}
         </p>
       ) : null}
       {availability ? (

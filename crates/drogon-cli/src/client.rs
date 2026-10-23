@@ -692,6 +692,10 @@ pub struct MeetingAvailability {
     pub platform: String,
     pub supported: bool,
     pub installation: String,
+    /// The bundle that produced `installation: "installed"`, so a client can
+    /// open the tool it actually found. `None` in every other state.
+    #[serde(default)]
+    pub installation_path: Option<String>,
     pub configuration: String,
     pub configured: bool,
     pub config_path: String,
@@ -1108,6 +1112,13 @@ fn check_meeting_availability(availability: &MeetingAvailability) -> Result<(), 
             "installation must be installed|not-installed|unsupported, got {}",
             availability.installation
         ));
+    }
+    // The path and the state must agree: an installed tool names its bundle,
+    // and a missing one never invents a path to open.
+    if (availability.installation == "installed") != availability.installation_path.is_some() {
+        return Err(
+            "installationPath must be present exactly when installation is installed".to_string(),
+        );
     }
     if !["defaults", "configured", "invalid"].contains(&availability.configuration.as_str()) {
         return Err(format!(

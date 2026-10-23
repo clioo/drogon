@@ -16,6 +16,7 @@ import {
   commitment,
   commitmentPage,
   page,
+  tracked,
   transcript,
 } from "./meetings-test-fixtures";
 import MeetingsPage, { type MeetingsPageProps } from "./MeetingsPage";
@@ -534,6 +535,119 @@ describe("Meetings page list and reader", () => {
     await waitFor(() =>
       expect(bridge.read).toHaveBeenCalledWith({ id: NOTE_ID }),
     );
+  });
+});
+
+describe("Meetings page tracked work", () => {
+  it("turns an accepted action into a Drogon task and shows the ticket key", async () => {
+    const untracked = commitmentPage();
+    const nowTracked = commitmentPage({ commitments: [tracked().commitment] });
+    const commitments = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true as const, result: untracked })
+      .mockResolvedValue({ ok: true as const, result: nowTracked });
+    const track = vi.fn(async () => ({ ok: true as const, result: tracked() }));
+    const bridge = fixturesBridge({ commitments, track });
+    renderPage({ bridge });
+    await openActionsTab();
+
+    // Accepted is not tracked: the row offers the step and names no work yet.
+    expect(screen.queryByText("DRG-41")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: /Track as a Drogon task/ }));
+    await waitFor(() => expect(track).toHaveBeenCalledWith({ id: "commitment-1" }));
+    expect(await screen.findByText(/Tracked as DRG-41 on the Drogon Work board/)).toBeTruthy();
+    // The ledger is reloaded, so the row now names the work and no longer
+    // offers to create it again.
+    expect(await screen.findByText("DRG-41")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Track as a Drogon task/ })).toBeNull();
+    expect(commitments).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a refusal instead of showing the action as tracked", async () => {
+    const track = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: "commitment_quote_missing",
+        message:
+          "The transcript no longer contains this action's quote, so no Drogon task was created.",
+        retryable: false,
+      },
+    }));
+    const bridge = fixturesBridge({ track });
+    renderPage({ bridge });
+    await openActionsTab();
+    fireEvent.click(await screen.findByRole("button", { name: /Track as a Drogon task/ }));
+    expect(await screen.findByText(/no Drogon task was created/)).toBeTruthy();
+    expect(screen.queryByText(/Tracked as/)).toBeNull();
+    expect(screen.queryByText("DRG-41")).toBeNull();
+  });
+
+  it("shows the same ticket when the action was already tracked", async () => {
+    const commitments = vi.fn(async () => ({
+      ok: true as const,
+      result: commitmentPage({ commitments: [tracked().commitment] }),
+    }));
+    const bridge = fixturesBridge({ commitments });
+    renderPage({ bridge });
+    await openActionsTab();
+    // The key is the pointer to the work; the step is not offered twice.
+    expect(await screen.findByText("DRG-41")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Track as a Drogon task/ })).toBeNull();
+  });
+});
+
+describe("Meetings page recording tool", () => {
+  it("opens the bundle the daemon found, and says so when it cannot", async () => {
+    const openTool = vi.fn(async () => null);
+    renderPage({ bridge: bridgeFor(page()), openTool });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Open Write That Down/ }),
+    );
+    await waitFor(() =>
+      expect(openTool).toHaveBeenCalledWith("/Applications/WriteThatDown.app"),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    const failing = vi.fn(async () => "no application knows how to open it");
+    cleanup();
+    renderPage({ bridge: bridgeFor(page()), openTool: failing });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Open Write That Down/ }),
+    );
+    expect(await screen.findByText("no application knows how to open it")).toBeTruthy();
+  });
+
+  it("offers the tool only when the daemon found a bundle", async () => {
+    const absent = page({
+      availability: availability({
+        status: "unavailable",
+        reason: "not-installed",
+        installation: "not-installed",
+        installationPath: null,
+      }),
+    });
+    renderPage({ bridge: bridgeFor(absent) });
+    await screen.findByText("Write That Down is not installed");
+    expect(screen.queryByRole("button", { name: /Open Write That Down/ })).toBeNull();
+    // The setup path stays the action for a missing tool.
+    expect(screen.getByRole("button", { name: /View setup/ })).toBeTruthy();
+  });
+
+  it("reveals the resolved notes folder and never a folder it could not read", async () => {
+    const revealNotes = vi.fn(async () => null);
+    renderPage({ bridge: bridgeFor(page()), revealNotes });
+    fireEvent.click(await screen.findByRole("button", { name: /Reveal notes folder/ }));
+    await waitFor(() =>
+      expect(revealNotes).toHaveBeenCalledWith("/home/carlos/Transcripts"),
+    );
+
+    cleanup();
+    const missingFolder = page({
+      availability: availability({ transcriptRootState: "missing", reason: "transcript-root-missing" }),
+    });
+    renderPage({ bridge: bridgeFor(missingFolder), revealNotes });
+    await screen.findByText("Notes folder not found");
+    expect(screen.queryByRole("button", { name: /Reveal notes folder/ })).toBeNull();
   });
 });
 

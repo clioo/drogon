@@ -9,10 +9,21 @@ import type {
   MeetingCommitment,
   MeetingCommitmentPage,
   MeetingCommitmentStatus,
+  MeetingCommitmentTracked,
   MeetingsBridge,
 } from "../../../../shared/meetings-contract";
 
 export const MEETINGS_ACTIONS_DEBOUNCE_MS = 250;
+
+/**
+ * What the ledger says after tracking. `created: false` is a distinct answer:
+ * the promise already had its ticket, and no second one was made.
+ */
+export function trackedNotice(tracked: MeetingCommitmentTracked): string {
+  return tracked.created
+    ? `Tracked as ${tracked.ticket.key} on the Drogon Work board.`
+    : `${tracked.ticket.key} was already the Drogon task for this action.`;
+}
 
 export type MeetingCommitmentsController = {
   page: MeetingCommitmentPage | null;
@@ -26,6 +37,11 @@ export type MeetingCommitmentsController = {
   acceptNotice: string | null;
   acceptError: string | null;
   acceptingLine: number | null;
+  /** The commitment whose Work ticket is being created right now. */
+  trackingId: string | null;
+  /** Set after a track, naming the ticket the daemon created (or found). */
+  trackNotice: string | null;
+  trackError: string | null;
   accept: (input: {
     meetingId: string;
     text: string;
@@ -36,6 +52,12 @@ export type MeetingCommitmentsController = {
     line: number;
   }) => void;
   resolve: (commitment: MeetingCommitment, status: MeetingCommitmentStatus) => void;
+  /**
+   * Turns one accepted commitment into a Drogon Work ticket. The daemon
+   * re-verifies the quote first, so a refusal creates nothing and the ledger
+   * is reloaded rather than optimistically marked tracked.
+   */
+  track: (commitment: MeetingCommitment) => void;
   refresh: () => void;
   clearNotices: () => void;
 };
@@ -57,6 +79,9 @@ export function useMeetingCommitments({
   const [acceptNotice, setAcceptNotice] = useState<string | null>(null);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [acceptingLine, setAcceptingLine] = useState<number | null>(null);
+  const [trackingId, setTrackingId] = useState<string | null>(null);
+  const [trackNotice, setTrackNotice] = useState<string | null>(null);
+  const [trackError, setTrackError] = useState<string | null>(null);
   const generation = useRef(0);
 
   useEffect(() => {
@@ -174,9 +199,40 @@ export function useMeetingCommitments({
     [bridge, busyId, load],
   );
 
+  const track = useCallback(
+    (commitment: MeetingCommitment) => {
+      if (!bridge || trackingId !== null) return;
+      setTrackingId(commitment.id);
+      setTrackError(null);
+      setTrackNotice(null);
+      setAcceptError(null);
+      void bridge
+        .track({ id: commitment.id })
+        .then((result) => {
+          if (!result.ok) {
+            setTrackError(result.error.message);
+            return;
+          }
+          setTrackNotice(trackedNotice(result.result));
+          load();
+        })
+        .catch((failure: unknown) => {
+          setTrackError(
+            failure instanceof Error
+              ? failure.message
+              : "That action could not be turned into a Drogon task.",
+          );
+        })
+        .finally(() => setTrackingId(null));
+    },
+    [bridge, load, trackingId],
+  );
+
   const clearNotices = useCallback(() => {
     setAcceptNotice(null);
     setAcceptError(null);
+    setTrackNotice(null);
+    setTrackError(null);
   }, []);
 
   return {
@@ -191,8 +247,12 @@ export function useMeetingCommitments({
     acceptNotice,
     acceptError,
     acceptingLine,
+    trackingId,
+    trackNotice,
+    trackError,
     accept,
     resolve,
+    track,
     refresh: load,
     clearNotices,
   };

@@ -61,6 +61,8 @@ const COMMITMENT = {
   source: "suggested",
   confidence: "high",
   status: "open",
+  ticketId: null,
+  ticketKey: null,
   createdAt: "2026-09-11T10:00:00Z",
   updatedAt: "2026-09-11T10:00:00Z",
   resolvedAt: null,
@@ -81,6 +83,7 @@ const AVAILABILITY = {
   platform: "macos",
   supported: true,
   installation: "installed",
+  installationPath: "/Applications/WriteThatDown.app",
   configuration: "configured",
   configured: true,
   configPath: "/Users/meetings-fixture/Library/Application Support/WriteThatDown/config.json",
@@ -346,5 +349,80 @@ describe("dispatchMeetingsRequest", () => {
       ),
     ).toMatchObject({ ok: false });
     expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards tracked work and refuses a reply that names another ticket", async () => {
+    const TICKET = {
+      id: "ticket-1",
+      key: "DRG-41",
+      title: "Fix the flaky login test",
+      columnId: "column-todo",
+      projectId: null,
+    };
+    const TRACKED = {
+      commitment: { ...COMMITMENT, ticketId: "ticket-1", ticketKey: "DRG-41" },
+      ticket: TICKET,
+      created: true,
+    };
+    const call = vi.fn(async () => ({ ok: true as const, result: TRACKED }));
+    const tracked = await dispatchMeetingsRequest(
+      { op: "track", params: { id: "commitment-1" } },
+      call,
+    );
+    expect(call).toHaveBeenCalledWith("meeting.commitment_track", { id: "commitment-1" });
+    expect(tracked).toEqual({ ok: true, result: TRACKED });
+
+    // The ledger row and the ticket must agree, and the ticket must name the
+    // column it landed in: a page that showed untracked work would be wrong.
+    const mismatch = vi.fn(async () => ({
+      ok: true as const,
+      result: { ...TRACKED, commitment: { ...TRACKED.commitment, ticketKey: "DRG-42" } },
+    }));
+    expect(
+      await dispatchMeetingsRequest({ op: "track", params: { id: "commitment-1" } }, mismatch),
+    ).toMatchObject({ ok: false });
+    const noColumn = vi.fn(async () => ({
+      ok: true as const,
+      result: { ...TRACKED, ticket: { ...TICKET, columnId: "" } },
+    }));
+    expect(
+      await dispatchMeetingsRequest({ op: "track", params: { id: "commitment-1" } }, noColumn),
+    ).toMatchObject({ ok: false });
+
+    // Unknown fields and a blank id never reach the daemon.
+    const spare = vi.fn(async () => ({ ok: true as const, result: TRACKED }));
+    expect(
+      await dispatchMeetingsRequest(
+        { op: "track", params: { id: "commitment-1", title: "caller text" } },
+        spare,
+      ),
+    ).toMatchObject({ ok: false });
+    expect(
+      await dispatchMeetingsRequest({ op: "track", params: { id: "" } }, spare),
+    ).toMatchObject({ ok: false });
+    expect(spare).not.toHaveBeenCalled();
+
+    // The daemon's own refusal passes through unchanged: a quote the note no
+    // longer holds is the interesting case, and the page must show it.
+    const refused = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: "commitment_quote_missing",
+        message:
+          "The transcript no longer contains this action's quote, so no Drogon task was created.",
+        retryable: false,
+      },
+    }));
+    expect(
+      await dispatchMeetingsRequest({ op: "track", params: { id: "commitment-1" } }, refused),
+    ).toEqual({
+      ok: false,
+      error: {
+        code: "commitment_quote_missing",
+        message:
+          "The transcript no longer contains this action's quote, so no Drogon task was created.",
+        retryable: false,
+      },
+    });
   });
 });

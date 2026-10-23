@@ -42,6 +42,7 @@ import {
   meetingsResultSummary,
 } from "./meetings-page-copy";
 import { isFilterApplied } from "./meetings-filters";
+import { openWriteThatDown, revealNotesFolder } from "./meetings-tool-actions";
 import { useMeetingAnalysis } from "./use-meeting-analysis";
 import { useMeetingCommitments } from "./use-meeting-commitments";
 import { useMeetingsPageController } from "./use-meetings-page-controller";
@@ -58,6 +59,10 @@ export type MeetingsPageProps = {
   renderTranscript?: (read: MeetingRead) => React.ReactNode;
   /** Open the Write That Down setup page; injected so tests use no network. */
   openSetupUrl?: (url: string) => void;
+  /** Launch the installed tool / reveal the notes folder; injected so a test
+   *  never opens another app or Finder window. */
+  openTool?: (appPath: string | null) => Promise<string | null>;
+  revealNotes?: (root: string | null) => Promise<string | null>;
 };
 
 type MeetingsView = "transcripts" | "actions";
@@ -120,11 +125,14 @@ export default function MeetingsPage({
   hostSelector = MEETINGS_PAGE_HOST_SELECTOR,
   renderTranscript,
   openSetupUrl,
+  openTool,
+  revealNotes,
 }: MeetingsPageProps = {}): React.JSX.Element {
   const controller = useMeetingsPageController({ bridge });
   const analysis = useMeetingAnalysis({ bridge });
   const commitments = useMeetingCommitments({ bridge });
   const [view, setView] = useState<MeetingsView>("transcripts");
+  const [toolError, setToolError] = useState<string | null>(null);
   const page = controller.page;
   const analysisStatus = page?.availability.analysis ?? UNAVAILABLE_ANALYSIS;
   // A failed read keeps the reader on screen: dropping back to the list
@@ -141,6 +149,17 @@ export default function MeetingsPage({
     defaultOpenSetupUrl(WRITE_THAT_DOWN_SETUP_URL);
   }, [openSetupUrl]);
   useMeetingsPageEscape({ onClose, hostSelector });
+
+  // Both actions report their own failure instead of looking like a no-op.
+  const runToolAction = useCallback(
+    (action: () => Promise<string | null>) => {
+      setToolError(null);
+      void action()
+        .then((message) => setToolError(message))
+        .catch(() => setToolError("That could not be completed."));
+    },
+    [],
+  );
 
   const openFromLedger = useCallback(
     (meetingId: string) => {
@@ -191,7 +210,22 @@ export default function MeetingsPage({
             </p>
           </div>
 
-          <MeetingsNotices page={page} error={controller.error} onOpenSetup={openSetup} />
+          <MeetingsNotices
+            page={page}
+            error={controller.error}
+            toolError={toolError}
+            onOpenSetup={openSetup}
+            onOpenTool={() =>
+              runToolAction(() =>
+                (openTool ?? openWriteThatDown)(page?.availability.installationPath ?? null),
+              )
+            }
+            onRevealNotes={() =>
+              runToolAction(() =>
+                (revealNotes ?? revealNotesFolder)(page?.availability.transcriptRoot ?? null),
+              )
+            }
+          />
 
           {/* The product's own Tabs primitive (the same one the Mentu pane
               uses), so the two views get the source's ARIA semantics and
@@ -223,11 +257,15 @@ export default function MeetingsPage({
                 status={commitments.status}
                 query={commitments.query}
                 busyId={commitments.busyId}
+                trackingId={commitments.trackingId}
+                trackNotice={commitments.trackNotice}
+                trackError={commitments.trackError}
                 onStatusChange={commitments.setStatus}
                 onQueryChange={commitments.setQuery}
                 onRefresh={commitments.refresh}
                 onOpenMeeting={openFromLedger}
                 onResolve={commitments.resolve}
+                onTrack={commitments.track}
               />
             </TabsContent>
 

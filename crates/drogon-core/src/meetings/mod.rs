@@ -189,6 +189,10 @@ pub struct MeetingAvailability {
     pub platform: String,
     pub supported: bool,
     pub installation: &'static str,
+    /// The app bundle this host actually has, when it has one. The page opens
+    /// exactly this path instead of guessing between `/Applications` and
+    /// `~/Applications`; `None` whenever the state is not `installed`.
+    pub installation_path: Option<String>,
     pub configuration: &'static str,
     pub configured: bool,
     pub config_path: String,
@@ -261,12 +265,14 @@ pub enum MeetingsParamError {
 }
 
 /// `true` when the Write That Down app bundle is present on this host.
+/// The installation state and the bundle that produced it, so the surface can
+/// open the tool it actually found rather than a hardcoded path.
 fn installation(
     file_system: &dyn MeetingFileSystem,
     environment: &MeetingEnvironment,
-) -> InstallationState {
+) -> (InstallationState, Option<PathBuf>) {
     if !environment.supported() {
-        return InstallationState::Unsupported;
+        return (InstallationState::Unsupported, None);
     }
     for candidate in &environment.app_candidates {
         let app_ok = file_system
@@ -282,10 +288,10 @@ fn installation(
             .map(|meta| meta.is_file)
             .unwrap_or(false)
         {
-            return InstallationState::Installed;
+            return (InstallationState::Installed, Some(candidate.clone()));
         }
     }
-    InstallationState::NotInstalled
+    (InstallationState::NotInstalled, None)
 }
 
 fn availability_reason(
@@ -321,9 +327,10 @@ fn availability_reason(
 fn build_availability(
     environment: &MeetingEnvironment,
     configuration: &ResolvedConfiguration,
-    installation: InstallationState,
+    installation: (InstallationState, Option<PathBuf>),
     walk: &transcripts::Walk,
 ) -> MeetingAvailability {
+    let (installation, installation_path) = installation;
     // The headline reason is computed from the FULL walk when paging, so
     // page 2 of an empty-looking page still reports `ready`.
     let reason = availability_reason(
@@ -344,6 +351,7 @@ fn build_availability(
         platform: environment.platform.clone(),
         supported: environment.supported(),
         installation: installation.as_wire(),
+        installation_path: installation_path.map(|path| path.display().to_string()),
         configuration: configuration.state.as_wire(),
         configured: configuration.state != ConfigurationState::Defaults,
         config_path: configuration.config_path.display().to_string(),
@@ -613,6 +621,8 @@ mod tests {
         assert_eq!(page.availability.reason, "not-installed");
         assert_eq!(page.availability.status, "unavailable");
         assert_eq!(page.availability.installation, "not-installed");
+        // No bundle to open, so no path to offer.
+        assert_eq!(page.availability.installation_path, None);
         assert_eq!(page.availability.transcript_root_state, "missing");
         assert_eq!(
             page.availability.transcript_root,
@@ -677,6 +687,36 @@ mod tests {
         let page = list(&fs, &env, None, None, MeetingFilters::default()).unwrap();
         assert_eq!(page.availability.reason, "unsupported-platform");
         assert_eq!(page.availability.installation, "unsupported");
+        assert_eq!(page.availability.installation_path, None);
+    }
+
+    #[test]
+    fn an_installed_tool_reports_the_bundle_the_surface_opens() {
+        let mut fs = FakeFileSystem::default();
+        installed(&mut fs);
+        let env = environment("/home/carlos");
+        let page = list(&fs, &env, None, None, MeetingFilters::default()).unwrap();
+        assert_eq!(page.availability.installation, "installed");
+        assert_eq!(
+            page.availability.installation_path.as_deref(),
+            Some("/Applications/WriteThatDown.app")
+        );
+
+        // The per-user bundle is found when `/Applications` has none, and the
+        // reported path follows the one that was actually found.
+        let mut fs = FakeFileSystem::default();
+        fs.insert_file(
+            "/home/carlos/Applications/WriteThatDown.app/Contents/MacOS/WriteThatDown",
+            b"binary",
+        );
+        let mut env = env.clone();
+        env.app_candidates = default_app_candidates(&env.home_dir);
+        let page = list(&fs, &env, None, None, MeetingFilters::default()).unwrap();
+        assert_eq!(page.availability.installation, "installed");
+        assert_eq!(
+            page.availability.installation_path.as_deref(),
+            Some("/home/carlos/Applications/WriteThatDown.app")
+        );
     }
 
     #[test]
