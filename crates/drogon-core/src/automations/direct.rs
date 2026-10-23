@@ -507,6 +507,13 @@ pub struct SessionEvidence {
     pub exit_code: Option<i64>,
     pub agent_state: String,
     pub agent_state_at: Option<String>,
+    /// Wire `agentTurnStartedAt`/`agentTurnEndedAt`: the last turn boundary
+    /// the harness's own hooks reported, which — unlike `agent_state_at` —
+    /// the launch's idle boundary never stamps. Both `None` on a freshly
+    /// launched session, which is exactly what keeps a launch from reading
+    /// as a finished turn (issue #684).
+    pub turn_started_at: Option<String>,
+    pub turn_ended_at: Option<String>,
     pub incarnation: String,
 }
 
@@ -587,6 +594,21 @@ fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
+/// Whether `stamp` is proven not to predate `dispatched_at`. Hook stamps
+/// are seconds-truncated at write time, so one can read up to just under a
+/// second *before* the true signal instant: the `+ 999` ms tolerance makes
+/// the edge exact rather than approximate — only a stamp a full second (or
+/// more) before dispatch can be proven to predate this run. A missing
+/// stamp, or a run with no dispatch time, proves nothing.
+fn stamp_not_before_dispatch(stamp: Option<&str>, dispatched_at: Option<f64>) -> bool {
+    match (stamp.and_then(rfc3339_to_secs), dispatched_at) {
+        (Some(signal_secs), Some(dispatched_at)) => {
+            signal_secs * 1000 + 999 >= dispatched_at as i64
+        }
+        _ => false,
+    }
+}
+
 /// Pure reconciliation decision for one `Dispatched` run. Never touches
 /// storage; the scheduler applies the outcome with [`apply_reconcile`].
 pub fn reconcile_decision(
@@ -614,21 +636,24 @@ pub fn reconcile_decision(
         // to predate this run. The `needs_input` arm stays for
         // interactive sessions whose harness reported a genuine wait that
         // also ended the turn (and for rows written before the turn-end
-        // reclassification); a stamp seconds-truncated at write time can
-        // read up to just under a second *before* the true signal instant,
-        // so the +999 ms tolerance makes the edge exact, not approximate:
-        // a signal stamped a full second (or more) before dispatch can
-        // only predate this run.
-        let edge_proven = match (
-            evidence.agent_state_at.as_deref().and_then(rfc3339_to_secs),
-            run.dispatched_at,
-        ) {
-            (Some(signal_secs), Some(dispatched_at)) => {
-                signal_secs * 1000 + 999 >= dispatched_at as i64
-            }
-            _ => false,
-        };
-        if edge_proven {
+        // reclassification). [`stamp_not_before_dispatch`] owns the
+        // seconds-truncation tolerance.
+        let edge_proven =
+            stamp_not_before_dispatch(evidence.agent_state_at.as_deref(), run.dispatched_at);
+        // Issue #684: the idle/needs_input edge alone is not a finished
+        // turn. A Claude launch is DEFINED to be idle (`harness.rs`'s
+        // `initial_hook_turn_ended`, so the sidebar shows no phantom
+        // spinner on a fresh TUI) and its stamp is written in the very
+        // second the run dispatches, so the stamp rule above accepts it.
+        // Completion additionally requires a turn boundary the harness
+        // itself reported — a resumption hook that opened a turn, or a
+        // turn-end hook that closed one — stamped no earlier than this
+        // run's dispatch. A launch reports neither, so the tick that fires
+        // a run can no longer finish it.
+        let turn_proven =
+            stamp_not_before_dispatch(evidence.turn_started_at.as_deref(), run.dispatched_at)
+                || stamp_not_before_dispatch(evidence.turn_ended_at.as_deref(), run.dispatched_at);
+        if edge_proven && turn_proven {
             return ReconcileOutcome::TurnEnded;
         }
     }

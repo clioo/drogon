@@ -180,6 +180,13 @@ pub(crate) struct HandoffSession {
     pub(crate) needs_input_at: Option<String>,
     pub(crate) hook_transition_age_ms: Option<u64>,
     pub(crate) hook_transition_at: Option<String>,
+    /// Turn-boundary proof (issue #684): survives the handoff so a run
+    /// dispatched before it cannot lose the evidence that its turn ran.
+    /// Absent from a predecessor that did not record it yet.
+    #[serde(default)]
+    pub(crate) hook_turn_started_at: Option<String>,
+    #[serde(default)]
+    pub(crate) hook_turn_ended_at: Option<String>,
     pub(crate) agent_prompt_preview: Option<String>,
     pub(crate) cache_idle_at: Option<String>,
     pub(crate) agent_session_id: Option<String>,

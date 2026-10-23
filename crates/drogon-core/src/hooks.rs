@@ -271,6 +271,11 @@ impl Engine {
             HookSignal::Wait => handle.note_hook_event(),
             HookSignal::TurnStart => handle.clear_hook_event(),
             HookSignal::TurnEnd => handle.end_hook_event(),
+            // The session boundary (Claude/Pi `SessionStart`) lands the
+            // same idle row as a turn end, with no turn-end proof behind
+            // it: a launch, a resume or a `/clear` is not a finished turn
+            // and must not finalize an automation run (issue #684).
+            HookSignal::SessionBoundary => handle.launch_idle_boundary(),
         }
         // R16-BF2 push: the hook signal moves the agent state now, so the
         // card/badge must learn about it now — not on the next poll.

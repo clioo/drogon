@@ -633,6 +633,14 @@ fn session_evidence(engine: &Engine, session_id: &str) -> Option<SessionEvidence
             .get("agentStateAt")
             .and_then(serde_json::Value::as_str)
             .map(str::to_string),
+        turn_started_at: snap
+            .get("agentTurnStartedAt")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        turn_ended_at: snap
+            .get("agentTurnEndedAt")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
         incarnation: snap.get("incarnation")?.as_str()?.to_string(),
     })
 }
@@ -640,7 +648,9 @@ fn session_evidence(engine: &Engine, session_id: &str) -> Option<SessionEvidence
 /// Finalizes previously `Dispatched` runs whose terminal state is now
 /// provable: an exited session, or a live session whose agent went
 /// `idle` (the reference's busy-to-idle edge, restored for issue #360)
-/// or reported a turn-ending wait signal after dispatch. Sessions gone
+/// or reported a turn-ending wait signal after dispatch — in both cases
+/// only once the harness itself reported a turn boundary for this run,
+/// never off the launch's own idle definition (issue #684). Sessions gone
 /// from this process close out
 /// as stranded, never as completed. Holds no database guard across the
 /// per-handle snapshot reads; each row finalizes in its own transaction.

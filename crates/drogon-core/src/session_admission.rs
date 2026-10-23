@@ -379,8 +379,11 @@ pub(crate) fn launch_reserved_with_cleanup(
                 // own authority until the first resumption hook — the
                 // activity clock's reading of keystroke echo at the fresh
                 // prompt is the sidebar-status bug. Same durable no-op as a
-                // turn-end hook (the reserved row already exists).
-                handle.end_hook_event();
+                // turn-end hook (the reserved row already exists), but NOT
+                // a turn-end proof: no turn has run, so an automation
+                // dispatched into this session must not reconcile its
+                // launch as a finished turn (issue #684).
+                handle.launch_idle_boundary();
             }
             for path in options.cleanup_paths {
                 handle.add_hook_cleanup_path(path);

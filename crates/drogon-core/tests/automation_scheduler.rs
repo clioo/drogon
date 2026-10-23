@@ -1258,13 +1258,29 @@ fn sample_run(id: &str, automation_id: &str) -> AutomationRun {
     }
 }
 
+/// A live session whose state the harness's own hooks reported: the turn
+/// boundary carries the same stamp as the state, which is what a real
+/// `UserPromptSubmit`/`Stop` pair produces.
 fn live_evidence(agent_state: &str, agent_state_at: Option<&str>) -> SessionEvidence {
     SessionEvidence {
         verdict: "live".to_string(),
         exit_code: None,
         agent_state: agent_state.to_string(),
         agent_state_at: agent_state_at.map(str::to_string),
+        turn_started_at: agent_state_at.map(str::to_string),
+        turn_ended_at: agent_state_at.map(str::to_string),
         incarnation: "inc-1".to_string(),
+    }
+}
+
+/// A live session that has reported NO turn boundary at all: exactly a
+/// freshly launched Claude session, which `initial_hook_turn_ended` defines
+/// to be `idle` with a stamp from the launch second (issue #684).
+fn launch_evidence(agent_state: &str, agent_state_at: Option<&str>) -> SessionEvidence {
+    SessionEvidence {
+        turn_started_at: None,
+        turn_ended_at: None,
+        ..live_evidence(agent_state, agent_state_at)
     }
 }
 
@@ -1284,6 +1300,8 @@ fn reconcile_decision_finalizes_only_on_proven_terminal_evidence() {
                 exit_code: Some(0),
                 agent_state: "exited".to_string(),
                 agent_state_at: None,
+                turn_started_at: None,
+                turn_ended_at: None,
                 incarnation: "inc-1".to_string(),
             })
         ),
@@ -1370,6 +1388,60 @@ fn reconcile_decision_finalizes_only_on_proven_terminal_evidence() {
             })
         ),
         ReconcileOutcome::Running
+    );
+    // Issue #684: a Claude launch IS idle, stamped in the dispatch second,
+    // and reports no turn boundary at all. The stamp edge alone must not
+    // finalize it — the tick that fired the run would otherwise complete
+    // it before Claude ever started the turn.
+    for state in ["idle", "needs_input"] {
+        assert_eq!(
+            reconcile_decision(
+                &run,
+                Some(&launch_evidence(state, Some(SIGNAL_AFTER_DISPATCH)))
+            ),
+            ReconcileOutcome::Running,
+            "a launch-only {state} row is not a finished turn"
+        );
+    }
+    // A turn START proven after dispatch is enough on its own: the harness
+    // opened a turn for this run and the row now reads idle/needs_input.
+    assert_eq!(
+        reconcile_decision(
+            &run,
+            Some(&SessionEvidence {
+                turn_ended_at: None,
+                ..live_evidence("idle", Some(SIGNAL_AFTER_DISPATCH))
+            })
+        ),
+        ReconcileOutcome::TurnEnded
+    );
+    // So is a turn-END hook on its own (pi's AgentEnd, opencode's
+    // SessionIdle): a harness that only reports the close still proves a
+    // turn ran.
+    assert_eq!(
+        reconcile_decision(
+            &run,
+            Some(&SessionEvidence {
+                turn_started_at: None,
+                ..live_evidence("idle", Some(SIGNAL_AFTER_DISPATCH))
+            })
+        ),
+        ReconcileOutcome::TurnEnded
+    );
+    // A turn boundary from a FULL second before dispatch belongs to an
+    // earlier turn, not this run's.
+    let mut late_dispatch = run.clone();
+    late_dispatch.dispatched_at = Some(2_000.0);
+    assert_eq!(
+        reconcile_decision(
+            &late_dispatch,
+            Some(&SessionEvidence {
+                agent_state_at: Some("1970-01-01T00:00:02Z".to_string()),
+                ..live_evidence("idle", Some(SIGNAL_AFTER_DISPATCH))
+            })
+        ),
+        ReconcileOutcome::Running,
+        "a stale turn boundary cannot finalize a later run"
     );
     // No handle in this process: stranded, never completed.
     assert_eq!(reconcile_decision(&run, None), ReconcileOutcome::Stranded);

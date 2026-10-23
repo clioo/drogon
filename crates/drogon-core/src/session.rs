@@ -179,6 +179,17 @@ pub(crate) struct SessionHandle {
     /// fresh-session idle boundary) still owes the card a freshness stamp,
     /// which the activity clock alone cannot provide.
     hook_transition_at: Mutex<Option<(Instant, String)>>,
+    /// Wall-clock stamps of the last turn boundary a harness hook actually
+    /// reported, kept apart from `hook_transition_at` (which a wait hook
+    /// clears and the admission boundary writes): a resumption hook stamps
+    /// `hook_turn_started_at`, a harness turn-end hook stamps
+    /// `hook_turn_ended_at`, and the launch idle boundary stamps NEITHER —
+    /// a launch is not a turn (issue #684). Automation reconciliation reads
+    /// them as its proof that a turn boundary of this session postdates a
+    /// run's dispatch, so a freshly launched idle row can never be mistaken
+    /// for a finished automation turn.
+    hook_turn_started_at: Mutex<Option<String>>,
+    hook_turn_ended_at: Mutex<Option<String>>,
     agent_prompt_preview: Mutex<Option<String>>,
     cache_idle_at: Mutex<Option<String>>,
     /// Provider-native conversation identity for this session, as the harness
@@ -343,6 +354,8 @@ impl SessionHandle {
             last_activity: Mutex::new(None),
             needs_input_at: Mutex::new(None),
             hook_transition_at: Mutex::new(None),
+            hook_turn_started_at: Mutex::new(None),
+            hook_turn_ended_at: Mutex::new(None),
             agent_prompt_preview: Mutex::new(None),
             cache_idle_at: Mutex::new(None),
             agent_session: Mutex::new(None),
@@ -525,6 +538,9 @@ impl SessionHandle {
         // whose harness has not emitted output yet.
         let stamp = (Instant::now(), crate::now_rfc3339());
         *self.hook_transition_at.lock().unwrap() = Some(stamp.clone());
+        // Turn-boundary proof for automation reconciliation: a turn the
+        // harness itself reported starting (issue #684).
+        *self.hook_turn_started_at.lock().unwrap() = Some(stamp.1.clone());
         persist_turn_fact(self, Some(TURN_ACTIVE_WIRE), Some(&stamp.1));
     }
 
@@ -535,6 +551,24 @@ impl SessionHandle {
     /// reads `idle` on the harness's own authority and the user's echo at
     /// the idle prompt does not spin it back to `working` (issue #360).
     pub(crate) fn end_hook_event(&self) {
+        self.close_turn(true);
+    }
+
+    /// The launch's own idle boundary (`initial_hook_turn_ended`): the same
+    /// durable ENDED row as a turn-end hook, so a fresh Claude TUI reads
+    /// `idle` instead of spinning on keystroke echo (issue #360) — but
+    /// WITHOUT the turn-end proof, because no turn ran. Automation
+    /// reconciliation would otherwise read the launch as "the turn ended"
+    /// and complete the run on the tick that started it (issue #684).
+    pub(crate) fn launch_idle_boundary(&self) {
+        self.close_turn(false);
+    }
+
+    /// Shared body of [`Self::end_hook_event`] and
+    /// [`Self::launch_idle_boundary`]: identical durable turn fact and
+    /// freshness stamp, differing only in whether a harness-reported turn
+    /// end is recorded as reconciliation proof.
+    fn close_turn(&self, hook_reported: bool) {
         self.turn_fact.store(TURN_ENDED, Ordering::Release);
         *self.needs_input_at.lock().unwrap() = None;
         persist_wait_signal(self, None);
@@ -544,6 +578,9 @@ impl SessionHandle {
         // carry a non-null `agentStateAt`.
         let stamp = (Instant::now(), crate::now_rfc3339());
         *self.hook_transition_at.lock().unwrap() = Some(stamp.clone());
+        if hook_reported {
+            *self.hook_turn_ended_at.lock().unwrap() = Some(stamp.1.clone());
+        }
         persist_turn_fact(self, Some(TURN_ENDED_WIRE), Some(&stamp.1));
     }
 
@@ -572,6 +609,11 @@ impl SessionHandle {
         *self.needs_input_at.lock().unwrap() = None;
         persist_wait_signal(self, None);
         *self.hook_transition_at.lock().unwrap() = None;
+        // The dropped lifecycle takes its turn-boundary proof with it: a
+        // neutered hook file can no longer conclude a turn, so no stale
+        // boundary may finalize an automation run either.
+        *self.hook_turn_started_at.lock().unwrap() = None;
+        *self.hook_turn_ended_at.lock().unwrap() = None;
         persist_turn_fact(self, None, None);
     }
 
@@ -1480,6 +1522,8 @@ impl SessionHandle {
             needs_input_at: self.needs_input_at.lock().unwrap().clone(),
             hook_transition_age_ms: hook_transition.as_ref().map(|(at, _)| age(*at)),
             hook_transition_at: hook_transition.map(|(_, stamp)| stamp),
+            hook_turn_started_at: self.hook_turn_started_at.lock().unwrap().clone(),
+            hook_turn_ended_at: self.hook_turn_ended_at.lock().unwrap().clone(),
             agent_prompt_preview: self.agent_prompt_preview.lock().unwrap().clone(),
             cache_idle_at: self.cache_idle_at.lock().unwrap().clone(),
             agent_session_id: agent_session.as_ref().map(|s| s.id.clone()),
@@ -1524,6 +1568,8 @@ impl SessionHandle {
         *self.needs_input_at.lock().unwrap() = state.needs_input_at;
         *self.hook_transition_at.lock().unwrap() =
             since(state.hook_transition_age_ms).zip(state.hook_transition_at);
+        *self.hook_turn_started_at.lock().unwrap() = state.hook_turn_started_at;
+        *self.hook_turn_ended_at.lock().unwrap() = state.hook_turn_ended_at;
         *self.agent_prompt_preview.lock().unwrap() = state.agent_prompt_preview;
         *self.cache_idle_at.lock().unwrap() = state.cache_idle_at;
         *self.agent_session.lock().unwrap() = AgentSessionIdentity::parse(
@@ -2322,6 +2368,14 @@ pub(crate) fn to_json(handle: &SessionHandle, verdict: &str, exit_code: Option<i
         // clock going quiet, null = no proof claimed). Older clients ignore
         // it; newer renderers never show `working`/`idle` without `hook`.
         "agentStateAuthority": agent_state_authority,
+        // Additive (issue #684): the last turn boundary a harness hook
+        // actually reported, as distinct from `agentStateAt` — which the
+        // launch's own idle boundary also stamps. Null until the harness
+        // reports one, so a freshly launched (idle) session carries no turn
+        // proof at all and automation reconciliation cannot read its launch
+        // as a finished turn. Absent on an older daemon.
+        "agentTurnStartedAt": handle.hook_turn_started_at.lock().unwrap().clone(),
+        "agentTurnEndedAt": handle.hook_turn_ended_at.lock().unwrap().clone(),
         // Additive (issue #333): true while a live foreground child runs
         // beyond the session leader; absent on older payloads reads as idle.
         "hasForegroundChild": has_foreground_child(handle, verdict),
