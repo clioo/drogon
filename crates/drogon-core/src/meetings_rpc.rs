@@ -8,6 +8,8 @@
 //! resolved notes directory on every call, so the id cannot be used as a
 //! general-purpose file read.
 
+use std::sync::Mutex;
+
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -196,6 +198,17 @@ pub fn read_value(
     serialize(&outcome, "meeting.read")
 }
 
+/// One tracking sequence at a time, daemon-wide.
+///
+/// `RequestLedger::run` dedupes by requestId, so two different callers (the
+/// page and the CLI, a retried click, two windows) reach this handler
+/// concurrently. Without this arbiter both read "untracked", both create a
+/// ticket, and the loser leaves an orphan on the board while reporting a
+/// failure — observed: eight concurrent tracks produced four tickets for one
+/// commitment. The check-create-link sequence is small and local; serializing
+/// it is cheap next to creating a ticket.
+static TRACK_LOCK: Mutex<()> = Mutex::new(());
+
 impl crate::Engine {
     pub(crate) fn do_meeting_list(&self, params: &Value) -> Result<Value, RpcError> {
         list_value(
@@ -311,6 +324,12 @@ impl crate::Engine {
     ///    that already exists instead of creating a duplicate.
     pub(crate) fn do_meeting_commitment_track(&self, params: &Value) -> Result<Value, RpcError> {
         let params: CommitmentTrackParams = decode(params, "meeting.commitment_track")?;
+        // The whole read-check-create-link sequence is one critical section:
+        // the "already tracked" answer below is only true if no other caller
+        // can create between this read and the link that records it.
+        let _guard = TRACK_LOCK
+            .lock()
+            .map_err(|_| error::internal_error("the meeting tracker lock was poisoned"))?;
         let commitment = self
             .meeting_commitments
             .get(&params.id)

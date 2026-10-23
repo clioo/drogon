@@ -283,9 +283,10 @@ fn drogond_binary() -> PathBuf {
         .expect("drogon-cli binary path has a parent directory")
         .to_path_buf();
     let drogond_path = target_dir.join("drogond");
-    if drogond_path.is_file() {
-        return drogond_path;
-    }
+    // Always ask cargo, even when the binary exists: `cargo build` is a no-op
+    // when it is current, and skipping it silently ran these tests against an
+    // older daemon (observed here: the concurrency regression test passed
+    // against a pre-fix binary). Honest tests must build the code they test.
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -1344,4 +1345,101 @@ fn an_accepted_commitment_becomes_real_tracked_work() {
     // Drogon state plus Work tickets, never an edit of the owner's files.
     assert_eq!(tree_snapshot(&fixture.notes), before);
     assert!(fixture.data_dir.join("meeting-commitments.json").is_file());
+}
+
+/// One commitment is one ticket even when the callers overlap.
+///
+/// `RequestLedger` dedupes by request id, so the page and the CLI (or two
+/// clicks) run this handler concurrently with different ids. Observed before
+/// the arbiter: eight concurrent tracks produced FOUR tickets for one
+/// commitment, and the losers reported `meeting_track_unlinked` after
+/// creating work nobody asked for.
+#[test]
+fn concurrent_tracking_creates_exactly_one_ticket() {
+    let mut fixture = Fixture::new();
+    fixture.write_note(
+        "2026-09-10",
+        "08-05",
+        "42 min",
+        "Weekly sync",
+        "[00:00] I will fix the flaky login test before the release",
+    );
+    fixture.start_daemon(&[]);
+    let list = fixture.cli_ok(&["meeting", "list", "--json"]);
+    let meeting_id = list["meetings"][0]["id"].as_str().unwrap().to_string();
+    let accepted = fixture.cli_ok(&[
+        "meeting",
+        "actions",
+        "add",
+        "--meeting-id",
+        &meeting_id,
+        "--text",
+        "Fix the flaky login test",
+        "--quote",
+        "I will fix the flaky login test before the release",
+        "--source",
+        "suggested",
+        "--json",
+    ]);
+    let commitment_id = accepted["id"].as_str().unwrap().to_string();
+
+    // Eight real CLI processes, one commitment, eight different request ids.
+    let mut children = Vec::new();
+    for _ in 0..8 {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_drogon-cli"));
+        command.args([
+            "meeting",
+            "actions",
+            "track",
+            "--id",
+            &commitment_id,
+            "--json",
+        ]);
+        common::scrub_environment(&mut command, &fixture.data_dir);
+        command.env("HOME", fixture.home_str());
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        children.push(command.spawn().expect("spawn a concurrent track"));
+    }
+    let mut created = 0;
+    let mut keys = std::collections::BTreeSet::new();
+    let mut failures = Vec::new();
+    for child in children {
+        let output = child.wait_with_output().expect("wait for the track call");
+        let text = stdout(&output);
+        let value: Value = serde_json::from_str(&text)
+            .unwrap_or_else(|err| panic!("track did not print JSON: {err}\n{text}"));
+        if value["ok"] == true {
+            let ticket = &value["result"]["ticket"];
+            assert_eq!(value["result"]["commitment"]["ticketKey"], ticket["key"]);
+            keys.insert(ticket["key"].as_str().unwrap().to_string());
+            if value["result"]["created"] == true {
+                created += 1;
+            }
+        } else {
+            failures.push((
+                value["error"]["code"].as_str().unwrap_or("?").to_string(),
+                value["error"]["message"].as_str().unwrap_or("").to_string(),
+            ));
+        }
+    }
+    let board = fixture.cli_ok(&["work", "board", "--json"]);
+    assert_eq!(
+        board["tickets"].as_array().unwrap().len(),
+        1,
+        "one commitment is one ticket, never one per caller: {board}"
+    );
+    assert_eq!(
+        keys.len(),
+        1,
+        "every caller must be told the same ticket: {keys:?}"
+    );
+    assert_eq!(
+        failures.len(),
+        0,
+        "no caller may lose the race: {failures:?}"
+    );
+    assert_eq!(created, 1, "exactly one caller created the ticket");
 }
