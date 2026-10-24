@@ -1218,7 +1218,13 @@ impl Engine {
             // when the kill confirms within the stop budget, `unverifiable`
             // when it does not. Either way the child has been signalled and
             // the record is forgotten below — an explicit close is final.
-            session::stop(&handle)?
+            let stopped = session::stop(&handle)?;
+            // The row is about to go, and with it the exit poller's only
+            // chance to write the completion a headless run owes its
+            // automation/bot rows (issue #694). Settle it here, from the
+            // code `stop` just reaped, before the delete.
+            session::settle_exit_before_forget(&handle);
+            stopped
         } else {
             // No handle in this instance: a prior-instance row this process
             // never owned. Nothing to stop; the stored verdict (honest for
@@ -1235,7 +1241,11 @@ impl Engine {
         let session_id = require_str(params, "sessionId")?.to_string();
         let incarnation = require_str(params, "incarnation")?;
         let row_value = self.session_row_as_value(&session_id, incarnation)?;
-        if let Some(handle) = self.sessions.lock().unwrap().get(&session_id).cloned() {
+        // Cloned out before anything else runs: the settle below takes the
+        // database lock, and holding the session map across it would invent
+        // a lock order this engine has nowhere else.
+        let handle = self.sessions.lock().unwrap().get(&session_id).cloned();
+        if let Some(handle) = handle {
             session::check_incarnation(&handle, incarnation)?;
             if !handle.is_exited() {
                 // Forgetting a live session would orphan its PTY: the one
@@ -1243,6 +1253,10 @@ impl Engine {
                 // the route that stops first.
                 return Err(error::invalid_argument("session is live; close it instead"));
             }
+            // Same race as `close` (issue #694): the exit is observed but
+            // the poller may not have written it yet, and the delete below
+            // takes that chance away.
+            session::settle_exit_before_forget(&handle);
         }
         self.sessions.lock().unwrap().remove(&session_id);
         let conn = self.db.lock().unwrap();
