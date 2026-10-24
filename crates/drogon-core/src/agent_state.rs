@@ -248,6 +248,13 @@ pub(crate) enum HookSignal {
     Wait,
     TurnStart,
     TurnEnd,
+    /// The harness announced the session boundary itself, not a turn:
+    /// Claude's and Pi's `SessionStart` (launch, resume, `/clear`). The
+    /// row lands on the same idle boundary as a turn end — the reference
+    /// maps it to a done row, since `working` would show a phantom spinner
+    /// on an idle TUI — but it is NOT evidence that a turn ran, so it
+    /// never finalizes an automation run (issue #684).
+    SessionBoundary,
 }
 
 /// Classifies a `session.hook_event` event name. A single flat namespace
@@ -276,7 +283,11 @@ pub(crate) fn classify_hook_event(event: &str) -> Option<HookSignal> {
 /// reference maps that to a **done** row ("'working' would show a phantom
 /// spinner on an idle TUI"), which is exactly the boundary `harness.rs`
 /// already lands at admission (`initial_hook_turn_ended`); classifying it as
-/// a turn start instead would spin a freshly launched idle session. Every
+/// a turn start instead would spin a freshly launched idle session. It is a
+/// [`HookSignal::SessionBoundary`] rather than a
+/// [`HookSignal::TurnEnd`] because the two differ in one thing only: a
+/// boundary is not proof that a turn ran, and an automation run must not
+/// finalize on it (issue #684). Every
 /// other name keeps the flat classification, which is safe because each
 /// harness's plumbing names only its own events.
 pub(crate) fn classify_hook_event_for_harness(
@@ -284,7 +295,7 @@ pub(crate) fn classify_hook_event_for_harness(
     harness_id: Option<&str>,
 ) -> Option<HookSignal> {
     if event == codex_events::SESSION_START && matches!(harness_id, Some("claude") | Some("pi")) {
-        return Some(HookSignal::TurnEnd);
+        return Some(HookSignal::SessionBoundary);
     }
     classify_hook_event(event)
 }
@@ -692,7 +703,7 @@ mod tests {
         for harness in ["claude", "pi"] {
             assert_eq!(
                 classify_hook_event_for_harness(codex_events::SESSION_START, Some(harness)),
-                Some(HookSignal::TurnEnd),
+                Some(HookSignal::SessionBoundary),
                 "{harness} fires SessionStart at the session boundary"
             );
         }

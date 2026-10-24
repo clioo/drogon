@@ -15,11 +15,27 @@ import assert from "node:assert/strict";
 // is pinned where it belongs, against a live handle, in
 // `crates/drogon-core/tests/engine.rs`.
 
+// `agentTurnStartedAt` / `agentTurnEndedAt` (issue #684) are dropped for
+// the same reason as `gridCursor`, not defaulted like the census field.
+// They are the hook lifecycle's in-memory turn boundaries, held on the
+// live handle and deliberately not mirrored into the `sessions` row: a
+// restored stub has no handle, so there is nothing for them to report.
+// Defaulting them to null would assert that a crashed daemon observed no
+// turn, which is a claim about the harness rather than about the record.
+// What IS durable — `turn_fact` / `turn_fact_at`, and so the row's
+// `agentState` / `agentStateAt` — stays in the comparison and still has to
+// match across the restart.
+
 // Normalizes a row for cross-restart comparison: a missing field means
 // the row was restored from a payload that predates it, which the
 // contract reads as idle. A present value is never stripped or coerced.
 export function normalizeSessionRow(row) {
-  const { gridCursor: _ringOffset, ...comparable } = row;
+  const {
+    gridCursor: _ringOffset,
+    agentTurnStartedAt: _turnOpened,
+    agentTurnEndedAt: _turnClosed,
+    ...comparable
+  } = row;
   return { ...comparable, hasForegroundChild: row.hasForegroundChild ?? false };
 }
 
