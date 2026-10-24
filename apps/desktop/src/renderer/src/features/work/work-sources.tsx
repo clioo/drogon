@@ -3,7 +3,7 @@
 // issue type and priority badges, the assignee avatar, and the words a card
 // uses for its sync state. Pure presentation; no bridge calls. A new source
 // adds one entry to SOURCE_UI.
-import { ArrowRight, BookOpen, Bug, CheckSquare, Lightbulb, Sparkles, Wrench } from "lucide-react";
+import { ArrowRight, BookOpen, Bug, CheckSquare, Lightbulb, PanelsTopLeft, Sparkles, Wrench } from "lucide-react";
 import { JiraIcon } from "../../components/icons/JiraIcon";
 import { LinearIcon } from "../../components/icons/LinearIcon";
 import { GithubIcon } from "../tasks/github-icon";
@@ -22,6 +22,7 @@ export const SOURCE_UI: Record<string, SourceUi> = {
   jira: { name: "Jira", Icon: JiraIcon, tone: "text-blue-500", board: "board", sprint: "sprint" },
   linear: { name: "Linear", Icon: LinearIcon, tone: "text-indigo-500 dark:text-indigo-400", board: "team", sprint: "cycle" },
   github: { name: "GitHub", Icon: GithubIcon, tone: "text-foreground", board: "project or repository", sprint: "iteration" },
+  plane: { name: "Plane", Icon: (props) => <PanelsTopLeft {...props} />, tone: "text-foreground", board: "project", sprint: "cycle" },
 };
 
 export function ProviderMark({ provider, className = "size-3.5" }: { provider?: string | null; className?: string }) {

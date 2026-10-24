@@ -59,9 +59,9 @@ function team(
   };
 }
 
-function mount(boards: ReturnType<typeof team>[]) {
+function mount(boards: ReturnType<typeof team>[], source: WorkSource = LINEAR) {
   const bridge = {
-    providerBoards: vi.fn(() => ok({ provider: "linear", boards })),
+    providerBoards: vi.fn(() => ok({ provider: source.id, boards })),
     // Never answers: the test only watches which board was asked for.
     importPreview: vi.fn(() => new Promise(() => {})),
   };
@@ -70,7 +70,7 @@ function mount(boards: ReturnType<typeof team>[]) {
       <WorkImportDialog
         open
         bridge={bridge as unknown as WorkBridge}
-        source={LINEAR}
+        source={source}
         projects={[]}
         onClose={vi.fn()}
         onImported={vi.fn()}
@@ -87,6 +87,15 @@ const chooseNames = (region: HTMLElement) =>
     .map((b) => b.getAttribute("aria-label"));
 
 describe("board picker", () => {
+  test("Plane projects use project labels and preserve the provider when selected", async () => {
+    const plane = { ...LINEAR, id: "plane", name: "Plane", boardTerm: "project", boardsTerm: "projects", workspaceSlug: "drogon" };
+    const bridge = mount([team("plane-app", "Application", "APP"), team("plane-web", "Website", "WEB")], plane);
+    expect(await screen.findByText("Import a Plane project")).toBeTruthy();
+    const filter = await screen.findByRole("textbox", { name: "Filter projects" });
+    fireEvent.change(filter, { target: { value: "APP" } });
+    fireEvent.keyDown(filter, { key: "Enter" });
+    await waitFor(() => expect(bridge.importPreview).toHaveBeenCalledWith(expect.objectContaining({ provider: "plane", externalBoardId: "plane-app" })));
+  });
   test("recommends the teams holding your open issues, most first, above the rest", async () => {
     mount([
       team("team-web", "Web Platform", "WEB", 0),

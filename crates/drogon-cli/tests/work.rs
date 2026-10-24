@@ -853,6 +853,129 @@ impl Drop for FakeSources {
 }
 
 #[test]
+fn plane_connects_and_round_trips_a_project_from_the_cli() {
+    let fx = Fixture::start();
+    let fake = FakeSources::start();
+    let listed = fx.text(&["work", "sources"]);
+    assert!(listed.contains("Plane  not connected"), "{listed}");
+    assert!(listed.contains("projects with cycles"), "{listed}");
+    let api = format!("{}/plane", fake.url);
+    let connect_args = [
+        "work",
+        "source",
+        "connect",
+        "--provider",
+        "plane",
+        "--workspace-slug",
+        "drogon",
+        "--api-key-stdin",
+        "--api-url",
+        &api,
+    ];
+    let refused = fx.text_with_stdin(&connect_args, "wrong\n");
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(stderr(&refused).contains("Invalid API key"));
+    let connected = fx.text_with_stdin(&connect_args, "plane_fixture\n");
+    assert!(connected.status.success(), "{}", stderr(&connected));
+    assert!(stdout(&connected).contains("Jon Doe · drogon"));
+    assert!(!stdout(&connected).contains("plane_fixture"));
+    let boards = fx.json(&["work", "import", "boards", "--provider", "plane"]);
+    assert_eq!(boards["boards"].as_array().unwrap().len(), 3);
+    let preview = fx.json(&[
+        "work",
+        "import",
+        "preview",
+        "--provider",
+        "plane",
+        "--board",
+        "plane-app",
+    ]);
+    assert_eq!(preview["issues"].as_array().unwrap().len(), 5);
+    assert_eq!(preview["sprints"][1]["state"], "active");
+    let imported = fx.json(&[
+        "work",
+        "import",
+        "run",
+        "--provider",
+        "plane",
+        "--board",
+        "plane-app",
+        "--issue",
+        "APP-128",
+        "--issue",
+        "APP-129",
+        "--issue",
+        "APP-130",
+    ]);
+    assert_eq!(imported["imported"], 3);
+    let board = imported["board"]["id"].as_str().unwrap();
+    let view = fx.json(&["work", "board", "--board", board]);
+    let progress = view["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "In Progress")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    fx.text(&[
+        "work", "ticket", "move", "--ticket", "APP-129", "--column", progress,
+    ]);
+    assert!(
+        fx.text(&["work", "push", "--ticket", "APP-129"])
+            .contains("APP-129: pushed.")
+    );
+    fx.text(&[
+        "work", "ticket", "sprint", "--ticket", "APP-130", "--to", "active",
+    ]);
+    fx.json(&["work", "push", "--ticket", "APP-130"]);
+    fx.json(&["work", "sync", "--board", board]);
+    let p = fx.json(&[
+        "work",
+        "import",
+        "preview",
+        "--provider",
+        "plane",
+        "--board",
+        "plane-app",
+    ]);
+    let issues = p["issues"].as_array().unwrap();
+    assert_eq!(
+        issues.iter().find(|i| i["key"] == "APP-129").unwrap()["status"]["name"],
+        "In Progress"
+    );
+    assert_eq!(
+        issues.iter().find(|i| i["key"] == "APP-130").unwrap()["sprint"]["id"],
+        "pc-active"
+    );
+    // The provider alias is accepted and reaches real conflict resolution.
+    fx.text(&[
+        "work",
+        "ticket",
+        "move",
+        "--ticket",
+        "APP-129",
+        "--column",
+        "In Review",
+    ]);
+    fx.text(&[
+        "work", "ticket", "resolve", "--ticket", "APP-129", "--keep", "plane",
+    ]);
+    fx.text(&["work", "source", "disable", "--provider", "plane"]);
+    assert!(
+        stderr(&fx.command(&["work", "sync", "--board", board])).contains("Plane is turned off")
+    );
+    fx.text(&["work", "source", "enable", "--provider", "plane"]);
+    fx.text(&["work", "source", "disconnect", "--provider", "plane"]);
+    assert!(
+        stderr(&fx.command(&["work", "sync", "--board", board])).contains("Plane is not connected")
+    );
+    let help = fx.text(&["work", "source", "connect", "--help"]);
+    assert!(help.contains("--workspace-slug"));
+    assert!(help.contains("plane"));
+}
+
+#[test]
 fn sources_are_listed_toggled_connected_and_a_linear_team_imported_from_the_cli() {
     let fx = Fixture::start();
     let fake = FakeSources::start();

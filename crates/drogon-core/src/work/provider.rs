@@ -282,6 +282,19 @@ pub(crate) trait WorkProvider {
         board_id: &str,
         new: &NewIssue,
     ) -> ProviderResult<(ExtIssue, Vec<String>)>;
+
+    /// Override to persist confirmation before provider follow-up requests.
+    /// The default reports the result of the provider's existing create method.
+    fn create_issue_confirmed(
+        &self,
+        board_id: &str,
+        new: &NewIssue,
+        confirmed: &mut dyn FnMut(&ExtIssue) -> ProviderResult<()>,
+    ) -> ProviderResult<(ExtIssue, Vec<String>)> {
+        let result = self.create_issue(board_id, new)?;
+        confirmed(&result.0)?;
+        Ok(result)
+    }
 }
 
 // ------------------------------------------------------------------ Jira --

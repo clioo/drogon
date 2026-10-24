@@ -499,7 +499,7 @@ export function WorkTicketPanel({
               <section className="space-y-2" aria-label={`${provider} details`}>
                 <h3 className="text-base font-semibold text-foreground">{provider} details</h3>
                 <dl className="grid grid-cols-[96px_1fr] gap-x-3 gap-y-2.5">
-                  <dt className="text-muted-foreground">{ticket.provider === "linear" ? "Team" : ticket.provider === "github" ? "Project" : "Board"}</dt>
+                  <dt className="text-muted-foreground">{ticket.provider === "linear" ? "Team" : ticket.provider === "github" || ticket.provider === "plane" ? "Project" : "Board"}</dt>
                   <dd className="flex items-center gap-1.5">
                     <ProviderMark provider={ticket.provider} /> {board.board?.projectName ?? board.board?.name}
                   </dd>

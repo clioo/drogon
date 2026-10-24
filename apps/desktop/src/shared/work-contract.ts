@@ -208,7 +208,7 @@ export type WorkBoard = {
 
 /** A ticket source a board can sync with, and its connection. */
 export type WorkSource = {
-  id: "jira" | "linear" | "github" | string;
+  id: "jira" | "linear" | "github" | "plane" | string;
   name: string;
   /** Allowed by the owner (every source starts allowed). */
   enabled: boolean;
@@ -217,6 +217,7 @@ export type WorkSource = {
   /** `tasks` (Jira's Tasks connection), `token` (a stored key) or `gh`. */
   via: string | null;
   apiUrl: string | null;
+  workspaceSlug?: string | null;
   error: string | null;
   boardTerm: string;
   /** The plural for lists ("teams", "projects and repositories"). */
@@ -426,7 +427,7 @@ export interface WorkBridge {
   // Sources (`work.sources.v1`).
   sources(): Promise<Result<{ sources: WorkSource[] }>>;
   sourceUpdate(input: { provider: string; enabled: boolean }): Promise<Result<WorkSource>>;
-  sourceConnect(input: { provider: string; apiKey?: string; apiUrl?: string }): Promise<Result<WorkSource>>;
+  sourceConnect(input: { provider: string; apiKey?: string; apiUrl?: string; workspaceSlug?: string }): Promise<Result<WorkSource>>;
   sourceDisconnect(input: { provider: string }): Promise<Result<WorkSource>>;
 }
 
@@ -558,6 +559,7 @@ const sourceSchema = z.looseObject({
   name: z.string(),
   enabled: z.boolean(),
   connected: z.boolean(),
+  workspaceSlug: z.string().nullable().optional(),
   account: z.string().nullable(),
   boardTerm: z.string(),
   sprintTerm: z.string(),

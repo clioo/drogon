@@ -202,7 +202,7 @@ fn every_source_starts_allowed_and_can_be_turned_off() {
         .iter()
         .map(|s| s["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, ["jira", "linear", "github"]);
+    assert_eq!(ids, ["jira", "linear", "github", "plane"]);
     for id in ids {
         let s = source(&sources, id);
         assert_eq!(s["enabled"], true, "{id} starts allowed");
@@ -277,6 +277,394 @@ fn every_source_starts_allowed_and_can_be_turned_off() {
         ctx.err("work.source_connect", json!({"provider": "github"}))
             .message
             .contains("gh auth login")
+    );
+}
+
+#[test]
+fn plane_connects_imports_syncs_pushes_and_resolves_conflicts() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    let api = fx.url("plane");
+    let connect = |key: &str, slug: &str| json!({"provider":"plane", "apiKey":key, "apiUrl":api, "workspaceSlug":slug});
+    assert_eq!(
+        ctx.err("work.provider_boards", json!({"provider":"plane"}))
+            .code,
+        "plane_not_connected"
+    );
+    assert_eq!(
+        ctx.err("work.source_connect", connect("wrong", "drogon"))
+            .code,
+        "plane_auth_required"
+    );
+    assert_eq!(
+        ctx.err("work.source_connect", connect("plane_fixture", "missing"))
+            .code,
+        "not_found"
+    );
+    assert_eq!(
+        ctx.err("work.source_connect", connect("plane_fixture", "../drogon"))
+            .code,
+        "invalid_argument"
+    );
+    assert!(
+        !ctx.dir
+            .path()
+            .join("integrations/work/plane.token")
+            .exists()
+    );
+    let connected = ctx.ok("work.source_connect", connect("plane_fixture", "drogon"));
+    assert_eq!(connected["connected"], true);
+    assert_eq!(connected["account"], "Jon Doe · drogon");
+    assert_eq!(connected["workspaceSlug"], "drogon");
+    assert_eq!(
+        connected["helpUrl"],
+        "https://app.plane.so/profile/api-tokens"
+    );
+    assert!(!connected.to_string().contains("plane_fixture"));
+    let token_path = ctx.dir.path().join("integrations/work/plane.token");
+    let sealed = std::fs::read(&token_path).unwrap();
+    assert!(sealed.starts_with(b"v1."));
+    assert!(!String::from_utf8_lossy(&sealed).contains("plane_fixture"));
+    assert_eq!(
+        std::fs::metadata(&token_path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let boards = ctx.ok("work.provider_boards", json!({"provider":"plane"}));
+    assert_eq!(
+        boards["boards"].as_array().unwrap().len(),
+        3,
+        "all project pages"
+    );
+    assert_eq!(boards["boards"][0]["kind"], "scrum");
+    assert_eq!(
+        ctx.err(
+            "work.provider_boards",
+            json!({"provider":"plane", "siteId":"other"})
+        )
+        .code,
+        "plane_workspace_mismatch"
+    );
+
+    let preview = || {
+        ctx.ok(
+            "work.import_preview",
+            json!({"provider":"plane", "externalBoardId":"plane-app"}),
+        )
+    };
+    let p = preview();
+    assert_eq!(
+        p["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "Backlog",
+            "Todo",
+            "In Progress",
+            "In Review",
+            "Done",
+            "Cancelled"
+        ]
+    );
+    assert_eq!(p["sprints"].as_array().unwrap().len(), 3);
+    assert_eq!(p["issues"].as_array().unwrap().len(), 5, "all issue pages");
+    let active = ctx.ok(
+        "work.import_preview",
+        json!({"provider":"plane", "externalBoardId":"plane-app", "scope":"sprint:pc-active"}),
+    );
+    assert_eq!(active["issues"].as_array().unwrap().len(), 2);
+    let backlog = ctx.ok(
+        "work.import_preview",
+        json!({"provider":"plane", "externalBoardId":"plane-app", "scope":"backlog"}),
+    );
+    assert_eq!(backlog["issues"].as_array().unwrap().len(), 1);
+    let imported = ctx.ok("work.board_import", json!({"provider":"plane", "externalBoardId":"plane-app", "issueKeys":["APP-128","APP-129","APP-130","APP-131","APP-132"]}));
+    assert_eq!(imported["imported"], 5);
+    let board = imported["board"]["id"].clone();
+    assert_eq!(imported["board"]["siteId"], "drogon");
+    let view = ctx.ok("work.board", json!({"boardId":board}));
+    assert_eq!(keys(&view), ["APP-128", "APP-129"]);
+    let ticket = ctx.ok("work.ticket_show", json!({"ticketId":"APP-128"}));
+    assert_eq!(ticket["issueType"], "Bug");
+    assert_eq!(ticket["assignee"], "Jon Doe");
+    assert_eq!(ticket["priority"], "high");
+    assert_eq!(
+        ticket["externalUrl"],
+        "https://app.plane.so/drogon/projects/plane-app/issues/pi-1/"
+    );
+    assert!(activity(&ctx, "APP-128").contains(&"Imported APP-128 from Plane (In Review)".into()));
+
+    let progress = column_id(&view, "In Progress");
+    let review = column_id(&view, "In Review");
+    ctx.ok(
+        "work.ticket_move",
+        json!({"ticketId":"APP-129", "columnId":progress}),
+    );
+    assert_eq!(
+        ctx.ok("work.ticket_push", json!({"ticketId":"APP-129"}))["pushed"],
+        true
+    );
+    let issue = |key: &str| {
+        preview()["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["key"] == key)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(issue("APP-129")["status"]["name"], "In Progress");
+    fx.control(
+        "plane/issue/APP-128",
+        json!({"state":"ps-done", "name":"Renamed upstream"}),
+    );
+    assert_eq!(
+        ctx.ok("work.board_sync", json!({"boardId":board}))["moved"],
+        1
+    );
+    assert_eq!(
+        ctx.ok("work.ticket_show", json!({"ticketId":"APP-128"}))["title"],
+        "Renamed upstream"
+    );
+
+    ctx.ok(
+        "work.ticket_move",
+        json!({"ticketId":"APP-129", "columnId":review}),
+    );
+    fx.control("plane/issue/APP-129", json!({"state":"ps-done"}));
+    ctx.ok("work.board_sync", json!({"boardId":board}));
+    assert_eq!(
+        ctx.ok("work.ticket_show", json!({"ticketId":"APP-129"}))["sync"],
+        "conflict"
+    );
+    ctx.ok(
+        "work.ticket_resolve",
+        json!({"ticketId":"APP-129", "keep":"plane"}),
+    );
+    assert_eq!(
+        ctx.ok("work.ticket_show", json!({"ticketId":"APP-129"}))["sync"],
+        "synced"
+    );
+    ctx.ok(
+        "work.ticket_move",
+        json!({"ticketId":"APP-129", "columnId":review}),
+    );
+    fx.control("plane/issue/APP-129", json!({"state":"ps-todo"}));
+    ctx.ok("work.board_sync", json!({"boardId":board}));
+    ctx.ok(
+        "work.ticket_resolve",
+        json!({"ticketId":"APP-129", "keep":"ours"}),
+    );
+    assert_eq!(issue("APP-129")["status"]["name"], "In Review");
+
+    ctx.ok(
+        "work.ticket_sprint",
+        json!({"ticketId":"APP-130", "to":"active"}),
+    );
+    assert_eq!(
+        ctx.ok("work.ticket_push", json!({"ticketId":"APP-130"}))["fields"],
+        json!(["sprint"])
+    );
+    assert_eq!(issue("APP-130")["sprint"]["id"], "pc-active");
+    ctx.ok(
+        "work.ticket_sprint",
+        json!({"ticketId":"APP-130", "to":"backlog"}),
+    );
+    ctx.ok("work.ticket_push", json!({"ticketId":"APP-130"}));
+    assert!(issue("APP-130")["sprint"].is_null());
+
+    ctx.ok(
+        "work.ticket_move",
+        json!({"ticketId":"APP-129", "columnId":progress}),
+    );
+    fx.control("plane/config", json!({"failure":{"path":"/work-items/pi-2/", "status":403, "message":"Project permission denied"}}));
+    let refused = ctx.ok("work.ticket_push", json!({"ticketId":"APP-129"}));
+    assert_eq!(refused["pushed"], false);
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("Project permission denied")
+    );
+    fx.control("plane/config", json!({}));
+    ctx.ok("work.ticket_push", json!({"ticketId":"APP-129"}));
+    fx.control("plane/issue/APP-129", json!({"deleted":true}));
+    assert_eq!(
+        ctx.ok("work.board_sync", json!({"boardId":board}))["removed"],
+        1
+    );
+
+    ctx.ok(
+        "work.ticket_move",
+        json!({"ticketId":"APP-128", "columnId":review}),
+    );
+    ctx.ok(
+        "work.source_update",
+        json!({"provider":"plane", "enabled":false}),
+    );
+    for (method, params) in [
+        ("work.provider_boards", json!({"provider":"plane"})),
+        (
+            "work.import_preview",
+            json!({"provider":"plane", "externalBoardId":"plane-app"}),
+        ),
+        (
+            "work.board_import",
+            json!({"provider":"plane", "externalBoardId":"plane-ops", "all":true}),
+        ),
+        ("work.board_sync", json!({"boardId":board})),
+        ("work.board_push", json!({"boardId":board})),
+    ] {
+        assert_eq!(ctx.err(method, params).code, "source_disabled", "{method}");
+    }
+    ctx.ok(
+        "work.source_update",
+        json!({"provider":"plane", "enabled":true}),
+    );
+    let disconnected = ctx.ok("work.source_disconnect", json!({"provider":"plane"}));
+    assert_eq!(disconnected["boards"], 1);
+    assert!(!token_path.exists());
+    assert_eq!(
+        ctx.err("work.board_sync", json!({"boardId":board})).code,
+        "plane_not_connected"
+    );
+}
+
+#[test]
+fn plane_refuses_incomplete_pagination_and_preserves_service_errors() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok("work.source_connect", json!({"provider":"plane", "apiKey":"plane_fixture", "apiUrl":fx.url("plane"), "workspaceSlug":"drogon"}));
+    fx.control("plane/config", json!({"pagination":"repeat"}));
+    assert!(
+        ctx.err(
+            "work.import_preview",
+            json!({"provider":"plane", "externalBoardId":"plane-app"})
+        )
+        .message
+        .contains("repeated pagination cursor")
+    );
+    fx.control(
+        "plane/config",
+        json!({"failure":{"path":"/projects/", "status":429, "message":"Rate limit exceeded"}}),
+    );
+    let error = ctx.err("work.provider_boards", json!({"provider":"plane"}));
+    assert_eq!(error.code, "plane_rate_limited");
+    assert!(error.message.contains("retry after 9s"));
+    fx.control("plane/config", json!({}));
+    assert_eq!(
+        ctx.ok("work.provider_boards", json!({"provider":"plane"}))["boards"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn plane_creates_real_work_items_and_auto_imports_new_assignments() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok("work.source_connect", json!({"provider":"plane", "apiKey":"plane_fixture", "apiUrl":fx.url("plane"), "workspaceSlug":"drogon"}));
+    let imported = ctx.ok("work.board_import", json!({"provider":"plane", "externalBoardId":"plane-app", "issueKeys":["APP-128"], "autoImportMine":true}));
+    let board = imported["board"]["id"].clone();
+    let created = ctx.ok("work.ticket_create", json!({"boardId":board, "columnId":"In Progress", "title":"Created from Drogon", "description":"Plain <context> & details"}));
+    assert_eq!(created["externalKey"], "APP-133");
+    assert_eq!(created["externalStatus"]["name"], "In Progress");
+    assert_eq!(created["sprintName"], "Current cycle");
+    assert_eq!(created["sync"], "synced");
+    assert_eq!(created["warnings"], json!([]));
+    fx.control(
+        "plane/issue/APP-130",
+        json!({"cycle":"pc-active", "assignees":[{"id":"plane-me", "display_name":"Jon Doe"}]}),
+    );
+    ctx.ok("work.board_sync", json!({"boardId":board}));
+    assert!(keys(&ctx.ok("work.board", json!({"boardId":board}))).contains(&"APP-130".into()));
+    assert!(
+        activity(&ctx, "APP-130").contains(&"Assigned to you in Plane: imported on sync".into())
+    );
+    // Failed reconnects preserve the last working connection.
+    ctx.err("work.source_connect", json!({"provider":"plane", "apiKey":"wrong", "apiUrl":fx.url("plane"), "workspaceSlug":"drogon"}));
+    assert_eq!(
+        source(&ctx.ok("work.sources", json!({})), "plane")["connected"],
+        true
+    );
+    ctx.ok("work.board_sync", json!({"boardId":board}));
+}
+
+#[test]
+fn plane_creation_keeps_its_confirmed_identity_when_read_back_fails() {
+    assert_plane_creation_survives_read_back(503, "Read-back unavailable");
+}
+
+#[test]
+fn plane_creation_keeps_its_confirmed_identity_when_read_back_returns_garbage() {
+    assert_plane_creation_survives_read_back(200, "Malformed successful reply");
+}
+
+fn assert_plane_creation_survives_read_back(status: u16, message: &str) {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok("work.source_connect", json!({"provider": "plane", "apiKey": "plane_fixture", "apiUrl": fx.url("plane"), "workspaceSlug": "drogon"}));
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"provider": "plane", "externalBoardId": "plane-app", "issueKeys": ["APP-128"]}),
+    );
+    let board = imported["board"]["id"].clone();
+    fx.control(
+        "plane/config",
+        json!({"failure": {"path": "/work-items/pi-6/", "status": status, "message": message}}),
+    );
+    let response = ctx.call("work.ticket_create", json!({"boardId": board, "columnId": "In Progress", "title": "Retain confirmed creation", "description": "Do not create twice"}));
+    assert!(
+        response.ok,
+        "creation succeeded remotely: {:?}",
+        response.error
+    );
+    let created = response.result.unwrap();
+    assert_eq!(created["externalId"], "pi-6");
+    assert_eq!(created["externalKey"], "APP-133");
+    assert_eq!(
+        created["externalUrl"],
+        "https://app.plane.so/drogon/projects/plane-app/issues/pi-6/"
+    );
+    assert_eq!(created["sprintName"], "Current cycle");
+    assert!(
+        created["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("could not read it back")),
+        "{created}"
+    );
+    let saved = ctx.ok("work.ticket_show", json!({"ticketId": created["id"]}));
+    assert_eq!(saved["externalId"], "pi-6");
+    fx.control("plane/config", json!({}));
+    ctx.ok("work.board_sync", json!({"boardId": board}));
+    let saved = ctx.ok("work.ticket_show", json!({"ticketId": created["id"]}));
+    assert_eq!(saved["removed"], false);
+    assert_eq!(saved["title"], "Retain confirmed creation");
+    let log = std::fs::read_to_string(fx._dir.path().join("requests.jsonl")).unwrap();
+    let posts = log
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .filter(|r| {
+            r["service"] == "plane"
+                && r["method"] == "POST"
+                && r["path"]
+                    .as_str()
+                    .is_some_and(|p| p.ends_with("/work-items/"))
+        })
+        .count();
+    assert_eq!(
+        posts, 1,
+        "recovery must read the existing work item, not create another"
     );
 }
 
