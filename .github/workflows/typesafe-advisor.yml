@@ -1,0 +1,37 @@
+# Advisory only. Jev may ask a reviewer to look at desktop acceptance or the
+# daemon tests. It does not skip foundation, journeys, cargo test, or packaged
+# acceptance. A missing TYPESAFE_API_KEY (a fork PR, or a repo without the
+# secret) writes that fact to the job summary and exits 0.
+name: TypeSafe advisor
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: typesafe-advisor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  advise:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+      - name: Test the validator and the advisor
+        run: node --test scripts/typesafe-validate.test.mjs scripts/ci-jev-advisor.test.mjs
+      - name: Advise on this diff
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          CI_JEV_MODE: ${{ vars.CI_JEV_MODE }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_EVENT_NAME: pull_request
+        run: node scripts/ci-jev-advisor.mjs
