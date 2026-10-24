@@ -60,6 +60,11 @@ import { parseArgs } from 'node:util'
 
 const FIXTURE_TOKEN = 'fixture-token'
 const SLOW_JQL_DELAY_MS = 10_000
+// Collections a test has made impossible to read whole, name → mode, from
+// `POST /__fixture/incomplete` ({collection: 'issues', mode: 'over-cap'};
+// mode null clears). 'over-cap' answers a board's issues as a site that
+// never proves the end: every page full, `isLast` false, `total` out of reach.
+const incomplete = new Map()
 
 const { values } = parseArgs({
   options: {
@@ -207,6 +212,12 @@ async function agile(req, res, url, path) {
   const maxResults = Number(url.searchParams.get('maxResults') ?? 50)
   const issuePage = (records) => {
     logRequest({ path, method: req.method })
+    if (incomplete.get('issues') === 'over-cap' && records.length) {
+      // Every page full, `isLast` false, `total` always beyond what has been
+      // read: paging never reaches an end the walk can trust.
+      const window = Array.from({ length: maxResults }, (_, n) => agileIssue(records[(startAt + n) % records.length]))
+      return json(res, 200, { startAt, maxResults, total: 1_000_000, isLast: false, issues: window })
+    }
     const window = records.slice(startAt, startAt + maxResults)
     return json(res, 200, { startAt, maxResults, total: records.length, issues: window.map(agileIssue) })
   }
@@ -309,6 +320,11 @@ async function control(req, res, path) {
     if (typeof body.deleted === 'boolean') issue.deleted = body.deleted
     issue.fields.updated = new Date().toISOString()
     return json(res, 200, agileIssue(issue))
+  }
+  if (path === '/__fixture/incomplete') {
+    if (body.mode) incomplete.set(body.collection, body.mode)
+    else incomplete.delete(body.collection)
+    return json(res, 200, { ok: true })
   }
   const sprintMatch = path.match(/^\/__fixture\/sprint\/(\d+)$/)
   if (sprintMatch) {

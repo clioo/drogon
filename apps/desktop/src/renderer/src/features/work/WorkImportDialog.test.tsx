@@ -378,3 +378,109 @@ describe("board picker", () => {
     );
   });
 });
+
+describe("a board that could not be read whole", () => {
+  const JIRA: WorkSource = {
+    ...LINEAR,
+    id: "jira",
+    name: "Jira",
+    boardTerm: "board",
+    sprintTerm: "sprint",
+    connect: "tasks",
+  };
+  const INCOMPLETE = {
+    ok: false as const,
+    error: {
+      code: "incomplete_collection",
+      message:
+        "Jira returned an incomplete issue collection. No partial import was applied; narrow the scope or try again.",
+    },
+  };
+  const issue = (key: string) => ({
+    id: key,
+    key,
+    url: `http://jira.local/browse/${key}`,
+    title: key,
+    issueType: "Story",
+    priority: null,
+    assignee: "Carlos",
+    assigneeId: "me",
+    status: { id: "1", name: "To Do", category: "new" },
+    sprint: null,
+    closedSprints: [],
+    importedTicketId: null,
+  });
+  const preview = (...keys: string[]) =>
+    ok({
+      provider: "jira",
+      me: "me",
+      board: { id: "7", name: "Platform Delivery", kind: "kanban" },
+      columns: [{ name: "To Do" }],
+      sprints: [],
+      issues: keys.map(issue),
+      facets: {
+        mine: keys.length,
+        finished: 0,
+        unassigned: 0,
+        noProject: 0,
+        people: [],
+        projects: [],
+        statuses: [],
+      },
+    });
+
+  const mountBoard = (importPreview: WorkBridge["importPreview"]) => {
+    const bridge = { providerBoards: vi.fn(), importPreview };
+    render(
+      <TooltipProvider>
+        <WorkImportDialog
+          open
+          bridge={bridge as unknown as WorkBridge}
+          source={JIRA}
+          projects={[]}
+          initialBoard={{ externalId: "7" }}
+          onClose={vi.fn()}
+          onImported={vi.fn()}
+          onOpenExternal={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+    return bridge;
+  };
+
+  test("reports an incomplete preview and does not offer partial issues to import", async () => {
+    mountBoard(vi.fn(() => Promise.resolve(INCOMPLETE)) as never);
+    const dialog = await screen.findByTestId("work-import-dialog");
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert.textContent).toBe(INCOMPLETE.error.message);
+    expect(within(dialog).queryByTestId("work-import-issues")).toBeNull();
+    expect(within(dialog).queryByRole("checkbox", { name: /^Import / })).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /^Import / })).toBeNull();
+    expect(within(dialog).queryByText(/^Reading the board/)).toBeNull();
+  });
+
+  test("a board that turns incomplete takes its issue list away again", async () => {
+    const importPreview = vi
+      .fn()
+      .mockResolvedValueOnce(await preview("FT-1", "FT-2"))
+      .mockResolvedValue(INCOMPLETE);
+    mountBoard(importPreview as never);
+    const dialog = await screen.findByTestId("work-import-dialog");
+    await within(dialog).findByTestId("work-import-issues");
+    expect(
+      within(dialog).getByRole("button", { name: "Import 2 issues" }),
+    ).toBeTruthy();
+
+    // The same board, read again for a filter: a prefix of it is not an
+    // import, so the rows in hand go away with it.
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Assigned to" }), {
+      target: { value: "any" },
+    });
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert.textContent).toBe(INCOMPLETE.error.message);
+    await waitFor(() =>
+      expect(within(dialog).queryByTestId("work-import-issues")).toBeNull(),
+    );
+    expect(within(dialog).queryByRole("button", { name: /^Import / })).toBeNull();
+  });
+});

@@ -12,11 +12,17 @@ use serde_json::{Value, json};
 
 use super::provider::{
     AssignedOpen, ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope,
-    NewIssue, ProviderError, ProviderResult, WorkProvider,
+    NewIssue, NextPage, ProviderError, ProviderResult, WorkProvider, complete_connection,
+    incomplete_collection, page_cursor,
 };
 use crate::jira::client::{HttpRequest, JiraRequestError, REQUEST_TIMEOUT, http_json};
 
 pub(crate) const DEFAULT_API_URL: &str = "https://api.linear.app";
+
+/// Nodes per page of a Linear connection, and the pages one walk asks for
+/// before it gives the collection up as unproven.
+const PAGE: usize = 100;
+const MAX_PAGES: usize = 100;
 
 pub(crate) struct LinearProvider {
     token: String,
@@ -110,13 +116,20 @@ impl LinearProvider {
         let data = self.gql(
             "query DrogonLinearTeam($id: String!) { team(id: $id) {
                id key name cyclesEnabled
-               states(first: 100) { nodes { id name type position } }
-               cycles(first: 100) { nodes { id number name startsAt endsAt completedAt isActive } }
+               states(first: 100) { nodes { id name type position } pageInfo { hasNextPage endCursor } }
+               cycles(first: 100) { nodes { id number name startsAt endsAt completedAt isActive } pageInfo { hasNextPage endCursor } }
              } }",
             json!({ "id": id }),
         )?;
         match data.get("team") {
-            Some(team) if !team.is_null() => Ok(team.clone()),
+            Some(team) if !team.is_null() => {
+                // The team's states are the board's columns and its cycles
+                // the sprints: a list read short would leave columns
+                // unmapped and put issues in the wrong sprint.
+                complete_connection(&team["states"], PAGE, "Linear", "workflow state")?;
+                complete_connection(&team["cycles"], PAGE, "Linear", "cycle")?;
+                Ok(team.clone())
+            }
             _ => Err(ProviderError::new(
                 "not_found",
                 format!("Linear team {id} not found"),
@@ -255,14 +268,27 @@ impl WorkProvider for LinearProvider {
     }
 
     fn list_boards(&self) -> ProviderResult<Vec<ExtBoard>> {
-        let data = self.gql(
-            "query DrogonLinearTeams { teams(first: 100) { nodes { id key name cyclesEnabled } } }",
-            json!({}),
-        )?;
-        Ok(data["teams"]["nodes"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
+        let query = "query DrogonLinearTeams($after: String) { teams(first: 100, after: $after) {
+             nodes { id key name cyclesEnabled } pageInfo { hasNextPage endCursor } } }";
+        let mut nodes: Vec<Value> = Vec::new();
+        let mut after: Option<String> = None;
+        let mut whole = false;
+        for _ in 0..MAX_PAGES {
+            let data = self.gql(query, json!({ "after": after }))?;
+            let page = &data["teams"];
+            nodes.extend(page["nodes"].as_array().cloned().unwrap_or_default());
+            match page_cursor(page, PAGE, after.as_deref(), "Linear", "team")? {
+                NextPage::Last => {
+                    whole = true;
+                    break;
+                }
+                NextPage::From(cursor) => after = Some(cursor),
+            }
+        }
+        if !whole {
+            return Err(incomplete_collection("Linear", "team"));
+        }
+        Ok(nodes
             .iter()
             .map(|team| ExtBoard {
                 id: text(&team["id"]),
@@ -283,12 +309,35 @@ impl WorkProvider for LinearProvider {
         &self,
         boards: &[ExtBoard],
     ) -> ProviderResult<HashMap<String, AssignedOpen>> {
-        let data = self.gql(
-            "query DrogonLinearAssigned { viewer { assignedIssues(first: 100, filter: { state: { type: { nin: [\"completed\", \"canceled\"] } } }) { nodes { team { id } } } } }",
-            json!({}),
-        )?;
+        let query = "query DrogonLinearAssigned($after: String) { viewer {
+             assignedIssues(first: 100, after: $after, filter: { state: { type: { nin: [\"completed\", \"canceled\"] } } }) {
+               nodes { team { id } } pageInfo { hasNextPage endCursor } } } }";
         // A Linear board is its team: every open issue there is on it.
-        let teams = team_counts(&data);
+        let mut teams: HashMap<String, u32> = HashMap::new();
+        let mut after: Option<String> = None;
+        let mut whole = false;
+        for _ in 0..MAX_PAGES {
+            let data = self.gql(query, json!({ "after": after }))?;
+            for (team, count) in team_counts(&data) {
+                *teams.entry(team).or_insert(0) += count;
+            }
+            match page_cursor(
+                &data["viewer"]["assignedIssues"],
+                PAGE,
+                after.as_deref(),
+                "Linear",
+                "assigned issue",
+            )? {
+                NextPage::Last => {
+                    whole = true;
+                    break;
+                }
+                NextPage::From(cursor) => after = Some(cursor),
+            }
+        }
+        if !whole {
+            return Err(incomplete_collection("Linear", "assigned issue"));
+        }
         Ok(boards
             .iter()
             .filter_map(|b| {
@@ -363,7 +412,8 @@ impl WorkProvider for LinearProvider {
         );
         let mut out = Vec::new();
         let mut after: Option<String> = None;
-        for _ in 0..100 {
+        let mut whole = false;
+        for _ in 0..MAX_PAGES {
             let data = self.gql(&query, json!({ "id": board_id, "after": after }))?;
             let page = &data["team"]["issues"];
             if data["team"].is_null() {
@@ -375,10 +425,16 @@ impl WorkProvider for LinearProvider {
             for raw in page["nodes"].as_array().cloned().unwrap_or_default() {
                 out.push(self.map_issue(&raw));
             }
-            if page["pageInfo"]["hasNextPage"] != true {
-                break;
+            match page_cursor(page, PAGE, after.as_deref(), "Linear", "issue")? {
+                NextPage::Last => {
+                    whole = true;
+                    break;
+                }
+                NextPage::From(cursor) => after = Some(cursor),
             }
-            after = page["pageInfo"]["endCursor"].as_str().map(str::to_owned);
+        }
+        if !whole {
+            return Err(incomplete_collection("Linear", "issue"));
         }
         Ok(match scope {
             // Its listing cannot be narrowed: a sync reads the whole board.

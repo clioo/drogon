@@ -1659,3 +1659,67 @@ fn new_session_on_a_ticket_makes_and_reuses_its_own_workspace() {
             .is_file()
     );
 }
+
+/// A site that pages a board forever without ever proving the end: the
+/// import refuses the prefix instead of bringing in 2500 issues as "the
+/// board", and a sync of an imported board changes nothing.
+#[test]
+fn a_board_jira_never_pages_to_the_end_of_is_refused() {
+    let path = fake_claude_on_path();
+    let server = FixtureServer::with_data("agile-site.json");
+    let ctx = TestContext::open();
+    ctx.connect(&server);
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"externalBoardId": "7", "all": true}),
+    );
+    let board = imported["board"]["id"].as_str().unwrap().to_string();
+    let before = imported["imported"].as_i64().unwrap();
+    assert!(before > 0);
+
+    // Every page full, `isLast` false and a `total` always out of reach.
+    server.control(
+        "incomplete",
+        json!({"collection": "issues", "mode": "over-cap"}),
+    );
+    let preview = ctx.err("work.import_preview", json!({"externalBoardId": "7"}));
+    assert_eq!(preview.code, "incomplete_collection");
+    assert_eq!(
+        preview.message,
+        "Jira returned an incomplete issue collection. No partial import was applied; narrow the scope or try again."
+    );
+    assert_eq!(
+        ctx.err(
+            "work.board_import",
+            json!({"externalBoardId": "9", "all": true})
+        )
+        .code,
+        "incomplete_collection"
+    );
+    // A sync reads known keys by JQL — through the same walk.
+    assert_eq!(
+        ctx.err("work.board_sync", json!({"boardId": board})).code,
+        "incomplete_collection"
+    );
+    let view = ctx.ok("work.board", json!({"boardId": board}));
+    assert_eq!(view["board"]["ticketCount"], before);
+    assert!(
+        view["board"]["lastSyncError"]
+            .as_str()
+            .is_some_and(|e| e.contains("incomplete issue collection")),
+        "{}",
+        view["board"]
+    );
+    for ticket in view["tickets"].as_array().unwrap() {
+        assert_ne!(ticket["sync"], "removed");
+    }
+
+    // The site proves the end again: the same board syncs as before.
+    server.control("incomplete", json!({"collection": "issues"}));
+    ctx.ok("work.board_sync", json!({"boardId": board}));
+    assert_eq!(
+        ctx.ok("work.board", json!({"boardId": board}))["board"]["lastSyncError"],
+        Value::Null
+    );
+    drop(path);
+}

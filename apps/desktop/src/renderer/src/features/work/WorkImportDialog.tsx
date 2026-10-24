@@ -173,6 +173,11 @@ export function WorkImportDialog({
       if (cancelled) return;
       setLoading(false);
       if (!result.ok) {
+        // A board that could not be read whole offers nothing to import:
+        // the rows in hand are a prefix, not the board (incomplete_collection).
+        setPreview(null);
+        setChosen(new Set());
+        seeded.current = null;
         setError(result.error.message);
         return;
       }
@@ -357,7 +362,7 @@ export function WorkImportDialog({
                 Showing {preview.issues.length} of {preview.total} matching issues. Narrow the filters to see the rest.
               </p>
             ) : null}
-            <div className="max-h-[320px] space-y-4 overflow-y-auto pr-1" aria-label="Issues">
+            <div className="max-h-[320px] space-y-4 overflow-y-auto pr-1" aria-label="Issues" data-testid="work-import-issues">
               {preview.issues.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">No issues match these filters.</p>
               ) : null}

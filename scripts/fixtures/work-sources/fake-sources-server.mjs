@@ -37,6 +37,22 @@ const data = JSON.parse(readFileSync(values.data, 'utf8'))
 const linear = data.linear
 const github = data.github
 const PAGE = 3
+// Collections a test has made impossible to read whole, `<service>:<name>`
+// → mode, from `POST /__fixture/<linear|github>/incomplete` ({collection,
+// mode}; mode null clears). Linear: issues, states, cycles, teams, assigned.
+// GitHub: items, item-fields, project-fields, projects, repos, repo-issues.
+const incomplete = new Map()
+
+// A connection's pageInfo, or the shape a source gives when it cannot prove
+// the collection is whole: `null-cursor` claims another page without saying
+// where it starts (walking on with `after: null` re-reads the first page),
+// `over-cap` never reports a last page.
+function pageInfo(collection, next, cursor) {
+  const mode = incomplete.get(collection)
+  if (mode === 'null-cursor') return { hasNextPage: true, endCursor: null }
+  if (mode === 'over-cap') return { hasNextPage: true, endCursor: String(cursor ?? 0) }
+  return { hasNextPage: Boolean(next), endCursor: next ? String(cursor) : null }
+}
 
 // Iterations are dated relative to today so "active" stays active.
 const today = new Date()
@@ -117,10 +133,25 @@ function linearGraphql(op, v) {
         const state = linearTeam(i.team).states.find((s) => s.id === i.state)
         return !['completed', 'canceled'].includes(state?.type)
       })
-      return { data: { viewer: { assignedIssues: { nodes: open.map((i) => ({ team: { id: i.team } })) } } } }
+      const start = v.after ? Number(v.after) : 0
+      const page = open.slice(start, start + PAGE)
+      return {
+        data: {
+          viewer: {
+            assignedIssues: {
+              nodes: page.map((i) => ({ team: { id: i.team } })),
+              pageInfo: pageInfo('linear:assigned', start + PAGE < open.length, start + PAGE),
+            },
+          },
+        },
+      }
     }
-    case 'DrogonLinearTeams':
-      return { data: { teams: { nodes: linear.teams.map(({ id, key, name, cyclesEnabled }) => ({ id, key, name, cyclesEnabled })) } } }
+    case 'DrogonLinearTeams': {
+      const all = linear.teams.map(({ id, key, name, cyclesEnabled }) => ({ id, key, name, cyclesEnabled }))
+      const start = v.after ? Number(v.after) : 0
+      const page = all.slice(start, start + PAGE)
+      return { data: { teams: { nodes: page, pageInfo: pageInfo('linear:teams', start + PAGE < all.length, start + PAGE) } } }
+    }
     case 'DrogonLinearTeam': {
       const team = linearTeam(v.id)
       if (!team) return { data: { team: null }, errors: [{ message: 'Entity not found: Team' }] }
@@ -131,8 +162,8 @@ function linearGraphql(op, v) {
             key: team.key,
             name: team.name,
             cyclesEnabled: team.cyclesEnabled,
-            states: { nodes: team.states },
-            cycles: { nodes: team.cycles },
+            states: { nodes: team.states, pageInfo: pageInfo('linear:states', false, 0) },
+            cycles: { nodes: team.cycles, pageInfo: pageInfo('linear:cycles', false, 0) },
           },
         },
       }
@@ -151,7 +182,7 @@ function linearGraphql(op, v) {
           team: {
             issues: {
               nodes: page.map(linearIssueJson),
-              pageInfo: { hasNextPage: next, endCursor: next ? String(start + size) : null },
+              pageInfo: pageInfo('linear:issues', next, start + size),
             },
           },
         },
@@ -273,7 +304,14 @@ function ghItemJson(item) {
   if (priority) values.push({ __typename: 'ProjectV2ItemFieldSingleSelectValue', optionId: priority.id, name: priority.name, field: { id: project.priority.id } })
   const iteration = iterationJson(project, item.iteration)
   if (iteration) values.push({ __typename: 'ProjectV2ItemFieldIterationValue', ...iteration })
-  return { __typename: 'ProjectV2Item', id: item.id, isArchived: false, project: { id: project.id }, content, fieldValues: { nodes: values } }
+  return {
+    __typename: 'ProjectV2Item',
+    id: item.id,
+    isArchived: false,
+    project: { id: project.id },
+    content,
+    fieldValues: { nodes: values, pageInfo: pageInfo('github:item-fields', false, 0) },
+  }
 }
 
 function ghProjectFields(project) {
@@ -314,15 +352,28 @@ function ghGraphql(op, v) {
                 owner: { login: p.owner },
                 fields: { nodes: ghProjectFields(p).map(({ __typename }) => ({ __typename })) },
               })),
+              pageInfo: pageInfo('github:projects', false, 0),
             },
-            organizations: { nodes: [] },
+            organizations: { nodes: [], pageInfo: pageInfo('github:organizations', false, 0) },
           },
         },
       }
     case 'DrogonGhProject': {
       const p = ghProject(v.id)
       if (!p) return { data: { node: null }, errors: [{ type: 'NOT_FOUND', message: `Could not resolve to a node with the global id of '${v.id}'` }] }
-      return { data: { node: { __typename: 'ProjectV2', id: p.id, number: p.number, title: p.title, closed: p.closed, owner: { login: p.owner }, fields: { nodes: ghProjectFields(p) } } } }
+      return {
+        data: {
+          node: {
+            __typename: 'ProjectV2',
+            id: p.id,
+            number: p.number,
+            title: p.title,
+            closed: p.closed,
+            owner: { login: p.owner },
+            fields: { nodes: ghProjectFields(p), pageInfo: pageInfo('github:project-fields', false, 0) },
+          },
+        },
+      }
     }
     case 'DrogonGhItems': {
       const p = ghProject(v.id)
@@ -336,7 +387,7 @@ function ghGraphql(op, v) {
           node: {
             items: {
               nodes: page.map(ghItemJson).filter(Boolean),
-              pageInfo: { hasNextPage: next, endCursor: next ? String(start + PAGE) : null },
+              pageInfo: pageInfo('github:items', next, start + PAGE),
             },
           },
         },
@@ -386,6 +437,15 @@ async function githubRest(req, res, path, url) {
   if (req.method === 'GET' && path === '/github/user') return send(res, 200, github.viewer)
   if (req.method === 'GET' && path === '/github/user/repos') {
     const page = Number(url.searchParams.get('page') ?? 1)
+    const perPage = Number(url.searchParams.get('per_page') ?? 30)
+    // An account REST can never page to the end of: every page is full.
+    if (incomplete.get('github:repos') === 'over-cap') {
+      return send(
+        res,
+        200,
+        Array.from({ length: perPage }, (_, n) => ({ full_name: `octo-fixture/r${(page - 1) * perPage + n}`, name: `r${n}`, owner: { login: 'octo-fixture' }, has_issues: true })),
+      )
+    }
     const repos = page > 1 ? [] : github.repos.map((r) => ({ full_name: r.full_name, name: r.full_name.split('/')[1], owner: { login: r.full_name.split('/')[0] }, has_issues: r.has_issues }))
     return send(res, 200, repos)
   }
@@ -402,6 +462,15 @@ async function githubRest(req, res, path, url) {
     const page = Number(url.searchParams.get('page') ?? 1)
     const perPage = Number(url.searchParams.get('per_page') ?? 30)
     const all = github.issues.filter((i) => i.repo === repo && !i.deleted)
+    // A repository REST can never page to the end of: every page is full.
+    if (incomplete.get('github:repo-issues') === 'over-cap') {
+      const first = all[0] ?? { repo, number: 0, title: 'Over the cap', body: '', state: 'open', assignees: [], labels: [] }
+      return send(
+        res,
+        200,
+        Array.from({ length: perPage }, (_, n) => ghIssueRest({ ...first, number: (page - 1) * perPage + n + 1 })),
+      )
+    }
     return send(res, 200, all.slice((page - 1) * perPage, page * perPage).map(ghIssueRest))
   }
   if (req.method === 'POST' && list) {
@@ -485,6 +554,13 @@ async function control(req, res, path) {
   }
   if (path === '/__fixture/github/projects-error') {
     github.projectsError = body.message ? { type: body.type ?? 'INSUFFICIENT_SCOPES', message: body.message } : null
+    return send(res, 200, { ok: true })
+  }
+  const incompleteMatch = path.match(/^\/__fixture\/(linear|github)\/incomplete$/)
+  if (incompleteMatch) {
+    const key = `${incompleteMatch[1]}:${body.collection}`
+    if (body.mode) incomplete.set(key, body.mode)
+    else incomplete.delete(key)
     return send(res, 200, { ok: true })
   }
   if (path === '/__fixture/github/issue') {
