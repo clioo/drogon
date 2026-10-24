@@ -123,7 +123,7 @@ export type WorkSession = {
 
 export type WorkDeliveryResult = {
   sessionId: string | null;
-  action: "sent" | "resumed" | "started" | "skipped" | "failed";
+  action: "sent" | "resumed" | "started" | "skipped" | "failed" | "unverifiable";
   newSessionId?: string | null;
   error?: string;
   [key: string]: unknown;
@@ -442,7 +442,7 @@ declare module "./session-contract" {
 const sessionSchema = z.looseObject({ id: z.string() });
 const resultSchema = z.looseObject({
   sessionId: z.string().nullable(),
-  action: z.enum(["sent", "resumed", "started", "skipped", "failed"]),
+  action: z.enum(["sent", "resumed", "started", "skipped", "failed", "unverifiable"]),
 });
 const deliverySchema = z.looseObject({
   ticketId: z.string(),

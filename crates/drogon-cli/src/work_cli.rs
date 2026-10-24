@@ -1862,8 +1862,10 @@ fn render_ticket(t: &Value) -> String {
         .iter()
         .take(5)
     {
+        // "delivery", not "sent": a row in this list can be a failure, and a
+        // line that opens with "sent" would contradict the one that follows.
         out.push(format!(
-            "  sent ({}): {}",
+            "  delivery ({}): {}",
             text(&send["trigger"]),
             summarize_results(&send["results"])
         ));

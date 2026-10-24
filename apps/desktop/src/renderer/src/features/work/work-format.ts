@@ -118,3 +118,30 @@ export function deliverySummary(results: { action: string }[]): string {
   for (const r of results) counts.set(r.action, (counts.get(r.action) ?? 0) + 1);
   return [...counts.entries()].map(([action, n]) => `${n} ${action}`).join(", ");
 }
+
+type DeliveryResultLike = { action: string; error?: string };
+
+/** A recipient the prompt did not reach, if any. A send whose RPC succeeded
+ *  can still have failed for every session it was meant for. */
+function unreached(results: DeliveryResultLike[]): DeliveryResultLike | undefined {
+  return results.find((r) => r.action === "failed" || r.action === "unverifiable");
+}
+
+export function deliveryHasFailures(results: DeliveryResultLike[]): boolean {
+  return unreached(results) !== undefined;
+}
+
+/** What a send should say, and whether it is bad news. The counts alone
+ *  cannot tell the user that a half-delivered prompt is sitting in a
+ *  composer waiting for a lone Return, so the first failure speaks. */
+export function deliveryNotice(
+  subject: string,
+  results: DeliveryResultLike[],
+): { text: string; kind: "success" | "error" } {
+  const failure = unreached(results);
+  const detail = failure?.error?.trim();
+  return {
+    text: `Delivery to ${subject}: ${deliverySummary(results) || "nothing"}${detail ? ` — ${detail}` : ""}`,
+    kind: failure ? "error" : "success",
+  };
+}
