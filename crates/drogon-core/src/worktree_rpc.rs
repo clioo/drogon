@@ -546,6 +546,28 @@ pub(crate) fn create_workspaces_dir(data_dir: &Path, dir: &Path) -> Result<(), R
             workspaces_tree(data_dir).display()
         )));
     };
+    // The walk starts at the data directory, so that directory has to be
+    // there -- and it is not always: `Engine::open` creates it, but a
+    // caller (a test with a temporary root, a cleaned cache) can take it
+    // away afterwards, and the `create_dir_all` this replaced quietly
+    // rebuilt the whole chain including it. Rebuild it the same way, then
+    // insist it really is a directory: recreating a root is ordinary, and
+    // following a link that appeared where the root used to be is not.
+    std::fs::create_dir_all(data_dir)
+        .map_err(|err| error::io_error(format!("cannot create workspaces directory: {err}")))?;
+    let root = std::fs::symlink_metadata(data_dir).map_err(|err| {
+        error::io_error(format!(
+            "could not inspect \"{}\": {err}",
+            data_dir.display()
+        ))
+    })?;
+    if !root.is_dir() {
+        return Err(error::invalid_argument(format!(
+            "refusing to create a workspace under \"{}\": \"{}\" is not a directory",
+            dir.display(),
+            data_dir.display()
+        )));
+    }
     let mut walked = data_dir.to_path_buf();
     for component in relative.components() {
         match component {
