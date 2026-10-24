@@ -7,7 +7,8 @@
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 
-use crate::{Engine, error, now_rfc3339, optional_str, require_str};
+use crate::workspace_session_settle::DeletionScope;
+use crate::{Engine, error, now_rfc3339, optional_bool, optional_str, require_str};
 
 /// Quick Session scratch layout (the fork's `drogon-quick-session-scratch`):
 /// `<data-dir>/quick-sessions/session-<id>/` with an ownership marker the
@@ -1042,6 +1043,7 @@ impl Engine {
     ) -> Result<Value, drogon_protocol::RpcError> {
         let _workspace_admission = self.workspace_lifecycle_gate.write().unwrap();
         let id = require_str(params, "id")?;
+        let mut force = optional_bool(params, "force", false)?;
         let scratch: Option<String> = {
             let conn = self.db.lock().unwrap();
             conn.query_row(
@@ -1056,6 +1058,30 @@ impl Engine {
             // Refuse a scratch this daemon cannot prove it owns before
             // stopping anything; the decision itself is remade at the unlink.
             let _ = self.validate_quick_session_scratch(id, path)?;
+            // "Delete Chat" already says it "stops its running sessions",
+            // so a Chat removal settles what it can rather than asking for a
+            // second confirmation the dialog never offered.
+            force = true;
+        }
+        // Issue #621, applied to the Project itself: deleting the
+        // registration takes every one of its Workspaces with it, and a
+        // session row is not a process. Before anything is stopped or
+        // deleted, answer for the terminals the rows this call will remove
+        // are running: refuse while one is live (nothing is stopped yet, so
+        // a refusal costs no agent its terminal), and with Force settle what
+        // this process can and refuse again for whatever it cannot. Without
+        // this, `project.remove` left live PTYs behind with a workspace_id
+        // no longer in `workspaces`, where no per-workspace list can see
+        // them — and `runtime.shutdown` then refuses every restart because
+        // they are still not `exited`.
+        let scope = self.project_deletion_scope(id)?;
+        if force {
+            self.settle_workspace_sessions(&scope)?;
+        }
+        if let Some(refusal) = self.workspace_session_evidence(&scope)?.refusal(force) {
+            return Err(refusal);
+        }
+        if let Some(path) = &scratch {
             self.settle_quick_session_members(path)?;
         }
         // `deleteFiles` asks for the folder to go with the registration. Only
@@ -1141,6 +1167,56 @@ impl Engine {
         let removed = remove(&conn, id)?;
         drop(conn);
         Ok(removed)
+    }
+
+    /// The Workspaces one `project.remove` unregisters: every Worktree's
+    /// card, plus the folder Project's own implicit row. No directory — a
+    /// registration-only removal unlinks nothing, and the branches that do
+    /// delete files (`deleteFiles`, a Chat's scratch) settle their own
+    /// containment through `settle_quick_session_members`, which this scope
+    /// deliberately does not duplicate.
+    fn project_deletion_scope(
+        &self,
+        project_id: &str,
+    ) -> Result<DeletionScope, drogon_protocol::RpcError> {
+        let conn = self.db.lock().unwrap();
+        let mut workspace_ids: Vec<String> = {
+            let mut statement = conn
+                .prepare("SELECT workspace_id FROM worktrees WHERE project_id = ?1 ORDER BY workspace_id")
+                .map_err(error::from_sqlite)?;
+            let rows = statement
+                .query_map([project_id], |row| row.get::<_, String>(0))
+                .map_err(error::from_sqlite)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(error::from_sqlite)?
+        };
+        // A folder Project's workspace row is keyed by its path, not by a
+        // `worktrees` row (the implicit card is synthesized), and
+        // `remove` deletes exactly that row.
+        let folder_path: Option<String> = conn
+            .query_row(
+                "SELECT path FROM projects WHERE id = ?1 AND kind = 'folder'",
+                [project_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(error::from_sqlite)?;
+        if let Some(path) = folder_path
+            && let Some(workspace_id) = conn
+                .query_row(
+                    "SELECT id FROM workspaces WHERE path = ?1",
+                    [&path],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(error::from_sqlite)?
+        {
+            workspace_ids.push(workspace_id);
+        }
+        Ok(DeletionScope {
+            workspace_ids,
+            directory: None,
+        })
     }
 
     fn cleanup_quick_session_scratch(

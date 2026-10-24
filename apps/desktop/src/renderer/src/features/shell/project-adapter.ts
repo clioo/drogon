@@ -53,6 +53,8 @@ export interface ProjectRpcBridge extends Partial<Pick<ProjectBridge, "worktreeI
   }) => Promise<Result<Project>>;
   projectRemove?: (input: {
     id: string;
+    force?: boolean;
+    deleteFiles?: boolean;
   }) => Promise<Result<{ id: string; removed: boolean }>>;
   projectUpdate?: (input: {
     id: string;

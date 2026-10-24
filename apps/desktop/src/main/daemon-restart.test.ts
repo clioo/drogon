@@ -142,12 +142,16 @@ describe("handleDaemonRestart", () => {
           () => fail("unverifiable", "down"),
           () => ok({ ...fences, serviceInstanceId: "svc2" }),
         ],
-        "workspace.list": [() => ok({ workspaces: [{ id: "w1" }] })],
         "session.list": [
           () =>
             ok({
               sessions: [
-                { id: "s1", incarnation: "i1", workspaceId: "w1" },
+                {
+                  id: "s1",
+                  incarnation: "i1",
+                  workspaceId: "w1",
+                  verdict: "live",
+                },
               ],
             }),
         ],
@@ -192,7 +196,7 @@ describe("handleDaemonRestart", () => {
           () => fail("unverifiable", "down"),
           () => ok({ ...fences, serviceInstanceId: "svc2" }),
         ],
-        "workspace.list": [() => ok({ workspaces: [] })],
+        "session.list": [() => ok({ sessions: [] })],
         "runtime.shutdown": [() => ok({ ...fences, accepted: true })],
       },
       seen,
@@ -216,11 +220,17 @@ describe("handleDaemonRestart", () => {
     const call = scripted(
       {
         status: [() => ok(fences)],
-        "workspace.list": [() => ok({ workspaces: [{ id: "w1" }] })],
         "session.list": [
           () =>
             ok({
-              sessions: [{ id: "s1", incarnation: "i1", workspaceId: "w1" }],
+              sessions: [
+                {
+                  id: "s1",
+                  incarnation: "i1",
+                  workspaceId: "w1",
+                  verdict: "live",
+                },
+              ],
             }),
         ],
         "session.stop": [() => fail("stale_incarnation", "gone")],
@@ -239,7 +249,7 @@ describe("handleDaemonRestart", () => {
     const call = scripted(
       {
         status: [() => ok(fences)],
-        "workspace.list": [() => ok({ workspaces: [] })],
+        "session.list": [() => ok({ sessions: [] })],
         "runtime.shutdown": [() => fail("runtime_busy", "a session is live")],
       },
       seen,
@@ -280,6 +290,7 @@ describe("handleDaemonRestart", () => {
         return statuses === 1 ? ok(fences) : fail("unverifiable", "down");
       }
       if (method === "workspace.list") return ok({ workspaces: [] });
+      if (method === "session.list") return ok({ sessions: [] });
       if (method === "runtime.shutdown")
         return fail("internal_error", "expected contract");
       throw new Error(`unexpected native call: ${method}`);
@@ -292,5 +303,144 @@ describe("handleDaemonRestart", () => {
     expect(result.reason).toMatch(
       "did not become healthy (spawned-then-timed-out)",
     );
+  });
+});
+
+describe("handleDaemonRestart session settlement (post-restart recovery)", () => {
+  /** Like `scripted`, but records the params so the verb per verdict is provable. */
+  function recording(
+    scripts: Record<string, Array<() => Result<unknown>>>,
+    calls: Array<{ method: string; params: unknown }>,
+  ) {
+    return async (
+      method: string,
+      params: object,
+    ): Promise<Result<unknown>> => {
+      calls.push({ method, params });
+      const queue = scripts[method];
+      if (!queue || queue.length === 0)
+        throw new Error(`unexpected native call: ${method}`);
+      return queue.shift()!();
+    };
+  }
+
+  test("an orphaned live session is stopped, a post-restart stub is closed, and the shutdown is admitted", async () => {
+    const calls: Array<{ method: string; params: unknown }> = [];
+    const spawn = vi.fn(async () => {});
+    const call = recording(
+      {
+        status: [
+          () => ok(fences),
+          () => fail("unverifiable", "down"),
+          () => fail("unverifiable", "down"),
+          () => ok({ ...fences, serviceInstanceId: "svc2" }),
+        ],
+        // Host-wide, and both rows point at a Workspace that no longer
+        // exists: a per-workspace enumeration sees neither.
+        "session.list": [
+          () =>
+            ok({
+              sessions: [
+                {
+                  id: "s-orphan",
+                  incarnation: "i1",
+                  workspaceId: "removed-workspace",
+                  verdict: "live",
+                },
+                {
+                  id: "s-stub",
+                  incarnation: "i2",
+                  workspaceId: "removed-workspace",
+                  verdict: "unverifiable",
+                },
+              ],
+            }),
+        ],
+        "session.stop": [() => ok({ verdict: "exited" })],
+        "session.close": [() => ok({ verdict: "unverifiable" })],
+        "runtime.shutdown": [() => ok({ ...fences, accepted: true })],
+      },
+      calls,
+    );
+    const result = await handleDaemonRestart(undefined, deps({ call, spawn }));
+
+    expect(result).toEqual({
+      restarted: true,
+      managed: true,
+      reason: null,
+      stoppedSessions: 2,
+    });
+    const called = (method: string) =>
+      calls.filter((entry) => entry.method === method);
+    expect(called("workspace.list")).toEqual([]);
+    expect(called("session.stop")).toEqual([
+      {
+        method: "session.stop",
+        params: { sessionId: "s-orphan", incarnation: "i1" },
+      },
+    ]);
+    expect(called("session.close")).toEqual([
+      {
+        method: "session.close",
+        params: { sessionId: "s-stub", incarnation: "i2" },
+      },
+    ]);
+    expect(called("runtime.shutdown")).toHaveLength(1);
+  });
+
+  test("a stub that cannot be closed aborts before the shutdown and names the refusal", async () => {
+    const call = scripted(
+      {
+        status: [() => ok(fences)],
+        "session.list": [
+          () =>
+            ok({
+              sessions: [
+                {
+                  id: "s-stub",
+                  incarnation: "i2",
+                  workspaceId: "w1",
+                  verdict: "unverifiable",
+                },
+              ],
+            }),
+        ],
+        "session.close": [() => fail("not_found", "session not found")],
+      },
+      [],
+    );
+    const result = await handleDaemonRestart(undefined, deps({ call }));
+    expect(result.restarted).toBe(false);
+    expect(result.reason).toMatch("left running");
+    expect(result.reason).toMatch("1 of 1");
+  });
+
+  test("a session list without verdicts still settles rows (older daemons)", async () => {
+    // `verdict` is additive on the wire; a row that omits it is not live by
+    // default — closing it is the only verb that can clear an unknown.
+    const calls: Array<{ method: string; params: unknown }> = [];
+    const call = recording(
+      {
+        status: [() => ok(fences)],
+        "session.list": [
+          () =>
+            ok({
+              sessions: [{ id: "s1", incarnation: "i1", workspaceId: "w1" }],
+            }),
+        ],
+        "session.close": [() => ok({})],
+        "runtime.shutdown": [() => fail("runtime_busy", "still unsettled")],
+      },
+      calls,
+    );
+    const result = await handleDaemonRestart(undefined, deps({ call }));
+    expect(result.restarted).toBe(false);
+    expect(result.reason).toMatch("runtime_busy");
+    expect(
+      calls.filter((entry) => entry.method === "session.close"),
+    ).toHaveLength(1);
+    expect(
+      calls.filter((entry) => entry.method === "session.stop"),
+    ).toHaveLength(0);
   });
 });

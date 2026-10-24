@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from "../../components/ui/tooltip";
 import { SettingsSection } from "./SettingsSection";
+import { isProvenLivePtyRemovalError } from "../shell/delete-worktree-toast";
 
 export function getProjectKindLabel(kind: Project["kind"]): string {
   return kind === "folder" ? "Folder" : "Git";
@@ -45,8 +46,14 @@ export function ProjectSettingsSection({
   onUpdateSetupScript,
 }: {
   project: Project;
-  /** Removes the registration (never files); the page closes on success. */
-  onRemoveProject: (projectId: string) => void;
+  /** Removes the registration (never files); the page closes on success.
+   *  `force` stops the project's running terminals first — unforced, the
+   *  daemon refuses a removal whose terminals are still live (`session_live`)
+   *  rather than stranding them with no workspace. */
+  onRemoveProject: (
+    projectId: string,
+    force: boolean,
+  ) => Promise<string | null>;
   /** Saves the local setup script; absent on old hosts hides the control. */
   onUpdateSetupScript?: (
     projectId: string,
@@ -54,13 +61,17 @@ export function ProjectSettingsSection({
   ) => Promise<string | null>;
 }): React.JSX.Element {
   const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [forceArmed, setForceArmed] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [setupScript, setSetupScript] = useState(project.setupScript ?? "");
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const removeLabel = confirmingRemove
-    ? "Confirm Remove Project"
+    ? forceArmed
+      ? "Stop terminals and remove"
+      : "Confirm Remove Project"
     : "Remove Project";
   const isFolder = project.kind === "folder";
 
@@ -72,8 +83,18 @@ export function ProjectSettingsSection({
 
   const handleRemove = () => {
     if (confirmingRemove) {
-      onRemoveProject(project.id);
-      setConfirmingRemove(false);
+      void onRemoveProject(project.id, forceArmed).then((failure) => {
+        if (!failure) {
+          setConfirmingRemove(false);
+          setForceArmed(false);
+          setRemoveError(null);
+          return;
+        }
+        setRemoveError(failure);
+        // A proven-live refusal is the one failure a stronger attempt can
+        // clear, so arm it: the next click says exactly what it will do.
+        if (isProvenLivePtyRemovalError(failure)) setForceArmed(true);
+      });
       return;
     }
     setConfirmingRemove(true);
@@ -125,7 +146,10 @@ export function ProjectSettingsSection({
                   variant={confirmingRemove ? "destructive" : "outline"}
                   size="icon-sm"
                   onClick={handleRemove}
-                  onBlur={() => setConfirmingRemove(false)}
+                  onBlur={() => {
+                    setConfirmingRemove(false);
+                    setForceArmed(false);
+                  }}
                   aria-label={removeLabel}
                 >
                   <Trash2 className="size-3.5" />
@@ -137,6 +161,11 @@ export function ProjectSettingsSection({
             </Tooltip>
           </div>
         </div>
+        {removeError ? (
+          <p className="text-xs text-destructive" role="alert">
+            {removeError}
+          </p>
+        ) : null}
 
         <div className="space-y-2">
           <p className="text-sm font-semibold">Display Name</p>

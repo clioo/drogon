@@ -121,6 +121,13 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=6144
       - run: pnpm accept:core-cli
+      # The coordination lane is a second, independent world: it drives the
+      # typed CLI's run/task/gate/mail/worker verbs plus a shell-fixture
+      # worker (no model, no credentials) and proves the shipped `ask`
+      # contract. It was unrun for long enough that its probe drifted from
+      # that contract and stayed red; wiring it here keeps it honest.
+      - name: Verify native coordination over the typed CLI
+        run: node scripts/accept-core-cli.mjs --coordination
       - name: Verify real live-child service-crash recovery
         run: |
           node --test scripts/live-child-crash-fixture.test.mjs
@@ -205,7 +212,7 @@ jobs:
       # Honest requires: skips stay in the manifest: bot-monitors (no pi),
       # backup-restore (no bundle), orchestrator-modes (no pi). The runner
       # counts skips separately and fails when zero journeys run.
-      # The manifest holds the union of the lanes (14 run, 10 held out):
+      # The manifest holds the union of the lanes (15 run, 10 held out):
       # the sequential gate needs room for all of them on one runner.
       # Shard this job if the wall time grows teeth; do not drop entries
       # to fit.

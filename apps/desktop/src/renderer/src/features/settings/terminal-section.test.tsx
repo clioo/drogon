@@ -385,3 +385,85 @@ describe("terminal restart daemon (R16-AD2)", () => {
     ).toBeDefined();
   });
 });
+
+describe("terminal manage sessions after a daemon restart", () => {
+  test("a session whose workspace row is gone is still listed and can be closed", async () => {
+    const close = vi.fn(async () => ({ ok: true, result: session() }));
+    const stop = vi.fn(async () => ({ ok: true, result: session() }));
+    const sessions = vi.fn(async () => ({
+      ok: true,
+      result: {
+        sessions: [
+          // A post-restart stub in a Workspace that no longer exists: no
+          // per-workspace list can see it, and `stop` cannot clear it.
+          session({
+            id: "s-gone",
+            workspaceId: "removed-workspace",
+            incarnation: "i9",
+            verdict: "unverifiable",
+            agentState: "unknown",
+          }),
+        ],
+      },
+    }));
+    (window as { drogon?: unknown }).drogon = {
+      // The host has no workspaces at all: the list must not depend on them.
+      workspaces: async () => ({ ok: true, result: { workspaces: [] } }),
+      sessions,
+      close,
+      stop,
+    };
+    render(<TerminalSection />);
+
+    // Listed (count 1) with the dead id as its only name.
+    expect(await screen.findByText("(1)")).toBeDefined();
+    expect(screen.getByText("removed-workspace")).toBeDefined();
+    // The host-wide call: no workspaceId argument.
+    expect(sessions).toHaveBeenCalledWith();
+
+    const kill = screen.getByRole("button", { name: "Kill session s-gone" });
+    fireEvent.click(kill);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm kill session s-gone" }),
+    );
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(close).toHaveBeenCalledWith({
+      sessionId: "s-gone",
+      incarnation: "i9",
+    });
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  test("Kill all closes a stub and a live session", async () => {
+    const close = vi.fn(
+      async (_input: { sessionId: string; incarnation: string }) => ({
+        ok: true,
+        result: session(),
+      }),
+    );
+    const stop = vi.fn(async () => ({ ok: true, result: session() }));
+    (window as { drogon?: unknown }).drogon = {
+      workspaces: async () => ({ ok: true, result: { workspaces: [workspace()] } }),
+      sessions: async () => ({
+        ok: true,
+        result: {
+          sessions: [session(), session({ id: "s-gone", verdict: "unverifiable" })],
+        },
+      }),
+      close,
+      stop,
+    };
+    render(<TerminalSection />);
+    await screen.findByText("(2)");
+    fireEvent.click(screen.getByRole("button", { name: "Kill all sessions" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm kill all sessions" }),
+    );
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
+    expect(close.mock.calls.map(([input]) => input.sessionId)).toEqual([
+      "s1",
+      "s-gone",
+    ]);
+    expect(stop).not.toHaveBeenCalled();
+  });
+});
