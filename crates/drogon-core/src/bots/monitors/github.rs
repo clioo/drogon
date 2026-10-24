@@ -287,7 +287,9 @@ fn prune(seen: &mut BTreeSet<u64>) {
 /// `drops` is how many numbers [`prune`] removes when one is added, so a
 /// legacy set read back over capacity is handled by the same arithmetic as
 /// the ordinary full set. A candidate survives when at least that many of
-/// the set's numbers are below it.
+/// the set's numbers are below it. `number` is a value NOT already in
+/// `seen` (inserting a present one is a no-op); [`decide`] filters on
+/// membership first.
 fn retained_after_prune(seen: &BTreeSet<u64>, number: u64) -> bool {
     let drops = seen.len().saturating_add(1).saturating_sub(MAX_SEEN_PULLS);
     drops == 0 || seen.range(..number).count() >= drops
@@ -1378,6 +1380,57 @@ mod tests {
                     cursor, &before,
                     "a release whose cursor does not move commits nothing"
                 );
+            }
+        }
+    }
+
+    /// The arithmetic in [`retained_after_prune`] is a shortcut for "clone,
+    /// insert, prune, look". Brute-force the two against each other over
+    /// sets below, at and over capacity, dense and sparse, with candidates
+    /// straddling both ends — including 0 and `u64::MAX`, which the
+    /// saturating arithmetic must not wrap. A sparse set is what catches an
+    /// off-by-one in the comparison: with gaps, a candidate can sit between
+    /// the lowest number and the next one up, which is exactly the band
+    /// where "at least `drops` below it" and "more than `drops` below it"
+    /// disagree.
+    #[test]
+    fn retention_agrees_with_inserting_then_pruning() {
+        for len in [
+            0,
+            1,
+            MAX_SEEN_PULLS - 2,
+            MAX_SEEN_PULLS - 1,
+            MAX_SEEN_PULLS,
+            MAX_SEEN_PULLS + 1,
+            MAX_SEEN_PULLS + 5,
+        ] {
+            for stride in [1u64, 7] {
+                let seen: BTreeSet<u64> =
+                    (0..len as u64).map(|index| 100 + index * stride).collect();
+                assert_eq!(seen.len(), len);
+                let mut candidates = vec![0, 1, 99, 100, u64::MAX - 1, u64::MAX];
+                if let Some(min) = seen.iter().next().copied() {
+                    candidates.extend([min.saturating_sub(1), min, min + 1, min + 2]);
+                }
+                if let Some(max) = seen.iter().next_back().copied() {
+                    candidates.extend([max - 1, max, max + 1]);
+                }
+                candidates.extend(seen.iter().copied().take(4));
+                for number in candidates {
+                    // `decide` filters on membership first, so the shortcut
+                    // only ever answers for a number not already present.
+                    if seen.contains(&number) {
+                        continue;
+                    }
+                    let mut probe = seen.clone();
+                    probe.insert(number);
+                    prune(&mut probe);
+                    assert_eq!(
+                        retained_after_prune(&seen, number),
+                        probe.contains(&number),
+                        "disagreement for #{number} against a {len}-number set of stride {stride}"
+                    );
+                }
             }
         }
     }
