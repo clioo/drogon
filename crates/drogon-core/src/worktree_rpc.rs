@@ -785,21 +785,32 @@ fn remove_worktree_checkout(
     // git: forced, it is unlinked here by the same guarded delete as any
     // other leaf; unforced, it is refused with copy that names Force, since
     // git's own message would not (#690).
-    if std::fs::symlink_metadata(recorded)
-        .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        if !force {
+    match std::fs::symlink_metadata(recorded) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            if !force {
+                return Err(error::io_error(format!(
+                    "\"{worktree_path}\" is a symbolic link, not a checkout git can remove. Use Force to unlink it and clear this workspace."
+                )));
+            }
+            delete_checkout_directory(data_dir, project_path, recorded)?;
+            // Same non-fatal tidy-up as the recovery path: the link is gone,
+            // so this can delete nothing, but it retires a stale admin entry
+            // that would otherwise keep the branch name taken.
+            let _ = run_git(project_path, &git_worktree_remove_argv(worktree_path, true));
+            return Ok(());
+        }
+        Ok(_) => {}
+        // Already gone: there is no link to follow, and the removal below
+        // answers a missing checkout the way #604 requires.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        // Anything else means this process could not read the path it is
+        // about to hand to a command that resolves it. Not knowing what is
+        // there is not a licence to let git find out.
+        Err(err) => {
             return Err(error::io_error(format!(
-                "\"{worktree_path}\" is a symbolic link, not a checkout git can remove. Use Force to unlink it and clear this workspace."
+                "could not inspect \"{worktree_path}\": {err}"
             )));
         }
-        delete_checkout_directory(data_dir, project_path, recorded)?;
-        // Same non-fatal tidy-up as the recovery path: the link is gone, so
-        // this can delete nothing, but it retires a stale admin entry that
-        // would otherwise keep the branch name taken.
-        let _ = run_git(project_path, &git_worktree_remove_argv(worktree_path, true));
-        return Ok(());
     }
     let argv = git_worktree_remove_argv(worktree_path, force);
     // Git itself refuses a dirty worktree without --force; this call
