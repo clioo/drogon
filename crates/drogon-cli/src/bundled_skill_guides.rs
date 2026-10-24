@@ -21,6 +21,13 @@ pub const BUNDLED_SKILL_GUIDES: &[BundledSkillGuide] = &[
         aliases: &[],
     },
     BundledSkillGuide {
+        name: "feature-qa",
+        description: "Exercise Drogon's main features end to end as a QA agent: bot session lifecycle and bot-as-operator flows, workspaces/projects/worktrees, cron automations, monitors, work graph execution with the bounded adversarial loop, telemetry and token usage, and the rendered sidebar. Safe by default, with explicit live lanes for real-harness behavior.",
+        markdown: include_str!("../../../skill-guides/feature-qa.md"),
+        full_markdown: include_str!("../../../skill-guides/feature-qa.md"),
+        aliases: &[],
+    },
+    BundledSkillGuide {
         name: "orchestration",
         description: "Use Drogon native orchestration for supervised multi-agent coordination: run and task ownership, worker dispatch, scoped send and check mail, blocking ask and reply flows, and worker_done completion tracking. Use the drogon-cli guide for full ownership handoffs, terminal control and worktree management instead.",
         markdown: include_str!("../../../skill-guides/orchestration.md"),
