@@ -1543,3 +1543,66 @@ fn worktree_create_writes_nothing_outside_when_the_project_root_is_a_symlink() {
         "the refused create left nothing at the link's target"
     );
 }
+
+/// Issue #690: a recorded path whose parent has been swapped for a link to
+/// a sibling workspace resolves onto a checkout git does know, so the
+/// removal must refuse and that sibling's work must survive. The property
+/// is what this asserts, not which layer enforces it: on git 2.54 the
+/// `git worktree remove` ahead of the guards already refuses this shape
+/// ("does not point back to '.git/worktrees/...'"), and Drogon refuses it
+/// on its own account besides, so the test passes if either holds and
+/// fails only if a sibling's files actually go.
+#[test]
+fn worktree_remove_refuses_a_recorded_path_redirected_at_a_sibling_workspace() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    // Two workspaces of the same repository, each one directory deep, so
+    // the parent of one can be pointed at the other.
+    let doomed = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "a/feature", "branch": "a-feature"}),
+    );
+    let bystander = ok(
+        &engine,
+        "worktree.create",
+        "w2",
+        json!({"projectId": project_id, "name": "b/feature", "branch": "b-feature"}),
+    );
+    let doomed_path = Path::new(doomed["path"].as_str().unwrap()).to_path_buf();
+    let bystander_path = Path::new(bystander["path"].as_str().unwrap()).to_path_buf();
+    std::fs::write(bystander_path.join("work.txt"), "uncommitted\n").unwrap();
+
+    let doomed_parent = doomed_path.parent().unwrap().to_path_buf();
+    let bystander_parent = bystander_path.parent().unwrap().to_path_buf();
+    let moved_aside = doomed_parent.with_file_name("a.real");
+    std::fs::rename(&doomed_parent, &moved_aside).unwrap();
+    std::os::unix::fs::symlink(&bystander_parent, &doomed_parent).unwrap();
+
+    let code = err_code(
+        &engine,
+        "worktree.remove",
+        "r1",
+        json!({"id": doomed["id"], "force": true}),
+    );
+    assert_eq!(code, "invalid_argument");
+    assert!(
+        bystander_path.join("work.txt").exists(),
+        "the workspace the link pointed at keeps its uncommitted work"
+    );
+    assert!(
+        moved_aside.join("feature").exists(),
+        "and the checkout the row was really about is untouched"
+    );
+}

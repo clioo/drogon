@@ -1245,15 +1245,10 @@ impl Engine {
         // names from becoming subdirectories.
         let project_segment = sanitize_worktree_root(project_name);
         let workspaces_root = self.data_dir.join("workspaces").join(project_segment);
-        // Issue #690: `create_dir_all` follows a symlinked `workspaces/` or
-        // project segment, so the guard belongs ahead of it.
-        crate::worktree_rpc::refuse_escape_from_workspaces(
-            &self.data_dir,
-            &workspaces_root,
-            "to create a workspace under",
-        )?;
-        std::fs::create_dir_all(&workspaces_root)
-            .map_err(|e| error::io_error(format!("cannot create workspaces directory: {e}")))?;
+        // Issue #690: made a component at a time, because `create_dir_all`
+        // follows a symlinked `workspaces/` or project segment and builds
+        // its directories at the link's target.
+        crate::worktree_rpc::create_workspaces_dir(&self.data_dir, &workspaces_root)?;
         let dir_base = format!("pr-{number}-{}", slugify(&head_branch));
         let mut attempt = 0u32;
         let (target_str, canonical_target_str) = loop {

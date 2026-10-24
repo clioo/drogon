@@ -9,6 +9,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard};
 
 use drogon_core::Engine;
 use drogon_protocol::{PROTOCOL_VERSION, Request};
@@ -33,12 +34,23 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} failed in {dir:?}");
 }
 
-/// Restores `PATH` however the test ends, so a panic cannot leak the
-/// wrapper into the rest of the process.
-struct SavedPath(Option<std::ffi::OsString>);
+/// `PATH` belongs to the process, not to one test, so a wrapper is
+/// installed under a lock held for as long as it is on `PATH` -- without
+/// it, two tests in this binary rewrite the same variable and each sees the
+/// other's `git`. The guard also restores the previous value however the
+/// test ends, so a panic cannot leak the wrapper into the rest of the run
+/// (the lock is poisoned by that panic, which fails the waiting test rather
+/// than letting it run against a wrapper it did not install).
+static PATH_LOCK: Mutex<()> = Mutex::new(());
+
+struct SavedPath {
+    previous: Option<std::ffi::OsString>,
+    _lock: MutexGuard<'static, ()>,
+}
 
 impl SavedPath {
     fn prepend(dir: &Path) -> Self {
+        let lock = PATH_LOCK.lock().unwrap();
         let previous = std::env::var_os("PATH");
         let mut entries = vec![dir.to_path_buf()];
         if let Some(current) = &previous {
@@ -46,14 +58,17 @@ impl SavedPath {
         }
         let joined = std::env::join_paths(entries).unwrap();
         unsafe { std::env::set_var("PATH", &joined) };
-        SavedPath(previous)
+        SavedPath {
+            previous,
+            _lock: lock,
+        }
     }
 }
 
 impl Drop for SavedPath {
     fn drop(&mut self) {
         unsafe {
-            match self.0.take() {
+            match self.previous.take() {
                 Some(previous) => std::env::set_var("PATH", previous),
                 None => std::env::remove_var("PATH"),
             }

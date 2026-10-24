@@ -512,6 +512,69 @@ pub(crate) fn refuse_escape_from_workspaces(
     Ok(())
 }
 
+/// `create_dir_all` for a directory under `<data-dir>/workspaces`, made one
+/// component at a time so the call cannot build a tree through a symlink.
+/// `create_dir_all` follows one and makes its directories at the link's
+/// target; checking first and creating afterwards still leaves the two
+/// steps apart, and the check is the half that can be made stale.
+/// `create_dir` does not follow a link at the component it creates, so each
+/// step either makes a real directory or meets something already there --
+/// and what is already there has to be a real directory, which
+/// `symlink_metadata` answers without resolving anything.
+///
+/// This narrows the gap rather than closing it: between two components an
+/// actor with write access to the data directory can still swap an ancestor
+/// Drogon has just approved, and only an `openat`-style handle held across
+/// the whole sequence would answer that. What that actor cannot do is get a
+/// checkout written or a row recorded outside the tree, because the path is
+/// checked again before `git worktree add` and once more, canonicalized,
+/// before anything is registered. Issue #690.
+pub(crate) fn create_workspaces_dir(data_dir: &Path, dir: &Path) -> Result<(), RpcError> {
+    let Some(relative) = workspaces_relative(data_dir, dir) else {
+        return Err(error::invalid_argument(format!(
+            "refusing to create a workspace under \"{}\": it is outside \"{}\"",
+            dir.display(),
+            workspaces_tree(data_dir).display()
+        )));
+    };
+    let mut walked = data_dir.to_path_buf();
+    for component in relative.components() {
+        match component {
+            std::path::Component::Normal(segment) => walked.push(segment),
+            std::path::Component::CurDir => continue,
+            _ => {
+                return Err(error::invalid_argument(format!(
+                    "refusing to create a workspace under \"{}\": the path is not a plain name under \"{}\"",
+                    dir.display(),
+                    workspaces_tree(data_dir).display()
+                )));
+            }
+        }
+        match std::fs::create_dir(&walked) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                let metadata = std::fs::symlink_metadata(&walked).map_err(|err| {
+                    error::io_error(format!("could not inspect \"{}\": {err}", walked.display()))
+                })?;
+                if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                    return Err(error::invalid_argument(format!(
+                        "refusing to create a workspace under \"{}\": \"{}\" is not a directory, and following it would leave \"{}\"",
+                        dir.display(),
+                        walked.display(),
+                        workspaces_tree(data_dir).display()
+                    )));
+                }
+            }
+            Err(err) => {
+                return Err(error::io_error(format!(
+                    "cannot create workspaces directory: {err}"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Where a freshly created checkout actually landed. Called with the
 /// canonicalized path `git worktree add` produced, after the fact, because
 /// the preflight guards run against a tree that nothing keeps still until
@@ -568,23 +631,23 @@ fn refuse_delete_reached_through_a_symlink(data_dir: &Path, parent: &Path) -> Re
     }
 }
 
-fn delete_checkout_directory(
-    data_dir: &Path,
-    project_path: &Path,
-    worktree_path: &Path,
-) -> Result<(), RpcError> {
+/// The two things a recorded path has to be before any of the guards below
+/// can say anything useful about it, checked by both the delete itself and
+/// the removal that runs before git. A `..` never survives
+/// `worktree.create`, but a row that acquired one must not be waved
+/// through: `canonicalize` cannot resolve a `..` whose intermediate is
+/// missing, the lexical fallback would carry it into a target that resolves
+/// to nothing, and the delete would "succeed" having removed nothing while
+/// the caller drops the rows -- the checkout left on disk with nothing able
+/// to reach it, which is the shape of #604. It would also hide a symlinked
+/// component from a guard reading the path lexically (#690).
+fn refuse_unusable_recorded_path(worktree_path: &Path) -> Result<(), RpcError> {
     if !worktree_path.is_absolute() {
         return Err(error::invalid_argument(format!(
             "refusing to delete \"{}\": the recorded workspace path is not absolute",
             worktree_path.display()
         )));
     }
-    // `..` never survives `worktree.create`, but a row that acquired one
-    // anyway must not be waved through: `canonicalize` cannot resolve a `..`
-    // whose intermediate is missing, and the lexical fallback below would
-    // then carry it into a target that resolves to nothing -- so the delete
-    // would "succeed" having removed nothing, while the caller drops the rows
-    // and the real checkout stays on disk, unreachable and undeletable.
     if worktree_path.components().any(|component| {
         matches!(
             component,
@@ -596,6 +659,15 @@ fn delete_checkout_directory(
             worktree_path.display()
         )));
     }
+    Ok(())
+}
+
+fn delete_checkout_directory(
+    data_dir: &Path,
+    project_path: &Path,
+    worktree_path: &Path,
+) -> Result<(), RpcError> {
+    refuse_unusable_recorded_path(worktree_path)?;
     // The parent is resolved but the final component deliberately is not: a
     // symlinked workspace has to be unlinked, never followed, or the guards
     // below would clear a directory belonging to whatever the link points at.
@@ -673,6 +745,24 @@ fn remove_worktree_checkout(
     other_registrations: &[String],
 ) -> Result<(), RpcError> {
     refuse_nested_registrations(Path::new(worktree_path), other_registrations)?;
+    // Before git runs, not only on the recovery path below, so that
+    // Drogon's refusal is Drogon's own. `git worktree remove` resolves the
+    // path it is handed, and a recorded path whose parent has been swapped
+    // for a link to another checkout of the same repository resolves onto
+    // a working tree git does know. What stops it there today is git's own
+    // check -- verified live on 2.54.0: "validation failed, cannot remove
+    // working tree: ... does not point back to '.git/worktrees/feature'",
+    // exit 128, because the admin entry behind the resolved directory
+    // records a different path than the one asked for. That is a guarantee
+    // of git's making, in a message git is free to change, protecting
+    // another card's files; this guard does not borrow it. A non-normalized
+    // row is refused here with the message the delete itself uses, rather
+    // than reaching git by a path no lexical guard has read (#690).
+    let recorded = Path::new(worktree_path);
+    refuse_unusable_recorded_path(recorded)?;
+    if let Some(parent) = recorded.parent() {
+        refuse_delete_reached_through_a_symlink(data_dir, parent)?;
+    }
     let argv = git_worktree_remove_argv(worktree_path, force);
     // Git itself refuses a dirty worktree without --force; this call
     // never re-implements that check.
@@ -1130,17 +1220,7 @@ impl Engine {
             .data_dir
             .join("workspaces")
             .join(sanitize_path_component(&project.name));
-        // Before `create_dir_all`, not after: it follows a symlinked
-        // `workspaces/` or project segment and makes directories at the
-        // link's target, so a guard that runs later has already let the
-        // call write outside the data directory.
-        refuse_escape_from_workspaces(
-            &self.data_dir,
-            &workspaces_root,
-            "to create a workspace under",
-        )?;
-        std::fs::create_dir_all(&workspaces_root)
-            .map_err(|e| error::io_error(format!("cannot create workspaces directory: {e}")))?;
+        create_workspaces_dir(&self.data_dir, &workspaces_root)?;
         let target = workspaces_root.join(&name);
         // Issue #690: a name may carry a separator, so an intermediate
         // component is caller-supplied, and `target.exists()` below follows
