@@ -17,13 +17,30 @@ use serde_json::{Value, json};
 
 use super::provider::{
     CreateOptions, ExtBoard, ExtColumn, ExtIssue, ExtSprint, ExtStatus, IssueRef, IssueScope,
-    NewIssue, ProviderError, ProviderResult, WorkProvider,
+    NewIssue, NextPage, ProviderError, ProviderResult, WorkProvider, complete_connection,
+    incomplete_collection, page_cursor,
 };
 use crate::jira::client::{HttpRequest, JiraRequestError, REQUEST_TIMEOUT, http_json};
 
 pub(crate) const DEFAULT_API_URL: &str = "https://api.github.com";
 /// The pseudo status of a project item with no Status value.
 pub(crate) const NO_STATUS: &str = "none";
+
+/// Project items per page, and the pages one walk asks for before it gives
+/// the project up as unproven (a broken cursor pages forever otherwise).
+const ITEM_PAGE: usize = 100;
+const MAX_ITEM_PAGES: usize = 100;
+/// A project's fields, and one item's field values: a page wide enough for
+/// a whole project, so the Status and Iteration values are never read from
+/// a partial list.
+const PROJECT_FIELD_PAGE: usize = 50;
+/// Repository issues and repositories per REST page, and the pages of each
+/// one walk asks for.
+const REST_PAGE: usize = 100;
+const MAX_ISSUE_PAGES: usize = 20;
+const MAX_REPO_PAGES: usize = 5;
+/// Projects and organizations the board picker reads in one page.
+const PICKER_PAGE: usize = 50;
 
 pub(crate) struct GithubProvider {
     token: String,
@@ -244,7 +261,7 @@ impl GithubProvider {
                  ... on ProjectV2IterationField { id name configuration {
                    iterations { id title startDate duration }
                    completedIterations { id title startDate duration } } }
-               } } } } }",
+               } pageInfo { hasNextPage endCursor } } } } }",
             json!({ "id": id }),
         )?;
         let node = &data["node"];
@@ -254,6 +271,14 @@ impl GithubProvider {
                 format!("GitHub project {id} not found"),
             ));
         }
+        // The Status field is the board's columns and the Iteration field
+        // its sprints: a field list read short would invent a board.
+        complete_connection(
+            &node["fields"],
+            PROJECT_FIELD_PAGE,
+            "GitHub",
+            "project field",
+        )?;
         let fields = node["fields"]["nodes"]
             .as_array()
             .cloned()
@@ -407,12 +432,13 @@ impl GithubProvider {
     const ITEM_FIELDS: &str = "id isArchived
       content { __typename
         ... on Issue { id number title body url state updatedAt repository { nameWithOwner }
-          assignees(first: 5) { nodes { login name } } labels(first: 10) { nodes { name } } }
+          assignees(first: 10) { nodes { login name } } labels(first: 10) { nodes { name } } }
         ... on PullRequest { id number title body url state updatedAt repository { nameWithOwner }
-          assignees(first: 5) { nodes { login name } } } }
-      fieldValues(first: 30) { nodes { __typename
+          assignees(first: 10) { nodes { login name } } } }
+      fieldValues(first: 50) { nodes { __typename
         ... on ProjectV2ItemFieldSingleSelectValue { optionId name field { ... on ProjectV2SingleSelectField { id } } }
-        ... on ProjectV2ItemFieldIterationValue { iterationId title startDate duration field { ... on ProjectV2IterationField { id } } } } }";
+        ... on ProjectV2ItemFieldIterationValue { iterationId title startDate duration field { ... on ProjectV2IterationField { id } } } }
+        pageInfo { hasNextPage endCursor } }";
 
     fn project_items(&self, id: &str, fields: &ProjectFields) -> ProviderResult<Vec<ExtIssue>> {
         let query = format!(
@@ -422,23 +448,32 @@ impl GithubProvider {
         );
         let mut out = Vec::new();
         let mut after: Option<String> = None;
-        for _ in 0..100 {
+        for _ in 0..MAX_ITEM_PAGES {
             let data = self.gql(&query, json!({ "id": id, "after": after }))?;
             let page = &data["node"]["items"];
             for raw in page["nodes"].as_array().cloned().unwrap_or_default() {
                 if raw["isArchived"] == true {
                     continue;
                 }
+                // An item's Status and Iteration live among its field
+                // values: a partial list would put the card in the wrong
+                // column instead of saying it could not be read.
+                complete_connection(
+                    &raw["fieldValues"],
+                    PROJECT_FIELD_PAGE,
+                    "GitHub",
+                    "item field",
+                )?;
                 if let Some(issue) = self.map_item(&raw, fields) {
                     out.push(issue);
                 }
             }
-            if page["pageInfo"]["hasNextPage"] != true {
-                break;
+            match page_cursor(page, ITEM_PAGE, after.as_deref(), "GitHub", "project item")? {
+                NextPage::Last => return Ok(out),
+                NextPage::From(cursor) => after = Some(cursor),
             }
-            after = page["pageInfo"]["endCursor"].as_str().map(str::to_owned);
         }
-        Ok(out)
+        Err(incomplete_collection("GitHub", "project item"))
     }
 
     fn map_rest_issue(&self, repo: &str, raw: &Value) -> ExtIssue {
@@ -575,10 +610,10 @@ impl WorkProvider for GithubProvider {
         let projects = self.gql(
             "query DrogonGhProjects { viewer { login
                projectsV2(first: 50) { nodes { id number title closed owner { ... on User { login } ... on Organization { login } }
-                 fields(first: 30) { nodes { __typename } } } }
+                 fields(first: 30) { nodes { __typename } } } pageInfo { hasNextPage endCursor } }
                organizations(first: 50) { nodes { login
                  projectsV2(first: 50) { nodes { id number title closed owner { ... on User { login } ... on Organization { login } }
-                   fields(first: 30) { nodes { __typename } } } } } } } }",
+                   fields(first: 30) { nodes { __typename } } } pageInfo { hasNextPage endCursor } } } pageInfo { hasNextPage endCursor } } } }",
             json!({}),
         );
         let data = match projects {
@@ -591,6 +626,22 @@ impl WorkProvider for GithubProvider {
             }
         };
         let viewer = &data["viewer"];
+        // A listing the picker could not read to the end is an omission, not
+        // a board that is gone: the boards it did reach still import, and the
+        // list says what is missing from it.
+        let unlisted = |connection: &Value, what: &str| {
+            if complete_connection(connection, PICKER_PAGE, "GitHub", "board").is_err() {
+                self.warnings.borrow_mut().push(what.to_string());
+            }
+        };
+        unlisted(
+            &viewer["projectsV2"],
+            "You have more GitHub Projects than this list shows; the rest are not here.",
+        );
+        unlisted(
+            &viewer["organizations"],
+            "You are in more GitHub organizations than this list reaches; Projects from the rest are not here.",
+        );
         let mut projects: Vec<Value> = viewer["projectsV2"]["nodes"]
             .as_array()
             .cloned()
@@ -600,6 +651,13 @@ impl WorkProvider for GithubProvider {
             .cloned()
             .unwrap_or_default()
         {
+            unlisted(
+                &org["projectsV2"],
+                &format!(
+                    "{} has more GitHub Projects than this list shows; the rest are not here.",
+                    text(&org["login"])
+                ),
+            );
             projects.extend(
                 org["projectsV2"]["nodes"]
                     .as_array()
@@ -624,16 +682,14 @@ impl WorkProvider for GithubProvider {
                 }
             })
             .collect();
-        for page in 1..=5 {
+        let mut all_repos = false;
+        for page in 1..=MAX_REPO_PAGES {
             let repos = self.rest(
                 "GET",
-                &format!("/user/repos?per_page=100&sort=pushed&page={page}"),
+                &format!("/user/repos?per_page={REST_PAGE}&sort=pushed&page={page}"),
                 None,
             )?;
             let repos = repos.as_array().cloned().unwrap_or_default();
-            if repos.is_empty() {
-                break;
-            }
             boards.extend(repos.iter().filter(|r| r["has_issues"] != false).map(|r| {
                 let name = text(&r["full_name"]);
                 ExtBoard {
@@ -644,9 +700,16 @@ impl WorkProvider for GithubProvider {
                     project_name: Some("Repository issues".into()),
                 }
             }));
-            if repos.len() < 100 {
+            if repos.len() < REST_PAGE {
+                all_repos = true;
                 break;
             }
+        }
+        if !all_repos {
+            self.warnings.borrow_mut().push(format!(
+                "Only your {} most recently pushed repositories are listed; older ones are not here.",
+                MAX_REPO_PAGES * REST_PAGE
+            ));
         }
         Ok(boards)
     }
@@ -730,22 +793,30 @@ impl WorkProvider for GithubProvider {
             }
             BoardRef::Repo(repo) => {
                 let mut out = Vec::new();
-                for page in 1..=20 {
+                // REST has no cursor: only a page shorter than the one asked
+                // for proves there is nothing behind it.
+                let mut whole = false;
+                for page in 1..=MAX_ISSUE_PAGES {
                     let raw = self.rest(
                         "GET",
-                        &format!("/repos/{repo}/issues?state=all&per_page=100&page={page}"),
+                        &format!("/repos/{repo}/issues?state=all&per_page={REST_PAGE}&page={page}"),
                         None,
                     )?;
                     let items = raw.as_array().cloned().unwrap_or_default();
+                    let got = items.len();
                     out.extend(
                         items
                             .iter()
                             .filter(|i| i.get("pull_request").is_none())
                             .map(|i| self.map_rest_issue(repo, i)),
                     );
-                    if items.len() < 100 {
+                    if got < REST_PAGE {
+                        whole = true;
                         break;
                     }
+                }
+                if !whole {
+                    return Err(incomplete_collection("GitHub", "issue"));
                 }
                 out
             }

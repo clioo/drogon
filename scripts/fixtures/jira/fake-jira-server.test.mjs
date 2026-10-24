@@ -141,3 +141,38 @@ test('the board listing honours the JQL a sync sends: imported keys OR your open
   );
   assert.deepEqual(await keys('key in ("NOPE-1")'), []);
 });
+
+// The Work board's fail-closed tests need a site that pages a board forever
+// without ever proving the end: every page full, `isLast` false, and a
+// `total` always beyond what has been read.
+test('the incomplete control pages a board that never reaches its end', async (t) => {
+  const port = await listenOn(t, path.join(here, 'data', 'agile-site.json'));
+  const control = async (body) => {
+    const response = await fetch(`http://127.0.0.1:${port}/__fixture/incomplete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 200, 'the incomplete control answers');
+  };
+  const page = (startAt) => call(port, 'GET', `/rest/agile/1.0/board/7/issue?startAt=${startAt}&maxResults=50`);
+
+  const whole = await page(0);
+  assert.ok(whole.issues.length < 50, `the board fits in one page: ${whole.issues.length}`);
+  assert.equal(whole.total, whole.issues.length);
+
+  await control({ collection: 'issues', mode: 'over-cap' });
+  for (const startAt of [0, 2450]) {
+    const over = await page(startAt);
+    assert.equal(over.issues.length, 50, 'every page is full');
+    assert.equal(over.isLast, false);
+    assert.ok(over.total > startAt + 50, `total stays out of reach: ${over.total}`);
+  }
+  // The backlog and a sprint's issues answer the same way: import and sync
+  // both walk this handler.
+  const backlog = await call(port, 'GET', '/rest/agile/1.0/board/7/backlog?startAt=0&maxResults=50');
+  assert.equal(backlog.isLast, false);
+
+  await control({ collection: 'issues', mode: null });
+  assert.equal((await page(0)).total, whole.total);
+});

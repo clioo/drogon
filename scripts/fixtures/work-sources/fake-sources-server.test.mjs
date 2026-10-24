@@ -53,14 +53,48 @@ async function listen(t, data) {
   return Promise.race([listening, exited]);
 }
 
-async function linear(port, apiKey, query) {
+async function linear(port, apiKey, query, variables = {}) {
   const res = await fetch(`http://127.0.0.1:${port}/linear/graphql`, {
     method: "POST",
     headers: { authorization: apiKey, "content-type": "application/json" },
-    body: JSON.stringify({ query, variables: {} }),
+    body: JSON.stringify({ query, variables }),
   });
   assert.equal(res.status, 200);
   return res.json();
+}
+
+async function github(port, token, query, variables = {}) {
+  const res = await fetch(`http://127.0.0.1:${port}/github/graphql`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  assert.equal(res.status, 200);
+  return res.json();
+}
+
+async function githubRest(port, token, pathname) {
+  const res = await fetch(`http://127.0.0.1:${port}/github${pathname}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(res.status, 200);
+  return res.json();
+}
+
+/** `POST /__fixture/<service>/incomplete`. */
+async function incomplete(port, service, collection, mode = null) {
+  const res = await fetch(
+    `http://127.0.0.1:${port}/__fixture/${service}/incomplete`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ collection, mode }),
+    },
+  );
+  assert.equal(res.status, 200, `the incomplete control answers ${collection}`);
 }
 
 test("DrogonLinearAssigned lists the viewer's open assigned issues with their team", async (t) => {
@@ -133,4 +167,167 @@ test("DrogonLinearAssigned lists the viewer's open assigned issues with their te
     .map((node) => node.team.id)
     .sort();
   assert.deepEqual(teams, ["team-eng", "team-ops"]);
+});
+
+// Every connection the daemon walks reports its `pageInfo`, and the
+// incomplete control makes a source answer the way a broken one does: the
+// Work board's fail-closed tests need a page that claims another one
+// without naming a cursor, and a REST listing that never ends.
+const TEAMS = `query DrogonLinearTeams($after: String) { teams(first: 100, after: $after) {
+   nodes { id } pageInfo { hasNextPage endCursor } } }`;
+const ASSIGNED = `query DrogonLinearAssigned($after: String) { viewer {
+   assignedIssues(first: 100, after: $after) { nodes { team { id } } pageInfo { hasNextPage endCursor } } } }`;
+const TEAM = `query DrogonLinearTeam($id: String!) { team(id: $id) {
+   states(first: 100) { nodes { id } pageInfo { hasNextPage endCursor } }
+   cycles(first: 100) { nodes { id } pageInfo { hasNextPage endCursor } } } }`;
+const ISSUES = `query DrogonLinearIssues($id: String!, $after: String) { team(id: $id) {
+   issues(first: 100, after: $after) { nodes { id } pageInfo { hasNextPage endCursor } } } }`;
+const ITEMS = `query DrogonGhItems($id: ID!, $after: String) { node(id: $id) {
+   items(first: 100, after: $after) { nodes { id fieldValues(first: 50) { nodes { __typename } pageInfo { hasNextPage endCursor } } }
+     pageInfo { hasNextPage endCursor } } } }`;
+const PROJECT = `query DrogonGhProject($id: ID!) { node(id: $id) {
+   fields(first: 50) { nodes { __typename } pageInfo { hasNextPage endCursor } } } }`;
+const PROJECTS = `query DrogonGhProjects { viewer {
+   projectsV2(first: 50) { nodes { id } pageInfo { hasNextPage endCursor } }
+   organizations(first: 50) { nodes { login } pageInfo { hasNextPage endCursor } } } }`;
+const WHOLE = { hasNextPage: false, endCursor: null };
+const NO_CURSOR = { hasNextPage: true, endCursor: null };
+
+test("every walked connection reports pageInfo, and one can be made to lie", async (t) => {
+  const data = JSON.parse(
+    readFileSync(path.join(here, "data", "sources-site.json"), "utf8"),
+  );
+  const port = await listen(t, data);
+  const key = data.linear.apiKey;
+  const token = data.github.token;
+  const project = data.github.projects[0].id;
+
+  // Linear: the team list, the recommendation counts, a team's states and
+  // cycles, and the issue walk itself.
+  assert.deepEqual((await linear(port, key, TEAMS)).data.teams.pageInfo, WHOLE);
+  assert.deepEqual(
+    (await linear(port, key, ASSIGNED)).data.viewer.assignedIssues.pageInfo,
+    WHOLE,
+  );
+  const team = (await linear(port, key, TEAM, { id: "team-eng" })).data.team;
+  assert.deepEqual(team.states.pageInfo, WHOLE);
+  assert.deepEqual(team.cycles.pageInfo, WHOLE);
+  const page = (await linear(port, key, ISSUES, { id: "team-eng" })).data.team
+    .issues;
+  assert.equal(page.pageInfo.hasNextPage, true, "the fixture pages in threes");
+  assert.equal(page.pageInfo.endCursor, "3");
+  const rest = (
+    await linear(port, key, ISSUES, { id: "team-eng", after: "3" })
+  ).data.team.issues;
+  assert.equal(rest.pageInfo.hasNextPage, false);
+
+  // GitHub: project items, one item's field values, a project's field list
+  // and the picker's own listings.
+  const items = (await github(port, token, ITEMS, { id: project })).data.node
+    .items;
+  assert.equal(items.pageInfo.endCursor, "3");
+  assert.deepEqual(items.nodes[0].fieldValues.pageInfo, WHOLE);
+  assert.deepEqual(
+    (await github(port, token, PROJECT, { id: project })).data.node.fields
+      .pageInfo,
+    WHOLE,
+  );
+  const picker = (await github(port, token, PROJECTS)).data.viewer;
+  assert.deepEqual(picker.projectsV2.pageInfo, WHOLE);
+  assert.deepEqual(picker.organizations.pageInfo, WHOLE);
+
+  // A page that claims another one and names no cursor, per collection.
+  for (const [service, collection, read] of [
+    ["linear", "teams", async () => (await linear(port, key, TEAMS)).data.teams],
+    [
+      "linear",
+      "assigned",
+      async () =>
+        (await linear(port, key, ASSIGNED)).data.viewer.assignedIssues,
+    ],
+    [
+      "linear",
+      "states",
+      async () =>
+        (await linear(port, key, TEAM, { id: "team-eng" })).data.team.states,
+    ],
+    [
+      "linear",
+      "cycles",
+      async () =>
+        (await linear(port, key, TEAM, { id: "team-eng" })).data.team.cycles,
+    ],
+    [
+      "linear",
+      "issues",
+      async () =>
+        (await linear(port, key, ISSUES, { id: "team-eng" })).data.team.issues,
+    ],
+    [
+      "github",
+      "items",
+      async () => (await github(port, token, ITEMS, { id: project })).data.node.items,
+    ],
+    [
+      "github",
+      "item-fields",
+      async () =>
+        (await github(port, token, ITEMS, { id: project })).data.node.items
+          .nodes[0].fieldValues,
+    ],
+    [
+      "github",
+      "project-fields",
+      async () =>
+        (await github(port, token, PROJECT, { id: project })).data.node.fields,
+    ],
+    [
+      "github",
+      "projects",
+      async () => (await github(port, token, PROJECTS)).data.viewer.projectsV2,
+    ],
+  ]) {
+    await incomplete(port, service, collection, "null-cursor");
+    assert.deepEqual(
+      (await read()).pageInfo,
+      NO_CURSOR,
+      `${service} ${collection} claims another page and names none`,
+    );
+    await incomplete(port, service, collection, null);
+    assert.notDeepEqual((await read()).pageInfo, NO_CURSOR, `${collection} is whole again`);
+  }
+
+  // `over-cap` never reaches a last page: the walk runs into its cap.
+  await incomplete(port, "linear", "issues", "over-cap");
+  const forever = (await linear(port, key, ISSUES, { id: "team-eng", after: "900" }))
+    .data.team.issues;
+  assert.equal(forever.pageInfo.hasNextPage, true);
+  assert.equal(forever.nodes.length, 0, "past the end and still not the last page");
+  await incomplete(port, "linear", "issues", null);
+
+  // REST has no cursor, so an endless listing is one full page after another.
+  assert.equal(
+    (await githubRest(port, token, "/user/repos?per_page=100&page=4")).length,
+    0,
+  );
+  await incomplete(port, "github", "repos", "over-cap");
+  assert.equal(
+    (await githubRest(port, token, "/user/repos?per_page=100&page=4")).length,
+    100,
+  );
+  await incomplete(port, "github", "repos", null);
+  const repo = data.github.repos[0].full_name;
+  await incomplete(port, "github", "repo-issues", "over-cap");
+  const issues = await githubRest(
+    port,
+    token,
+    `/repos/${repo}/issues?state=all&per_page=100&page=9`,
+  );
+  assert.equal(issues.length, 100);
+  assert.equal(new Set(issues.map((i) => i.number)).size, 100, "distinct issues");
+  await incomplete(port, "github", "repo-issues", null);
+  assert.ok(
+    (await githubRest(port, token, `/repos/${repo}/issues?state=all&per_page=100&page=9`))
+      .length < 100,
+  );
 });

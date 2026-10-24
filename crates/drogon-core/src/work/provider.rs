@@ -165,6 +165,70 @@ impl From<ProviderError> for RpcError {
 
 pub(crate) type ProviderResult<T> = Result<T, ProviderError>;
 
+/// A collection the source could not prove it answered whole. Import and
+/// sync refuse it: a prefix of a board read as the whole board imports part
+/// of it as all of it, and marks the issues it never saw as gone.
+pub(crate) fn incomplete_collection(source: &str, collection: &str) -> ProviderError {
+    ProviderError::new(
+        "incomplete_collection",
+        format!(
+            "{source} returned an incomplete {collection} collection. No partial import was applied; narrow the scope or try again."
+        ),
+    )
+}
+
+/// Where a connection walk goes after the page in hand.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum NextPage {
+    /// The source proved this page is the last one.
+    Last,
+    /// Another page follows, starting at this cursor.
+    From(String),
+}
+
+/// Reads a GraphQL connection's `pageInfo`, `used` being the cursor this
+/// page was asked for. The end has to be proven, by `hasNextPage: false` or
+/// by a page shorter than the `asked` size (one the source could not have
+/// cut); anything else is incomplete. A page that claims another one must
+/// name a cursor that moves: walking on with `after: null`, or with the
+/// cursor just used, would ask for the same page again, which is how a
+/// prefix of a board passes for the whole board.
+pub(crate) fn page_cursor(
+    connection: &Value,
+    asked: usize,
+    used: Option<&str>,
+    source: &str,
+    collection: &str,
+) -> ProviderResult<NextPage> {
+    let info = &connection["pageInfo"];
+    let nodes = connection["nodes"].as_array().map_or(0, Vec::len);
+    match info["hasNextPage"].as_bool() {
+        Some(true) => info["endCursor"]
+            .as_str()
+            .filter(|cursor| !cursor.is_empty() && Some(*cursor) != used)
+            .map(|cursor| NextPage::From(cursor.to_string()))
+            .ok_or_else(|| incomplete_collection(source, collection)),
+        Some(false) => Ok(NextPage::Last),
+        None if nodes < asked => Ok(NextPage::Last),
+        // No `pageInfo` behind a full page: nothing says it is the last one.
+        None => Err(incomplete_collection(source, collection)),
+    }
+}
+
+/// A collection read in one page has to hold all of it: `first: asked` with
+/// nothing after it.
+pub(crate) fn complete_connection(
+    connection: &Value,
+    asked: usize,
+    source: &str,
+    collection: &str,
+) -> ProviderResult<()> {
+    match page_cursor(connection, asked, None, source, collection)? {
+        NextPage::Last => Ok(()),
+        NextPage::From(_) => Err(incomplete_collection(source, collection)),
+    }
+}
+
 pub(crate) trait WorkProvider {
     fn kind(&self) -> &'static str;
     /// The account/site boards are imported from: an id (stable across
@@ -228,6 +292,10 @@ pub(crate) struct JiraProvider<'a> {
 }
 
 const AGILE: &str = "/rest/agile/1.0";
+/// Rows per page of an agile collection, and the pages one walk will ask
+/// for before it gives the collection up as unproven.
+const JIRA_PAGE: u64 = 50;
+const JIRA_MAX_PAGES: usize = 50;
 /// Your open work, for the board picker's recommendations: one page of at
 /// most `ASSIGNED_OPEN_LIMIT` issues, only their project.
 const ASSIGNED_OPEN_JQL: &str =
@@ -287,13 +355,19 @@ impl<'a> JiraProvider<'a> {
         self.call("GET", path, None).map_err(|e| jira_error(&e))
     }
 
-    /// Walks a paged agile collection (`values` or `issues`).
-    fn paged(&self, path: &str, key: &str) -> ProviderResult<Vec<Value>> {
+    /// Walks a paged agile collection (`values` or `issues`), fail-closed:
+    /// the walk ends where the site proves there is nothing after it
+    /// (`isLast`, the `total` reached, or — on a site that reports
+    /// neither — a page it could not have cut short). A site that keeps
+    /// claiming more until the page cap, or that answers a page with no
+    /// rows while promising more, leaves the collection unproven: that is
+    /// an error, not a short board.
+    fn paged(&self, path: &str, key: &str, collection: &str) -> ProviderResult<Vec<Value>> {
         let mut out = Vec::new();
         let separator = if path.contains('?') { '&' } else { '?' };
-        for _ in 0..50 {
+        for _ in 0..JIRA_MAX_PAGES {
             let page = self.get(&format!(
-                "{path}{separator}startAt={}&maxResults=50",
+                "{path}{separator}startAt={}&maxResults={JIRA_PAGE}",
                 out.len()
             ))?;
             let items = page
@@ -304,12 +378,26 @@ impl<'a> JiraProvider<'a> {
             let got = items.len();
             out.extend(items);
             let total = page.get("total").and_then(Value::as_u64);
-            let last = page.get("isLast").and_then(Value::as_bool).unwrap_or(false);
-            if got == 0 || last || total.is_some_and(|t| out.len() as u64 >= t) {
-                break;
+            let last = page.get("isLast").and_then(Value::as_bool);
+            if last == Some(true) || total.is_some_and(|t| out.len() as u64 >= t) {
+                return Ok(out);
+            }
+            // The site may answer a smaller page than it was asked for; its
+            // own `maxResults` is the size a full page has there.
+            let size = page
+                .get("maxResults")
+                .and_then(Value::as_u64)
+                .unwrap_or(JIRA_PAGE)
+                .max(1);
+            if last.is_none() && total.is_none() && (got as u64) < size {
+                return Ok(out);
+            }
+            if got == 0 {
+                // Asking again would send the same request forever.
+                return Err(incomplete_collection("Jira", collection));
             }
         }
-        Ok(out)
+        Err(incomplete_collection("Jira", collection))
     }
 
     /// The site's Sprint custom field (`customfield_10020` on most Cloud
@@ -576,7 +664,7 @@ impl WorkProvider for JiraProvider<'_> {
 
     fn list_boards(&self) -> ProviderResult<Vec<ExtBoard>> {
         Ok(self
-            .paged(&format!("{AGILE}/board"), "values")?
+            .paged(&format!("{AGILE}/board"), "values", "board")?
             .iter()
             .map(Self::map_board)
             .collect())
@@ -687,6 +775,7 @@ impl WorkProvider for JiraProvider<'_> {
                     encode_path_segment(board_id)
                 ),
                 "values",
+                "sprint",
             )?
             .iter()
             .filter_map(map_sprint)
@@ -704,7 +793,7 @@ impl WorkProvider for JiraProvider<'_> {
                     "{AGILE}/board/{board}/issue?fields={ISSUE_FIELDS}&jql={}",
                     url::form_urlencoded::byte_serialize(jql.as_bytes()).collect::<String>()
                 );
-                for raw in self.paged(&path, "issues")? {
+                for raw in self.paged(&path, "issues", "issue")? {
                     let issue = self.map_issue(&raw);
                     if !out.iter().any(|i| i.key == issue.key) {
                         out.push(issue);
@@ -723,7 +812,7 @@ impl WorkProvider for JiraProvider<'_> {
             ),
         };
         Ok(self
-            .paged(&path, "issues")?
+            .paged(&path, "issues", "issue")?
             .iter()
             .map(|raw| self.map_issue(raw))
             .collect())
@@ -1035,6 +1124,113 @@ mod tests {
             sync_jqls(&[r#"X-1") OR ("Y"#.to_string()], false),
             [r#"key in ("X-1) OR (Y")"#]
         );
+    }
+
+    /// A page of `asked` nodes with `hasNextPage` and `endCursor` as given.
+    fn connection(nodes: usize, info: Value) -> Value {
+        json!({ "nodes": vec![json!({"id": "n"}); nodes], "pageInfo": info })
+    }
+
+    #[test]
+    fn connection_limits_and_cursors_require_a_complete_result() {
+        let full = 100;
+        // A cursor walk goes on only where the source names the next page.
+        assert_eq!(
+            page_cursor(
+                &connection(full, json!({"hasNextPage": true, "endCursor": "c2"})),
+                full,
+                Some("c1"),
+                "GitHub",
+                "project item"
+            )
+            .unwrap(),
+            NextPage::From("c2".into())
+        );
+        assert_eq!(
+            page_cursor(
+                &connection(full, json!({"hasNextPage": false, "endCursor": null})),
+                full,
+                Some("c1"),
+                "GitHub",
+                "project item"
+            )
+            .unwrap(),
+            NextPage::Last
+        );
+        // `hasNextPage` with no cursor would restart the walk at page one:
+        // the collection is a prefix, and that is an error.
+        for broken in [
+            json!({"hasNextPage": true, "endCursor": null}),
+            json!({"hasNextPage": true, "endCursor": ""}),
+            json!({"hasNextPage": true}),
+            // The cursor just used: the walk would re-read this very page.
+            json!({"hasNextPage": true, "endCursor": "c1"}),
+        ] {
+            let error = page_cursor(
+                &connection(full, broken),
+                full,
+                Some("c1"),
+                "GitHub",
+                "project item",
+            )
+            .expect_err("a page that names no cursor is incomplete");
+            assert_eq!(error.code, "incomplete_collection");
+            assert_eq!(
+                error.message,
+                "GitHub returned an incomplete project item collection. No partial import was applied; narrow the scope or try again."
+            );
+        }
+        // No `pageInfo` at all: only a page the source could not have cut
+        // short proves there is nothing behind it.
+        assert_eq!(
+            page_cursor(
+                &connection(full - 1, json!(null)),
+                full,
+                None,
+                "Linear",
+                "issue"
+            )
+            .unwrap(),
+            NextPage::Last
+        );
+        assert_eq!(
+            page_cursor(
+                &connection(full, json!(null)),
+                full,
+                None,
+                "Linear",
+                "issue"
+            )
+            .unwrap_err()
+            .code,
+            "incomplete_collection"
+        );
+
+        // A collection read in one page must hold all of it.
+        assert!(
+            complete_connection(
+                &connection(full, json!({"hasNextPage": false})),
+                full,
+                "Linear",
+                "workflow state"
+            )
+            .is_ok()
+        );
+        let short = complete_connection(
+            &connection(full, json!({"hasNextPage": true, "endCursor": "c2"})),
+            full,
+            "Linear",
+            "workflow state",
+        )
+        .expect_err("a state list with another page is incomplete");
+        assert_eq!(short.code, "incomplete_collection");
+        assert!(
+            short
+                .message
+                .starts_with("Linear returned an incomplete workflow state collection.")
+        );
+        // An absent connection is empty, not truncated.
+        assert!(complete_connection(&Value::Null, full, "Linear", "cycle").is_ok());
     }
 
     #[test]

@@ -1276,3 +1276,211 @@ fn github_creates_issues_in_a_repository_board_and_a_project() {
     assert_eq!(issue["externalKey"], "clioo/drogon#17");
     assert_eq!(issue["externalStatus"]["name"], "Open");
 }
+
+/// A provider collection that cannot be read whole is not a board: import
+/// and sync refuse it instead of taking the prefix for the whole board (and
+/// then marking what the prefix never held as gone).
+#[test]
+fn a_collection_read_short_is_refused_instead_of_imported_as_the_board() {
+    let _gh = Gh::set(false);
+    let fx = FakeSources::start();
+    let ctx = TestContext::open();
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "linear", "apiKey": "lin_api_fixture", "apiUrl": fx.url("linear")}),
+    );
+    ctx.ok(
+        "work.source_connect",
+        json!({"provider": "github", "apiKey": "ghp_fixture", "apiUrl": fx.url("github")}),
+    );
+    let preview = |provider: &str, board: &str| {
+        ctx.err(
+            "work.import_preview",
+            json!({"provider": provider, "externalBoardId": board}),
+        )
+    };
+    let boards = |ctx: &TestContext| {
+        ctx.ok("work.board", json!({}))["boards"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    let only_local = boards(&ctx);
+
+    // Linear: a page that claims another one and names no cursor would walk
+    // the first page again and pass for the team.
+    fx.control(
+        "linear/incomplete",
+        json!({"collection": "issues", "mode": "null-cursor"}),
+    );
+    let short = preview("linear", "team-eng");
+    assert_eq!(short.code, "incomplete_collection");
+    assert_eq!(
+        short.message,
+        "Linear returned an incomplete issue collection. No partial import was applied; narrow the scope or try again."
+    );
+    // Nothing partial is written, by key or by "import everything".
+    assert_eq!(
+        ctx.err(
+            "work.board_import",
+            json!({"provider": "linear", "externalBoardId": "team-eng", "all": true})
+        )
+        .code,
+        "incomplete_collection"
+    );
+    assert_eq!(
+        ctx.err(
+            "work.board_import",
+            json!({"provider": "linear", "externalBoardId": "team-eng", "issueKeys": ["ENG-1"]})
+        )
+        .code,
+        "incomplete_collection"
+    );
+    assert_eq!(boards(&ctx), only_local, "no board was created");
+
+    // The same walk, over its page cap: a cursor that never ends.
+    fx.control(
+        "linear/incomplete",
+        json!({"collection": "issues", "mode": "over-cap"}),
+    );
+    assert_eq!(preview("linear", "team-eng").code, "incomplete_collection");
+
+    // A team whose states or cycles were cut would invent the board's own
+    // columns and sprints.
+    fx.control("linear/incomplete", json!({"collection": "issues"}));
+    for (collection, noun) in [("states", "workflow state"), ("cycles", "cycle")] {
+        fx.control(
+            "linear/incomplete",
+            json!({"collection": collection, "mode": "null-cursor"}),
+        );
+        let error = preview("linear", "team-eng");
+        assert_eq!(error.code, "incomplete_collection");
+        assert!(
+            error
+                .message
+                .starts_with(&format!("Linear returned an incomplete {noun} collection.")),
+            "{}",
+            error.message
+        );
+        fx.control("linear/incomplete", json!({"collection": collection}));
+    }
+    // Teams past the first page are walked, not dropped: the picker is whole.
+    assert_eq!(
+        ctx.ok("work.provider_boards", json!({"provider": "linear"}))["boards"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    // Whole again: the board imports, and then a sync that cannot read the
+    // team whole changes nothing — no ticket is marked gone.
+    let imported = ctx.ok(
+        "work.board_import",
+        json!({"provider": "linear", "externalBoardId": "team-eng", "all": true}),
+    );
+    let board = imported["board"]["id"].as_str().unwrap().to_string();
+    let before = keys(&ctx.ok("work.board", json!({"boardId": board})));
+    assert!(before.contains(&"ENG-1".to_string()));
+    fx.control(
+        "linear/incomplete",
+        json!({"collection": "issues", "mode": "null-cursor"}),
+    );
+    assert_eq!(
+        ctx.err("work.board_sync", json!({"boardId": board})).code,
+        "incomplete_collection"
+    );
+    let after = ctx.ok("work.board", json!({"boardId": board}));
+    assert_eq!(keys(&after), before);
+    assert!(
+        after["board"]["lastSyncError"]
+            .as_str()
+            .is_some_and(|e| e.contains("incomplete issue collection")),
+        "the board records why the sync stopped: {}",
+        after["board"]
+    );
+    for key in &before {
+        assert_ne!(
+            ctx.ok("work.ticket_show", json!({"ticketId": key}))["sync"],
+            "removed",
+            "{key} was still on the team"
+        );
+    }
+    fx.control("linear/incomplete", json!({"collection": "issues"}));
+    ctx.ok("work.board_sync", json!({"boardId": board}));
+
+    // GitHub Projects: the walk that `get_issue` falls back to for an
+    // id-less item is the one that must not answer short.
+    fx.control(
+        "github/incomplete",
+        json!({"collection": "items", "mode": "null-cursor"}),
+    );
+    let project = preview("github", "project:PVT_roadmap");
+    assert_eq!(project.code, "incomplete_collection");
+    assert_eq!(
+        project.message,
+        "GitHub returned an incomplete project item collection. No partial import was applied; narrow the scope or try again."
+    );
+    fx.control("github/incomplete", json!({"collection": "items"}));
+    // A project whose field list was cut would map every card by a partial
+    // Status field; so would an item whose field values were cut.
+    for (collection, noun) in [
+        ("project-fields", "project field"),
+        ("item-fields", "item field"),
+    ] {
+        fx.control(
+            "github/incomplete",
+            json!({"collection": collection, "mode": "null-cursor"}),
+        );
+        let error = preview("github", "project:PVT_roadmap");
+        assert_eq!(error.code, "incomplete_collection", "{}", error.message);
+        assert!(
+            error
+                .message
+                .starts_with(&format!("GitHub returned an incomplete {noun} collection.")),
+            "{}",
+            error.message
+        );
+        fx.control("github/incomplete", json!({"collection": collection}));
+    }
+
+    // A repository REST can never page to the end of: 20 full pages are not
+    // a whole repository, and 2000 issues are not an import.
+    fx.control(
+        "github/incomplete",
+        json!({"collection": "repo-issues", "mode": "over-cap"}),
+    );
+    let repo = preview("github", "repo:clioo/drogon");
+    assert_eq!(repo.code, "incomplete_collection");
+    assert_eq!(
+        repo.message,
+        "GitHub returned an incomplete issue collection. No partial import was applied; narrow the scope or try again."
+    );
+    assert_eq!(
+        boards(&ctx),
+        only_local + 1,
+        "only the Linear team imported"
+    );
+    fx.control("github/incomplete", json!({"collection": "repo-issues"}));
+
+    // The board picker is the one listing that still answers: a repository
+    // it could not reach is an omission it names, not a board that is gone.
+    fx.control(
+        "github/incomplete",
+        json!({"collection": "repos", "mode": "over-cap"}),
+    );
+    let picker = ctx.ok("work.provider_boards", json!({"provider": "github"}));
+    assert!(
+        picker["boards"].as_array().unwrap().len() > 500,
+        "the repositories it reached are listed"
+    );
+    assert!(
+        picker["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("most recently pushed")),
+        "{}",
+        picker["warnings"]
+    );
+}
