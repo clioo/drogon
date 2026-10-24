@@ -449,9 +449,14 @@ fn workspaces_relative<'a>(data_dir: &Path, path: &'a Path) -> Option<&'a Path> 
 /// but would not land there, by walking it one component at a time with
 /// `symlink_metadata` and refusing the first symbolic link it meets.
 ///
-/// A symlink is the only way out of that tree, and both directions are
-/// destructive: `git worktree add` writes a whole checkout *through* an
-/// intermediate link, and `remove_dir_all` deletes *through* one.
+/// A symlink is the way out of that tree this guard is about, and both
+/// directions are destructive: `git worktree add` writes a whole checkout
+/// *through* an intermediate link, and `remove_dir_all` deletes *through*
+/// one. It is not the only way a path can lead somewhere surprising -- a
+/// mount point redirects without a link and this walk sees an ordinary
+/// directory -- but a volume mounted inside the workspaces tree is part of
+/// that tree as far as Drogon is concerned, and refusing to delete a
+/// workspace that lives on one would be #604 again.
 /// `canonicalize` cannot be the guard here, because following the link is
 /// precisely what it does -- it hands back the escaped path as if it had
 /// always been the target and says nothing about how it got there.
@@ -526,9 +531,13 @@ pub(crate) fn refuse_escape_from_workspaces(
 /// actor with write access to the data directory can still swap an ancestor
 /// Drogon has just approved, and only an `openat`-style handle held across
 /// the whole sequence would answer that. What that actor cannot do is get a
-/// checkout written or a row recorded outside the tree, because the path is
-/// checked again before `git worktree add` and once more, canonicalized,
-/// before anything is registered. Issue #690.
+/// row recorded outside the tree, because the path is checked again before
+/// `git worktree add` and once more, canonicalized, before anything is
+/// registered. A checkout can still be left outside by a swap timed against
+/// `git worktree add` itself: the registration check refuses the call but
+/// deliberately does not delete what git wrote, since deleting a path
+/// outside the workspaces tree is the thing this whole guard exists to
+/// refuse. Its message says where it is. Issue #690.
 pub(crate) fn create_workspaces_dir(data_dir: &Path, dir: &Path) -> Result<(), RpcError> {
     let Some(relative) = workspaces_relative(data_dir, dir) else {
         return Err(error::invalid_argument(format!(
@@ -556,7 +565,9 @@ pub(crate) fn create_workspaces_dir(data_dir: &Path, dir: &Path) -> Result<(), R
                 let metadata = std::fs::symlink_metadata(&walked).map_err(|err| {
                     error::io_error(format!("could not inspect \"{}\": {err}", walked.display()))
                 })?;
-                if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                // `symlink_metadata` does not follow, so a link to a
+                // directory reports as a link and fails this one test.
+                if !metadata.is_dir() {
                     return Err(error::invalid_argument(format!(
                         "refusing to create a workspace under \"{}\": \"{}\" is not a directory, and following it would leave \"{}\"",
                         dir.display(),
@@ -762,6 +773,33 @@ fn remove_worktree_checkout(
     refuse_unusable_recorded_path(recorded)?;
     if let Some(parent) = recorded.parent() {
         refuse_delete_reached_through_a_symlink(data_dir, parent)?;
+    }
+    // The parent is clear; the final component is the other half. The
+    // delete below never follows it -- a symlinked workspace is unlinked,
+    // which is the whole point of resolving only the parent -- but `git
+    // worktree remove` has no such rule and resolves the path it is handed
+    // all the way down. Verified on git 2.54: with the link's target a
+    // checkout git registers, `git worktree remove --force --force` exits 0
+    // having deleted that target, wherever it lives, and leaves the link
+    // sitting there. So a recorded path that is itself a link never reaches
+    // git: forced, it is unlinked here by the same guarded delete as any
+    // other leaf; unforced, it is refused with copy that names Force, since
+    // git's own message would not (#690).
+    if std::fs::symlink_metadata(recorded)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        if !force {
+            return Err(error::io_error(format!(
+                "\"{worktree_path}\" is a symbolic link, not a checkout git can remove. Use Force to unlink it and clear this workspace."
+            )));
+        }
+        delete_checkout_directory(data_dir, project_path, recorded)?;
+        // Same non-fatal tidy-up as the recovery path: the link is gone, so
+        // this can delete nothing, but it retires a stale admin entry that
+        // would otherwise keep the branch name taken.
+        let _ = run_git(project_path, &git_worktree_remove_argv(worktree_path, true));
+        return Ok(());
     }
     let argv = git_worktree_remove_argv(worktree_path, force);
     // Git itself refuses a dirty worktree without --force; this call
