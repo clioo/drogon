@@ -477,13 +477,18 @@ mod tests {
             lines[0],
             "drogon-cli: Drive Drogon through the public `drogon-cli`: resolve the executable, check status and capabilities, manage workspaces, projects and worktrees, operate terminals (create, list, send, read, wait, close) and the embedded browser pane (open, navigate, snapshot, click, fill, tabs), launch harnesses, create and run cron automations, work the Work board (Drogon tickets such as DRG-41, their columns and the prompts a column types into the sessions linked to its tickets: create, link, move, configure, send; import Jira, Linear and GitHub boards and sync, push and carry tickets across sprints), manage Bots and their self-managed automations, monitors and monitor actions, seal and grant integration secrets, and list and restore pre-migration backups. Use for terminal control, lightweight prompts and shell commands. Use the orchestration guide for supervised multi-agent coordination."
         );
-        assert!(lines[1].starts_with("orchestration: Use Drogon native orchestration"));
+        assert_eq!(
+            lines[1],
+            "feature-qa: Exercise Drogon's main features end to end as a QA agent: bot session lifecycle and bot-as-operator flows, workspaces/projects/worktrees, cron automations, monitors, work graph execution with the bounded adversarial loop, telemetry and token usage, and the rendered sidebar. Safe by default, with explicit live lanes for real-harness behavior."
+        );
+        assert!(lines[2].starts_with("orchestration: Use Drogon native orchestration"));
 
         let outcome = run("req-skills", true, &SkillsAction::List).expect("json list");
         let parsed: serde_json::Value = serde_json::from_str(&outcome.stdout).expect("json parses");
         let topics = parsed["topics"].as_array().expect("topics array");
-        assert_eq!(topics.len(), 2);
+        assert_eq!(topics.len(), 3);
         assert_eq!(topics[0]["name"], "drogon-cli");
+        assert_eq!(topics[1]["name"], "feature-qa");
         assert!(topics[0]["description"].is_string());
     }
 
@@ -498,7 +503,7 @@ mod tests {
                     full: false
                 }
             )),
-            "Missing skill topic. Available topics: drogon-cli, orchestration"
+            "Missing skill topic. Available topics: drogon-cli, feature-qa, orchestration"
         );
         assert_eq!(
             usage_of(run(
@@ -509,7 +514,7 @@ mod tests {
                     full: false
                 }
             )),
-            "Unknown skill topic \"nope\". Available topics: drogon-cli, orchestration"
+            "Unknown skill topic \"nope\". Available topics: drogon-cli, feature-qa, orchestration"
         );
     }
 
@@ -553,7 +558,7 @@ mod tests {
         });
         assert_eq!(
             text,
-            "Choose one or more skills to install:\n  drogon-cli\n  orchestration\n\nUsage: drogon-cli skills install --skill <name> [--skill <name> ...]\n   or: drogon-cli skills install --all"
+            "Choose one or more skills to install:\n  drogon-cli\n  feature-qa\n  orchestration\n\nUsage: drogon-cli skills install --skill <name> [--skill <name> ...]\n   or: drogon-cli skills install --all"
         );
         let outcome = run(
             "req",
@@ -569,7 +574,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&outcome.stdout).expect("json parses");
         assert_eq!(
             parsed["availableSkills"],
-            serde_json::json!(["drogon-cli", "orchestration"])
+            serde_json::json!(["drogon-cli", "feature-qa", "orchestration"])
         );
     }
 
@@ -587,7 +592,7 @@ mod tests {
                     dry_run: true,
                 }
             )),
-            "Unknown skill \"nope\". Available skills: drogon-cli, orchestration"
+            "Unknown skill \"nope\". Available skills: drogon-cli, feature-qa, orchestration"
         );
         assert_eq!(
             usage_of(run(
@@ -647,7 +652,7 @@ mod tests {
         assert_eq!(parsed["global"], true);
         assert_eq!(
             parsed["command"],
-            "npx --yes skills add https://github.com/clioo/drogon --skill drogon-cli --skill orchestration --global --agent universal -y"
+            "npx --yes skills add https://github.com/clioo/drogon --skill drogon-cli --skill feature-qa --skill orchestration --global --agent universal -y"
         );
     }
 
