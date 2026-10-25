@@ -222,6 +222,7 @@ fn spawn_curl(
     request: &HttpRequest<'_>,
     files: &mut TempFiles,
     max_time_secs: u64,
+    auth_header_name: &str,
 ) -> Result<CurlOutcome, JiraRequestError> {
     let mut argv: Vec<String> = vec![
         "-sS".into(),
@@ -245,7 +246,7 @@ fn spawn_curl(
         "-H".into(),
         format!("User-Agent: {JIRA_API_USER_AGENT}"),
         "-H".into(),
-        format!("Authorization: {}", request.authorization),
+        format!("{auth_header_name}: {}", request.authorization),
     ];
     if let Some(body) = &request.body {
         let body_path = files.body.with_extension("request-body");
@@ -373,6 +374,26 @@ fn read_jira_error(status: u32, body: &str) -> String {
 fn read_service_error(status: u32, body: &str, service: &str) -> String {
     if let Ok(data) = serde_json::from_str::<serde_json::Value>(body) {
         let mut messages: Vec<String> = Vec::new();
+        if service == "Plane"
+            && let Some(fields) = data.as_object()
+        {
+            for (field, value) in fields {
+                if let Some(message) = value.as_str() {
+                    messages.push(message.to_string());
+                } else if let Some(errors) = value.as_array() {
+                    messages.extend(
+                        errors
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .map(|message| format!("{field}: {message}")),
+                    );
+                }
+            }
+            messages.retain(|message| !message.is_empty());
+            if !messages.is_empty() {
+                return messages.join("; ");
+            }
+        }
         if let Some(error_messages) = data
             .get("errorMessages")
             .and_then(serde_json::Value::as_array)
@@ -463,9 +484,23 @@ pub(crate) fn http_json(
     request: &HttpRequest<'_>,
     service: &str,
 ) -> Result<serde_json::Value, JiraRequestError> {
+    http_json_with_auth_header(request, service, "Authorization")
+}
+
+/// Plane authenticates API keys with X-API-Key instead of Authorization.
+pub(crate) fn http_json_with_auth_header(
+    request: &HttpRequest<'_>,
+    service: &str,
+    auth_header_name: &str,
+) -> Result<serde_json::Value, JiraRequestError> {
     let mut files = TempFiles::new(&format!("req-{}", next_temp_counter()))
         .map_err(|e| JiraRequestError::Network(format!("cannot stage jira response files: {e}")))?;
-    let outcome = spawn_curl(request, &mut files, request.timeout.as_secs().max(1) + 1);
+    let outcome = spawn_curl(
+        request,
+        &mut files,
+        request.timeout.as_secs().max(1) + 1,
+        auth_header_name,
+    );
     files.cleanup();
     let outcome = outcome?;
     let status = outcome.http_status.unwrap_or(0);
@@ -504,6 +539,22 @@ pub fn failure_message(error: &JiraRequestError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plane_errors_read_detail_and_field_validation_without_changing_other_services() {
+        assert_eq!(
+            read_service_error(403, r#"{"detail":"Project permission denied"}"#, "Plane"),
+            "Project permission denied"
+        );
+        assert_eq!(
+            read_service_error(400, r#"{"state":["Invalid state."]}"#, "Plane"),
+            "state: Invalid state."
+        );
+        assert_eq!(
+            read_service_error(403, r#"{"detail":"Denied"}"#, "Jira"),
+            "Jira request failed (403)"
+        );
+    }
 
     #[test]
     fn auth_header_matches_the_fork() {

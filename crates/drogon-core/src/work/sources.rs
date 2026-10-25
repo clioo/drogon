@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 
 use super::github::GithubProvider;
 use super::linear::LinearProvider;
+use super::plane::PlaneProvider;
 use super::provider::{JiraProvider, WorkProvider};
 use super::{reject_unknown, required, str_field};
 use crate::integrations::seal;
@@ -70,6 +71,15 @@ pub(crate) const SOURCES: &[SourceInfo] = &[
         help_url: Some(
             "https://github.com/settings/tokens/new?scopes=repo,project&description=Drogon%20Work",
         ),
+    },
+    SourceInfo {
+        id: "plane",
+        name: "Plane",
+        board_term: "project",
+        boards_term: "projects",
+        sprint_term: "cycle",
+        connect: "api_key",
+        help_url: Some("https://app.plane.so/profile/api-tokens"),
     },
 ];
 
@@ -247,6 +257,23 @@ impl Engine {
                 })?;
                 Ok(Box::new(GithubProvider::new(c.token, c.api_url)))
             }
+            "plane" => {
+                let c = self.source_connection(kind)?.ok_or_else(|| RpcError::new(
+                    "plane_not_connected", "Plane is not connected. Connect it in Work → Sources with an API key and workspace slug."))?;
+                let workspace = plane_workspace(c.site_url.as_deref()).ok_or_else(|| {
+                    RpcError::new(
+                        "plane_not_connected",
+                        "Reconnect Plane in Work → Sources with a workspace slug.",
+                    )
+                })?;
+                if site.is_some_and(|site| site != workspace) {
+                    return Err(RpcError::new(
+                        "plane_workspace_mismatch",
+                        "This board belongs to another Plane workspace. Reconnect that workspace in Work → Sources.",
+                    ));
+                }
+                Ok(Box::new(PlaneProvider::new(c.token, c.api_url, workspace)))
+            }
             other => Err(error::invalid_argument(format!("no provider for {other}"))),
         }
     }
@@ -295,6 +322,7 @@ impl Engine {
             "account": account,
             "via": via,
             "apiUrl": row.api_url,
+            "workspaceSlug": if info.id == "plane" { plane_workspace(row.site_url.as_deref()) } else { None },
             "error": problem,
             "boardTerm": info.board_term,
             "boardsTerm": info.boards_term,
@@ -335,7 +363,10 @@ impl Engine {
     /// it sealed. Not routed through the mutation ledger: the key must
     /// never be recorded.
     pub(crate) fn work_source_connect(&self, params: &Value) -> Result<Value, RpcError> {
-        reject_unknown(params, &["provider", "apiKey", "apiUrl"])?;
+        reject_unknown(params, &["provider", "apiKey", "apiUrl", "workspaceSlug"])?;
+        let input: drogon_protocol::work::SourceConnectParams =
+            serde_json::from_value(params.clone())
+                .map_err(|e| error::invalid_argument(e.to_string()))?;
         let info = source_info(&required(params, "provider")?)?;
         let key = str_field(params, "apiKey")?
             .map(str::trim)
@@ -346,6 +377,11 @@ impl Engine {
             .filter(|u| !u.is_empty())
             .map(|u| super::validate_url(u, "apiUrl"))
             .transpose()?;
+        if info.id != "plane" && input.workspace_slug.is_some() {
+            return Err(error::invalid_argument(
+                "workspaceSlug is only used by Plane",
+            ));
+        }
         let (token, account, site_url, pasted) = match info.id {
             "jira" => {
                 return Err(error::invalid_argument(
@@ -386,6 +422,23 @@ impl Engine {
                     .viewer()
                     .map_err(RpcError::from)?;
                 (token, login, None, pasted)
+            }
+            "plane" => {
+                let workspace = super::plane::workspace_slug(
+                    input.workspace_slug.as_deref().unwrap_or_default(),
+                )
+                .map_err(RpcError::from)?;
+                let key = key.ok_or_else(|| error::invalid_argument("apiKey is required: create a Plane API token at https://app.plane.so/profile/api-tokens"))?;
+                let provider = PlaneProvider::new(key.clone(), api_url.clone(), workspace.clone());
+                let name = provider.viewer().map_err(RpcError::from)?;
+                // Validate workspace access too; a valid key can target the wrong slug.
+                provider.list_boards().map_err(RpcError::from)?;
+                (
+                    key,
+                    format!("{name} · {workspace}"),
+                    Some(provider.site().1),
+                    true,
+                )
             }
             other => {
                 return Err(error::invalid_argument(format!(
@@ -432,6 +485,10 @@ impl Engine {
     }
 }
 
+fn plane_workspace(site_url: Option<&str>) -> Option<String> {
+    super::plane::workspace_slug(site_url?.strip_prefix("https://app.plane.so/")?).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,7 +496,7 @@ mod tests {
     #[test]
     fn the_registry_names_every_source_once() {
         let ids: Vec<&str> = SOURCES.iter().map(|s| s.id).collect();
-        assert_eq!(ids, ["jira", "linear", "github"]);
+        assert_eq!(ids, ["jira", "linear", "github", "plane"]);
         assert!(
             source_info("gitlab")
                 .unwrap_err()
@@ -447,5 +504,6 @@ mod tests {
                 .contains("known: jira, linear, github")
         );
         assert_eq!(source_info("linear").unwrap().sprint_term, "cycle");
+        assert_eq!(source_info("plane").unwrap().connect, "api_key");
     }
 }

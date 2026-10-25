@@ -31,6 +31,7 @@ use drogon_protocol::RpcError;
 
 mod github;
 mod linear;
+mod plane;
 pub(crate) mod provider;
 mod sources;
 mod sync;

@@ -66,6 +66,7 @@ export function sourceKind(url: string | null): string {
   if (host.includes("github")) return "GitHub";
   if (host.includes("atlassian") || host.includes("jira")) return "Jira";
   if (host.includes("linear")) return "Linear";
+  if (host === "app.plane.so") return "Plane";
   if (host.includes("gitlab")) return "GitLab";
   return host;
 }

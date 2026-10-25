@@ -102,6 +102,7 @@ export function WorkSourceConnectForm({
 }) {
   const [key, setKey] = useState("");
   const [apiUrl, setApiUrl] = useState(source.apiUrl ?? "");
+  const [workspaceSlug, setWorkspaceSlug] = useState(source.workspaceSlug ?? "");
   const [advanced, setAdvanced] = useState(Boolean(source.apiUrl));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,6 +115,7 @@ export function WorkSourceConnectForm({
         provider: source.id,
         ...(withKey ? { apiKey: key.trim() } : {}),
         ...(apiUrl.trim() ? { apiUrl: apiUrl.trim() } : {}),
+        ...(source.id === "plane" ? { workspaceSlug: workspaceSlug.trim() } : {}),
       });
       if (result.ok) {
         setKey("");
@@ -147,7 +149,7 @@ export function WorkSourceConnectForm({
       aria-label={`Connect ${source.name}`}
       onSubmit={(event) => {
         event.preventDefault();
-        if (key.trim()) void connect(true);
+        if (key.trim() && (source.id !== "plane" || workspaceSlug.trim())) void connect(true);
       }}
     >
       {github ? (
@@ -163,6 +165,21 @@ export function WorkSourceConnectForm({
           this Mac.
         </p>
       )}
+      {source.id === "plane" ? (
+        <div className="space-y-1">
+          <Input
+            aria-label="Plane workspace slug"
+            aria-describedby="plane-workspace-help"
+            className="h-8"
+            placeholder="my-team"
+            value={workspaceSlug}
+            onChange={(event) => setWorkspaceSlug(event.target.value)}
+          />
+          <p id="plane-workspace-help" className="text-xs text-muted-foreground">
+            The workspace slug in app.plane.so/my-team/projects/ is my-team.
+          </p>
+        </div>
+      ) : null}
       <div className="flex items-center gap-2">
         {source.helpUrl ? (
           <Button type="button" variant="outline" size="sm" onClick={() => onOpenExternal(source.helpUrl!)}>
@@ -174,11 +191,11 @@ export function WorkSourceConnectForm({
           type="password"
           autoComplete="off"
           className="h-8 flex-1"
-          placeholder={github ? "ghp_…" : "lin_api_…"}
+          placeholder={github ? "ghp_…" : source.id === "plane" ? "Plane API key" : "lin_api_…"}
           value={key}
           onChange={(event) => setKey(event.target.value)}
         />
-        <Button type="submit" size="sm" disabled={busy || !key.trim()}>
+        <Button type="submit" size="sm" disabled={busy || !key.trim() || (source.id === "plane" && !workspaceSlug.trim())}>
           {busy ? <Loader2 className="animate-spin" /> : null} Connect
         </Button>
       </div>
