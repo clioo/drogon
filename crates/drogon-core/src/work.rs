@@ -53,7 +53,10 @@ pub(crate) const SCHEMA_VERSION: i64 = 6;
 pub(crate) const PR_POLL_MS: i64 = 5 * 60_000;
 
 const MAX_NAME: usize = 64;
-const MAX_TITLE: usize = 200;
+/// A ticket's title bound. `pub(crate)` because another surface that creates
+/// work (a meeting commitment becoming a ticket) must respect the same cap
+/// instead of inventing a second one.
+pub(crate) const MAX_TITLE: usize = 200;
 const MAX_TEXT: usize = 20_000;
 const MAX_MESSAGE: usize = 16_000;
 const MAX_URL: usize = 2048;
@@ -2580,6 +2583,17 @@ mod tests {
         assert_eq!(
             out,
             "Review PR #648 for DRG-42.\nSource: https://jira.example/DRG-42 {unknown}"
+        );
+
+        // A multi-line body (a meeting brief, say) reaches the prompt whole:
+        // the placeholder is a substitution, not an excerpt.
+        let mut with_brief = ticket.clone();
+        with_brief.description =
+            "From Write That Down: Weekly sync · 2026-09-10 · line 8\n\n> [00:12] I will fix it."
+                .into();
+        assert_eq!(
+            render_message("Do this:\n{ticket.description}\n", &with_brief, None, None),
+            "Do this:\nFrom Write That Down: Weekly sync · 2026-09-10 · line 8\n\n> [00:12] I will fix it."
         );
     }
 }

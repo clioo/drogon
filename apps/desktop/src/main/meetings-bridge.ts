@@ -15,6 +15,7 @@ import {
   meetingAnalysisSchema,
   meetingCommitmentPageSchema,
   meetingCommitmentSchema,
+  meetingCommitmentTrackSchema,
   meetingReadSchema,
   meetingsPageSchema,
   meetingsRequestSchema,
@@ -88,6 +89,13 @@ export async function dispatchMeetingsRequest(
       const result = await call("meeting.commitment_update", params);
       if (!result.ok) return result;
       return revalidate(result.result, meetingCommitmentSchema);
+    }
+    case "track": {
+      // Tracked work is created by the daemon through the Work board's own
+      // path (key, column, on-enter delivery) after re-verifying the quote.
+      const result = await call("meeting.commitment_track", params);
+      if (!result.ok) return result;
+      return revalidate(result.result, meetingCommitmentTrackSchema);
     }
     default:
       return invalid();

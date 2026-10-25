@@ -38,6 +38,18 @@ export function meetingsAnalysisUnavailableCopy(status: MeetingAnalysisStatus): 
   };
 }
 
+/**
+ * A refused "track as a Drogon task", in the page's words. `method_not_found`
+ * is the one case where the daemon is simply older than the page: it says so,
+ * and names the fix, instead of showing the wire's "Unknown method".
+ */
+export function meetingsTrackFailureCopy(code: string, message: string): string {
+  if (code === "method_not_found") {
+    return "This Drogon service predates tracked meeting work, so no task was created. Restart the daemon (Settings → Restart daemon) and try again.";
+  }
+  return message;
+}
+
 export function meetingCommitmentStatusLabel(status: MeetingCommitmentStatus): string {
   return status === "open" ? "Open" : status === "done" ? "Done" : "Dismissed";
 }

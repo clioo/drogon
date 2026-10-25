@@ -8,15 +8,19 @@
 //! resolved notes directory on every call, so the id cannot be used as a
 //! general-purpose file read.
 
+use std::sync::Mutex;
+
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::error;
 use crate::meetings::{
     self, AnalysisEnvironment, AnalysisError, MAX_TRANSCRIPT_BYTES, MeetingEnvironment,
     MeetingFilters, MeetingReadSpecError, MeetingsParamError, RealMeetingFileSystem,
 };
-use crate::meetings::{CommitmentError, CommitmentFilter, CommitmentSource, CommitmentStatus};
+use crate::meetings::{
+    Commitment, CommitmentError, CommitmentFilter, CommitmentSource, CommitmentStatus,
+};
 use drogon_protocol::RpcError;
 
 // Two rules are enforced here rather than in the UI: analysis delegates to
@@ -65,6 +69,22 @@ struct CommitmentCreateParams {
 struct CommitmentUpdateParams {
     id: String,
     status: String,
+}
+
+/// `meeting.commitment_track`: the one step that turns an accepted commitment
+/// into tracked work. The ticket's destination is optional (the board's first
+/// column on My work otherwise); nothing else is configurable here, because
+/// the ticket's own body is the meeting evidence, not a caller's text.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CommitmentTrackParams {
+    id: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    workspace_id: Option<String>,
+    #[serde(default)]
+    column_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,6 +198,17 @@ pub fn read_value(
     serialize(&outcome, "meeting.read")
 }
 
+/// One tracking sequence at a time, daemon-wide.
+///
+/// `RequestLedger::run` dedupes by requestId, so two different callers (the
+/// page and the CLI, a retried click, two windows) reach this handler
+/// concurrently. Without this arbiter both read "untracked", both create a
+/// ticket, and the loser leaves an orphan on the board while reporting a
+/// failure — observed: eight concurrent tracks produced four tickets for one
+/// commitment. The check-create-link sequence is small and local; serializing
+/// it is cheap next to creating a ticket.
+static TRACK_LOCK: Mutex<()> = Mutex::new(());
+
 impl crate::Engine {
     pub(crate) fn do_meeting_list(&self, params: &Value) -> Result<Value, RpcError> {
         list_value(
@@ -277,6 +308,171 @@ impl crate::Engine {
             .map_err(commitment_error)?;
         serialize(&updated, "meeting.commitment_update")
     }
+
+    /// Turns one accepted commitment into a Drogon Work ticket, through the
+    /// Work board's own creation path (key allocation, column placement, the
+    /// column's on-enter delivery), so a meeting action is tracked work like
+    /// any other — not a second kind of task.
+    ///
+    /// Two rules hold here:
+    ///
+    /// 1. **The note is re-read and the quote re-verified.** The transcript is
+    ///    the evidence for the commitment, and it is not Drogon's file: it can
+    ///    change or disappear outside Drogon. If the quote is no longer in the
+    ///    note, nothing is created and the caller is told why.
+    /// 2. **One commitment, one ticket.** Tracking again reports the ticket
+    ///    that already exists instead of creating a duplicate.
+    pub(crate) fn do_meeting_commitment_track(&self, params: &Value) -> Result<Value, RpcError> {
+        let params: CommitmentTrackParams = decode(params, "meeting.commitment_track")?;
+        // The whole read-check-create-link sequence is one critical section:
+        // the "already tracked" answer below is only true if no other caller
+        // can create between this read and the link that records it.
+        // The guard protects sequencing, not shared data (the ledger is
+        // re-read below), so a panic elsewhere must not disable tracking until
+        // the daemon restarts: recover the poisoned lock rather than propagate
+        // it forever.
+        let _guard = TRACK_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let commitment = self
+            .meeting_commitments
+            .get(&params.id)
+            .map_err(commitment_error)?;
+        if let Some(ticket_id) = commitment.ticket_id.clone() {
+            match self.work_ticket_show(&json!({ "ticketId": ticket_id })) {
+                Ok(ticket) => {
+                    return Ok(json!({
+                        "commitment": commitment,
+                        "ticket": tracked_ticket(&ticket),
+                        "created": false,
+                    }));
+                }
+                // The ticket this action became was deleted from the board.
+                // Forget the stale link and make a live one below: a promise
+                // must not be stranded on work that no longer exists.
+                Err(failure) if failure.code == "not_found" => {
+                    self.meeting_commitments
+                        .clear_ticket(&commitment.id)
+                        .map_err(commitment_error)?;
+                }
+                Err(failure) => return Err(failure),
+            }
+        }
+        let file_system = RealMeetingFileSystem;
+        let root = self.notes_root(&file_system);
+        let (_note, content) =
+            meetings::note_for_commitment(&file_system, &root, &commitment.meeting_id)
+                .map_err(commitment_error)?;
+        if meetings::verify_quote(&content, &commitment.quote).is_none() {
+            return Err(quote_missing_error());
+        }
+        let mut create = json!({
+            "title": ticket_title(&commitment.text),
+            "description": commitment_ticket_description(&commitment),
+        });
+        for (field, value) in [
+            ("projectId", params.project_id.as_deref()),
+            ("workspaceId", params.workspace_id.as_deref()),
+            ("columnId", params.column_id.as_deref()),
+        ] {
+            if let Some(value) = value {
+                create[field] = json!(value);
+            }
+        }
+        let ticket = self.do_work_ticket_create(&create)?;
+        let ticket_id = ticket["id"]
+            .as_str()
+            .ok_or_else(|| error::internal_error("the created ticket has no id"))?
+            .to_string();
+        let ticket_key = ticket["key"]
+            .as_str()
+            .ok_or_else(|| error::internal_error("the created ticket has no key"))?
+            .to_string();
+        let linked = self
+            .meeting_commitments
+            .link_ticket(&commitment.id, &ticket_id, &ticket_key)
+            .map_err(|failure| {
+                // The work exists either way; say so instead of pretending the
+                // ticket was not made.
+                RpcError::new(
+                    "meeting_track_unlinked",
+                    format!(
+                        "Drogon created {} on the Work board, but could not record it against \
+                         this action ({}). The ticket is still on the board.",
+                        ticket_key,
+                        failure.message()
+                    ),
+                )
+            })?;
+        Ok(json!({
+            "commitment": linked,
+            "ticket": tracked_ticket(&ticket),
+            "created": true,
+        }))
+    }
+}
+
+/// The parts of a Work ticket the meetings surface names, so the ledger row
+/// can say "DRG-12" without carrying a whole board ticket.
+fn tracked_ticket(ticket: &Value) -> Value {
+    json!({
+        "id": ticket["id"].clone(),
+        "key": ticket["key"].clone(),
+        "title": ticket["title"].clone(),
+        "columnId": ticket["columnId"].clone(),
+        "projectId": ticket["projectId"].clone(),
+    })
+}
+
+/// A ticket title is bounded by the Work board's own cap; the meeting's text
+/// may be longer, so it is cut here rather than sent and refused.
+fn ticket_title(text: &str) -> String {
+    let max = crate::work::MAX_TITLE;
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max - 1).collect();
+    out.push('…');
+    out
+}
+
+/// The ticket body: the meeting it came from, the verbatim line that proves
+/// it, and how it was accepted. It is the meeting's brief on the board, and a
+/// column prompt that uses `{ticket.description}` types it into the session
+/// that prompt starts, so it carries the evidence rather than a summary of it.
+fn commitment_ticket_description(commitment: &Commitment) -> String {
+    let owner = commitment
+        .owner
+        .as_deref()
+        .map(|owner| format!(" · owner {owner}"))
+        .unwrap_or_default();
+    let source = match commitment.source {
+        CommitmentSource::Suggested => {
+            "a suggestion from the configured Pi model that you accepted"
+        }
+        CommitmentSource::Owner => "an action you wrote down yourself",
+    };
+    format!(
+        "From Write That Down: {} · {} · line {}{}\n\n> {}\n\nAccepted in Drogon's \
+         meeting ledger as {} ({}, confidence {}). The quote above was found verbatim in the \
+         note, which Drogon only ever reads.",
+        commitment.meeting_title,
+        commitment.meeting_date,
+        commitment.line,
+        owner,
+        commitment.quote,
+        commitment.id,
+        source,
+        commitment.confidence,
+    )
+}
+
+fn quote_missing_error() -> RpcError {
+    RpcError::new(
+        "commitment_quote_missing",
+        "The transcript no longer contains this action's quote, so no Drogon task was created. \
+         The note was not changed.",
+    )
 }
 
 fn commitment_status(value: &str) -> Result<CommitmentStatus, RpcError> {
@@ -541,6 +737,118 @@ mod tests {
             meetings::MEETINGS_ACTIONS_CAPABILITY,
             meetings::MEETINGS_CAPABILITY
         );
+        // Tracked work is its own additive step: a ledger-only service still
+        // accepts and resolves actions.
+        assert_eq!(meetings::MEETINGS_WORK_CAPABILITY, "meetings.work.v1");
+        assert_ne!(
+            meetings::MEETINGS_WORK_CAPABILITY,
+            meetings::MEETINGS_ACTIONS_CAPABILITY
+        );
+    }
+
+    #[test]
+    fn tracking_params_are_a_closed_shape() {
+        for params in [
+            json!({}),
+            json!({ "id": 7 }),
+            json!({ "id": "x", "title": "caller text" }),
+            json!({ "id": "x", "quote": "caller evidence" }),
+            json!({ "id": "x", "status": "done" }),
+        ] {
+            assert!(
+                serde_json::from_value::<CommitmentTrackParams>(params.clone()).is_err(),
+                "{params} must be refused"
+            );
+        }
+        let bare: CommitmentTrackParams =
+            serde_json::from_value(json!({ "id": "commitment-1" })).expect("id is enough");
+        assert_eq!(bare.column_id, None);
+        let placed: CommitmentTrackParams = serde_json::from_value(json!({
+            "id": "commitment-1",
+            "columnId": "column-1",
+            "projectId": "project-1",
+            "workspaceId": "workspace-1"
+        }))
+        .expect("placement is optional and admitted");
+        assert_eq!(placed.column_id.as_deref(), Some("column-1"));
+        assert_eq!(placed.project_id.as_deref(), Some("project-1"));
+        assert_eq!(placed.workspace_id.as_deref(), Some("workspace-1"));
+    }
+
+    fn commitment() -> Commitment {
+        Commitment {
+            id: "commitment-1".into(),
+            meeting_id: "write-that-down:/home/carlos/Transcripts/2026-09-10/08-00_30min.md".into(),
+            relative_path: "2026-09-10/08-00_30min.md".into(),
+            meeting_title: "Weekly sync".into(),
+            meeting_date: "2026-09-10".into(),
+            text: "Fix the flaky login test".into(),
+            owner: Some("Carlos".into()),
+            quote: "[00:12] I will fix the flaky login test before the release.".into(),
+            line: 8,
+            source: CommitmentSource::Suggested,
+            confidence: "high".into(),
+            status: CommitmentStatus::Open,
+            ticket_id: None,
+            ticket_key: None,
+            created_at: "2026-09-10T08:30:00Z".into(),
+            updated_at: "2026-09-10T08:30:00Z".into(),
+            resolved_at: None,
+        }
+    }
+
+    #[test]
+    fn the_ticket_brief_carries_the_meeting_and_its_verified_line() {
+        let brief = commitment_ticket_description(&commitment());
+        assert!(brief.contains("Weekly sync · 2026-09-10 · line 8"));
+        assert!(brief.contains("owner Carlos"));
+        assert!(brief.contains("> [00:12] I will fix the flaky login test before the release."));
+        assert!(brief.contains("suggestion from the configured Pi model that you accepted"));
+        assert!(brief.contains("commitment-1"));
+        assert!(brief.contains("confidence high"));
+
+        let mut owner_written = commitment();
+        owner_written.source = CommitmentSource::Owner;
+        owner_written.owner = None;
+        let brief = commitment_ticket_description(&owner_written);
+        assert!(brief.contains("an action you wrote down yourself"));
+        assert!(!brief.contains("owner "));
+    }
+
+    #[test]
+    fn a_long_commitment_stays_inside_the_work_boards_title_cap() {
+        assert_eq!(
+            ticket_title("Fix the flaky login test"),
+            "Fix the flaky login test"
+        );
+        let long = "á".repeat(meetings::MAX_COMMITMENT_TEXT_CHARS);
+        let title = ticket_title(&long);
+        // The Work board's own bound counts characters, not bytes, and the
+        // cut is on a character boundary with one character for the ellipsis.
+        assert_eq!(title.chars().count(), crate::work::MAX_TITLE);
+        assert!(title.ends_with('…'));
+        let exact = "b".repeat(crate::work::MAX_TITLE);
+        assert_eq!(ticket_title(&exact), exact);
+    }
+
+    #[test]
+    fn a_tracked_ticket_reports_only_the_fields_the_ledger_names() {
+        let ticket = json!({
+            "id": "ticket-1",
+            "key": "DRG-41",
+            "title": "Fix the flaky login test",
+            "columnId": "column-1",
+            "projectId": Value::Null,
+            "description": "long body",
+            "sends": [],
+        });
+        let compact = tracked_ticket(&ticket);
+        assert_eq!(compact["id"], "ticket-1");
+        assert_eq!(compact["key"], "DRG-41");
+        assert_eq!(compact["columnId"], "column-1");
+        assert!(compact["projectId"].is_null());
+        assert!(compact.get("description").is_none());
+        assert!(compact.get("sends").is_none());
     }
 
     #[test]

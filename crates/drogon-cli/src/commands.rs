@@ -17,18 +17,18 @@ use crate::cli::{
 use crate::client::{
     AgentState, AutomationHistory, AutomationList, AutomationRunNow, AutomationSummary,
     BrowserSnapshot, BrowserTab, BrowserTabsList, CallOk, Client, HarnessCatalog, MeetingAnalysis,
-    MeetingCommitment, MeetingCommitmentPage, MeetingList, MeetingRead, MentuOpenResult,
-    MentuPendingApprovalResult, MentuRecipesResult, MentuRun, MentuRunResult, MentuRunStatus,
-    MentuRunsResult, MentuRuntimeInfo, MentuRuntimeResult, Project, ProjectList, ReadResult,
-    Removed, Session, SessionList, StatusResult, Verdict, Workspace, WorkspaceList, Worktree,
-    WorktreeList, WriteResult, check_automation, check_automation_history, check_automation_list,
-    check_automation_run_now, check_browser_snapshot, check_browser_tab, check_browser_tabs,
-    check_harness_catalog, check_meeting_analysis, check_meeting_commitment,
-    check_meeting_commitments, check_meeting_list, check_meeting_read, check_mentu_open,
-    check_mentu_pending_approval, check_mentu_recipes, check_mentu_run, check_mentu_run_result,
-    check_mentu_runs, check_mentu_runtime, check_project, check_project_list, check_read,
-    check_removed, check_session, check_status, check_workspace, check_workspace_list,
-    check_worktree, check_worktree_list, check_write, partition_session_list,
+    MeetingCommitment, MeetingCommitmentPage, MeetingCommitmentTracked, MeetingList, MeetingRead,
+    MentuOpenResult, MentuPendingApprovalResult, MentuRecipesResult, MentuRun, MentuRunResult,
+    MentuRunStatus, MentuRunsResult, MentuRuntimeInfo, MentuRuntimeResult, Project, ProjectList,
+    ReadResult, Removed, Session, SessionList, StatusResult, Verdict, Workspace, WorkspaceList,
+    Worktree, WorktreeList, WriteResult, check_automation, check_automation_history,
+    check_automation_list, check_automation_run_now, check_browser_snapshot, check_browser_tab,
+    check_browser_tabs, check_harness_catalog, check_meeting_analysis, check_meeting_commitment,
+    check_meeting_commitment_tracked, check_meeting_commitments, check_meeting_list,
+    check_meeting_read, check_mentu_open, check_mentu_pending_approval, check_mentu_recipes,
+    check_mentu_run, check_mentu_run_result, check_mentu_runs, check_mentu_runtime, check_project,
+    check_project_list, check_read, check_removed, check_session, check_status, check_workspace,
+    check_workspace_list, check_worktree, check_worktree_list, check_write, partition_session_list,
 };
 use crate::error::{CliError, mentu_approval_required, method_not_found, timeout};
 use crate::output;
@@ -1689,6 +1689,52 @@ async fn meeting_actions(
                 call,
                 json,
                 || output::meeting_commitment(&commitment),
+                0,
+                None,
+            )
+        }
+        CommitmentAction::Track {
+            id,
+            column,
+            project,
+            workspace,
+        } => {
+            // Tracked work is additive on top of the ledger: a service that
+            // only keeps the ledger still accepts and resolves actions.
+            capability_preflight(
+                client,
+                request_id,
+                "meetings.work.v1",
+                "tracking a meeting action",
+            )
+            .await?;
+            let mut params = json!({ "id": id });
+            if let Some(column) = column {
+                params["columnId"] = json!(column);
+            }
+            if let Some(project) = project {
+                params["projectId"] = json!(project);
+            }
+            if let Some(workspace) = workspace {
+                params["workspaceId"] = json!(workspace);
+            }
+            let call = client
+                .call(
+                    "meeting.commitment_track",
+                    params,
+                    request_id,
+                    DEFAULT_TIMEOUT,
+                )
+                .await?;
+            let tracked: MeetingCommitmentTracked = Client::decode_checked(
+                &call,
+                "meeting.commitment_track",
+                check_meeting_commitment_tracked,
+            )?;
+            emit(
+                call,
+                json,
+                || output::meeting_commitment_tracked(&tracked),
                 0,
                 None,
             )

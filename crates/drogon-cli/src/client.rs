@@ -692,6 +692,10 @@ pub struct MeetingAvailability {
     pub platform: String,
     pub supported: bool,
     pub installation: String,
+    /// The bundle that produced `installation: "installed"`, so a client can
+    /// open the tool it actually found. `None` in every other state.
+    #[serde(default)]
+    pub installation_path: Option<String>,
     pub configuration: String,
     pub configured: bool,
     pub config_path: String,
@@ -839,9 +843,35 @@ pub struct MeetingCommitment {
     pub source: String,
     pub confidence: String,
     pub status: String,
+    /// The Drogon Work ticket this became, once it was tracked.
+    #[serde(default)]
+    pub ticket_id: Option<String>,
+    #[serde(default)]
+    pub ticket_key: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub resolved_at: Option<String>,
+}
+
+/// The Work ticket an accepted commitment became, as the ledger names it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingTrackedTicket {
+    pub id: String,
+    pub key: String,
+    pub title: String,
+    pub column_id: String,
+    pub project_id: Option<String>,
+}
+
+/// `meeting.commitment_track`: the commitment, its ticket, and whether this
+/// call created the ticket or found an existing one.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingCommitmentTracked {
+    pub commitment: MeetingCommitment,
+    pub ticket: MeetingTrackedTicket,
+    pub created: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -999,6 +1029,29 @@ pub fn check_meeting_commitment(commitment: &MeetingCommitment) -> Result<(), St
     if commitment.status == "open" && commitment.resolved_at.is_some() {
         return Err("an open commitment must not carry resolvedAt".to_string());
     }
+    // Tracking writes the ticket id and its human key together; one without
+    // the other is a ledger the CLI must not print as tracked work.
+    if commitment.ticket_id.is_some() != commitment.ticket_key.is_some() {
+        return Err("a tracked commitment carries both ticketId and ticketKey".to_string());
+    }
+    Ok(())
+}
+
+/// Invariants `meeting.commitment_track` must satisfy: the returned
+/// commitment is the tracked one, and the ticket it names has an id, a key
+/// and a column, so the CLI never reports work that cannot be found.
+pub fn check_meeting_commitment_tracked(tracked: &MeetingCommitmentTracked) -> Result<(), String> {
+    check_meeting_commitment(&tracked.commitment)?;
+    if tracked.commitment.ticket_id.as_deref() != Some(tracked.ticket.id.as_str()) {
+        return Err("the commitment does not name the returned ticket".to_string());
+    }
+    if tracked.commitment.ticket_key.as_deref() != Some(tracked.ticket.key.as_str()) {
+        return Err("the commitment does not carry the ticket's key".to_string());
+    }
+    require_nonempty("ticket.id", &tracked.ticket.id)?;
+    require_nonempty("ticket.key", &tracked.ticket.key)?;
+    require_nonempty("ticket.title", &tracked.ticket.title)?;
+    require_nonempty("ticket.columnId", &tracked.ticket.column_id)?;
     Ok(())
 }
 
@@ -1059,6 +1112,13 @@ fn check_meeting_availability(availability: &MeetingAvailability) -> Result<(), 
             "installation must be installed|not-installed|unsupported, got {}",
             availability.installation
         ));
+    }
+    // The path and the state must agree: an installed tool names its bundle,
+    // and a missing one never invents a path to open.
+    if (availability.installation == "installed") != availability.installation_path.is_some() {
+        return Err(
+            "installationPath must be present exactly when installation is installed".to_string(),
+        );
     }
     if !["defaults", "configured", "invalid"].contains(&availability.configuration.as_str()) {
         return Err(format!(

@@ -8,7 +8,7 @@
 // number, so any entry can be checked against the note it came from. Closing
 // one is explicit, and `done` and `dismissed` are different answers on
 // purpose.
-import { Check, FileText, LoaderCircle, X } from "lucide-react";
+import { Check, Copy, FileText, ListTodo, LoaderCircle, X } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -32,19 +32,37 @@ export const MEETINGS_ACTIONS_SEARCH_ID = "meetings-actions-search";
 function CommitmentRow({
   commitment,
   busy,
+  tracking,
   onOpenMeeting,
   onResolve,
+  onTrack,
 }: {
   commitment: MeetingCommitment;
   busy: boolean;
+  tracking: boolean;
   onOpenMeeting: (meetingId: string) => void;
   onResolve: (status: MeetingCommitmentStatus) => void;
+  onTrack: () => void;
 }): React.JSX.Element {
   return (
     <li className="space-y-2 px-4 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="min-w-0 flex-1 text-sm text-foreground">{commitment.text}</p>
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          {commitment.ticketKey ? (
+            <Badge variant="outline" title="Tracked on the Drogon Work board">
+              <ListTodo className="size-3" aria-hidden />
+              {commitment.ticketKey}
+            </Badge>
+          ) : null}
+          {commitment.confidence === "low" ? (
+            <Badge
+              variant="outline"
+              title="The model inferred this; the transcript does not state it directly."
+            >
+              uncertain
+            </Badge>
+          ) : null}
           {commitment.owner ? <Badge variant="outline">{commitment.owner}</Badge> : null}
           <Badge
             variant={
@@ -81,6 +99,22 @@ function CommitmentRow({
           <FileText className="size-3.5" />
           Open transcript
         </Button>
+        {commitment.ticketKey ? null : (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || tracking}
+            title="Create a Drogon Work ticket from this action, with the transcript line it came from"
+            onClick={onTrack}
+          >
+            {tracking ? (
+              <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" />
+            ) : (
+              <ListTodo className="size-3.5" />
+            )}
+            Track as a Drogon task
+          </Button>
+        )}
         {commitment.status !== "done" ? (
           <Button
             size="sm"
@@ -121,11 +155,15 @@ export function MeetingActionsPanel({
   status,
   query,
   busyId,
+  trackingId,
+  trackNotice,
+  trackError,
   onStatusChange,
   onQueryChange,
   onRefresh,
   onOpenMeeting,
   onResolve,
+  onTrack,
 }: {
   page: MeetingCommitmentPage | null;
   loading: boolean;
@@ -133,11 +171,15 @@ export function MeetingActionsPanel({
   status: CommitmentStatusFilter;
   query: string;
   busyId: string | null;
+  trackingId: string | null;
+  trackNotice: string | null;
+  trackError: string | null;
   onStatusChange: (status: CommitmentStatusFilter) => void;
   onQueryChange: (query: string) => void;
   onRefresh: () => void;
   onOpenMeeting: (meetingId: string) => void;
   onResolve: (commitment: MeetingCommitment, status: MeetingCommitmentStatus) => void;
+  onTrack: (commitment: MeetingCommitment) => void;
 }): React.JSX.Element {
   return (
     <section aria-labelledby="meeting-actions-title" className="space-y-3">
@@ -147,8 +189,10 @@ export function MeetingActionsPanel({
             My actions
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Commitments you accepted, with the line each one came from. Kept in Drogon&apos;s
-            own file — the notes themselves are never changed.
+            Commitments you accepted, with the line each one came from. Accepting keeps the
+            ledger; <span className="text-foreground">Track as a Drogon task</span> turns one
+            into a ticket on the Work board, so it can be moved and given to a session. Kept in
+            Drogon&apos;s own file — the notes themselves are never changed.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -199,6 +243,18 @@ export function MeetingActionsPanel({
         </div>
       ) : null}
 
+      {trackNotice !== null ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          {trackNotice}
+        </p>
+      ) : null}
+
+      {trackError !== null ? (
+        <p role="alert" className="text-xs text-destructive">
+          {trackError}
+        </p>
+      ) : null}
+
       {loading && page === null ? (
         <div className="flex items-center gap-2 rounded-lg border border-border px-4 py-3 text-sm text-muted-foreground">
           <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
@@ -214,8 +270,10 @@ export function MeetingActionsPanel({
               key={commitment.id}
               commitment={commitment}
               busy={busyId === commitment.id}
+              tracking={trackingId === commitment.id}
               onOpenMeeting={onOpenMeeting}
               onResolve={(next) => onResolve(commitment, next)}
+              onTrack={() => onTrack(commitment)}
             />
           ))}
         </ul>
@@ -228,7 +286,7 @@ export function MeetingActionsPanel({
           </p>
           <p className="mx-auto mt-1 max-w-lg text-sm leading-6 text-muted-foreground">
             Open a transcript and ask Drogon to suggest actions from it; whatever you accept
-            lands here, with the line it came from.
+            lands here, with the line it came from, ready to become a Drogon task.
           </p>
         </div>
       ) : null}

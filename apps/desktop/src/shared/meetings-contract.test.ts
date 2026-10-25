@@ -15,6 +15,8 @@ import {
   meetingAnalysisSchema,
   meetingCommitmentPageSchema,
   meetingCommitmentSchema,
+  meetingCommitmentTrackSchema,
+  meetingsAvailabilitySchema,
   meetingsPageSchema,
   meetingsReadInputSchema,
   meetingReadSchema,
@@ -28,6 +30,7 @@ const availability = {
   platform: "macos",
   supported: true,
   installation: "installed" as const,
+  installationPath: "/Applications/WriteThatDown.app",
   configuration: "configured" as const,
   configured: true,
   configPath: "/Users/meetings-fixture/Library/Application Support/WriteThatDown/config.json",
@@ -101,6 +104,8 @@ const commitment = {
   source: "suggested" as const,
   confidence: "high" as const,
   status: "open" as const,
+  ticketId: null,
+  ticketKey: null,
   createdAt: "2026-09-11T10:00:00Z",
   updatedAt: "2026-09-11T10:00:00Z",
   resolvedAt: null,
@@ -430,6 +435,75 @@ describe("meetings contract", () => {
     expect(meetingCommitmentPageSchema.safeParse({ ...page, limit: 0 }).success).toBe(false);
   });
 
+  it("pins the tracked-work reply to the same ticket on both halves", () => {
+    const ticket = {
+      id: "ticket-1",
+      key: "DRG-41",
+      title: "Fix the flaky login test",
+      columnId: "column-todo",
+      projectId: null,
+    };
+    const tracked = {
+      commitment: { ...commitment, ticketId: "ticket-1", ticketKey: "DRG-41" },
+      ticket,
+      created: true,
+    };
+    expect(meetingCommitmentTrackSchema.safeParse(tracked).success).toBe(true);
+    // A ledger row that names another ticket than the one returned is a
+    // response the page must never render as tracked work.
+    expect(
+      meetingCommitmentTrackSchema.safeParse({
+        ...tracked,
+        commitment: { ...tracked.commitment, ticketKey: "DRG-42" },
+      }).success,
+    ).toBe(false);
+    expect(
+      meetingCommitmentTrackSchema.safeParse({
+        ...tracked,
+        ticket: { ...ticket, columnId: "" },
+      }).success,
+    ).toBe(false);
+
+    // Tracking is both halves of the link or neither, on every commitment.
+    expect(
+      meetingCommitmentSchema.safeParse({
+        ...commitment,
+        ticketId: "ticket-1",
+        ticketKey: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      meetingCommitmentSchema.safeParse({
+        ...commitment,
+        ticketId: "ticket-1",
+        ticketKey: "DRG-41",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("says where the installed tool is, or that there is none", () => {
+    expect(meetingsAvailabilitySchema.safeParse(availability).success).toBe(true);
+    // An installed tool names the bundle the page opens...
+    expect(
+      meetingsAvailabilitySchema.safeParse({ ...availability, installationPath: null }).success,
+    ).toBe(false);
+    // ...and a missing one never invents a path.
+    expect(
+      meetingsAvailabilitySchema.safeParse({
+        ...availability,
+        installation: "not-installed",
+        installationPath: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      meetingsAvailabilitySchema.safeParse({
+        ...availability,
+        installation: "not-installed",
+        installationPath: "/Applications/WriteThatDown.app",
+      }).success,
+    ).toBe(false);
+  });
+
   it("registers every meetings method in the wire result schemas", () => {
     // The daemon's replies are validated per method on the socket before the
     // bridge ever sees them. A method missing from this table is refused as
@@ -442,6 +516,7 @@ describe("meetings contract", () => {
       "meeting.commitment_list",
       "meeting.commitment_create",
       "meeting.commitment_update",
+      "meeting.commitment_track",
     ] as const;
     for (const method of methods) {
       expect(resultSchemas[method], method).toBeTruthy();
