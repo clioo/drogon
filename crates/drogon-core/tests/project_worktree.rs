@@ -1348,3 +1348,357 @@ fn session_agent_state_is_unknown_before_any_output() {
     assert_eq!(session["agentState"], "unknown");
     assert!(session["agentStateAt"].is_null());
 }
+
+/// Issue #690: `worktree.create` accepts a name carrying a separator, so an
+/// intermediate component is the caller's. If one of them is a symlink,
+/// `git worktree add` writes the whole checkout at the link's target and the
+/// row records the canonicalized outside path -- after which a remove of
+/// that row deletes a directory the user never put under Drogon's control.
+#[test]
+fn worktree_create_refuses_a_name_whose_intermediate_component_is_a_symlink() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+
+    // One ordinary workspace locates the project's root under the data
+    // directory without this test re-deriving the name Drogon gives it.
+    let first = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "first"}),
+    );
+    let workspaces_root = Path::new(first["path"].as_str().unwrap())
+        .parent()
+        .unwrap()
+        .to_path_buf();
+
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), workspaces_root.join("escape")).unwrap();
+
+    let code = err_code(
+        &engine,
+        "worktree.create",
+        "w2",
+        json!({"projectId": project_id, "name": "escape/pwned", "branch": "pwned"}),
+    );
+    assert_eq!(code, "invalid_argument");
+    assert_eq!(
+        std::fs::read_dir(outside.path()).unwrap().count(),
+        0,
+        "the directory the link pointed at gains no child"
+    );
+    assert!(
+        engine
+            .dispatch(req("worktree.list", "l1", json!({"projectId": project_id})))
+            .result
+            .unwrap()["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|w| w["path"]
+                .as_str()
+                .unwrap()
+                .starts_with(workspaces_root.parent().unwrap().to_str().unwrap())
+                || w["path"].as_str().unwrap() == repo.path().to_string_lossy()),
+        "no row records a path outside the workspaces tree"
+    );
+
+    // A nested name under real directories is still ordinary work: it
+    // creates inside the workspaces root and deletes again.
+    let nested = ok(
+        &engine,
+        "worktree.create",
+        "w3",
+        json!({"projectId": project_id, "name": "nested/ok", "branch": "nested-ok"}),
+    );
+    let nested_path = nested["path"].as_str().unwrap().to_string();
+    assert!(Path::new(&nested_path).starts_with(&workspaces_root));
+    ok(
+        &engine,
+        "worktree.remove",
+        "w4",
+        json!({"id": nested["id"], "force": true}),
+    );
+    assert!(!Path::new(&nested_path).exists());
+}
+
+/// Issue #690: the final component of a delete is deliberately never
+/// followed, but every component above it was. Renaming a project's
+/// workspaces root away and dropping a symlink in its place pointed the
+/// forced delete's `remove_dir_all` at a directory outside the data
+/// directory entirely.
+#[test]
+fn worktree_force_remove_refuses_a_workspaces_root_swapped_for_a_symlink() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let worktree = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project["id"], "name": "feature"}),
+    );
+    let recorded = Path::new(worktree["path"].as_str().unwrap()).to_path_buf();
+    let workspaces_root = recorded.parent().unwrap().to_path_buf();
+    let backup = workspaces_root.parent().unwrap().join(format!(
+        "{}.bak",
+        workspaces_root.file_name().unwrap().to_string_lossy()
+    ));
+
+    let victim = tempfile::tempdir().unwrap();
+    std::fs::create_dir(victim.path().join("feature")).unwrap();
+    std::fs::write(
+        victim.path().join("feature").join("secret.txt"),
+        "not Drogon's",
+    )
+    .unwrap();
+
+    std::fs::rename(&workspaces_root, &backup).unwrap();
+    std::os::unix::fs::symlink(victim.path(), &workspaces_root).unwrap();
+
+    let code = err_code(
+        &engine,
+        "worktree.remove",
+        "r1",
+        json!({"id": worktree["id"], "force": true}),
+    );
+    assert_eq!(code, "invalid_argument", "the forced delete refuses");
+    assert!(
+        victim.path().join("feature").join("secret.txt").exists(),
+        "the outside directory the link pointed at is untouched"
+    );
+    assert!(
+        backup.join("feature").join(".git").exists(),
+        "and the real checkout the row was about is untouched too"
+    );
+
+    // Put the real root back and the same forced delete goes through, so
+    // the guard refuses the swap rather than the workspace.
+    std::fs::remove_file(&workspaces_root).unwrap();
+    std::fs::rename(&backup, &workspaces_root).unwrap();
+    ok(
+        &engine,
+        "worktree.remove",
+        "r2",
+        json!({"id": worktree["id"], "force": true}),
+    );
+    assert!(!recorded.exists());
+}
+
+/// Issue #690: `create_dir_all` on the project's root under the data
+/// directory follows a symlinked `workspaces/` or project segment and makes
+/// directories at the link's target. A guard that only runs afterwards has
+/// already let the call write outside the data directory.
+#[test]
+fn worktree_create_writes_nothing_outside_when_the_project_root_is_a_symlink() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let canonical_data = std::fs::canonicalize(data_dir.path()).unwrap();
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_segment = repo.path().file_name().unwrap().to_owned();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(canonical_data.join("workspaces")).unwrap();
+    std::os::unix::fs::symlink(
+        outside.path(),
+        canonical_data.join("workspaces").join(&project_segment),
+    )
+    .unwrap();
+
+    let code = err_code(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project["id"], "name": "first"}),
+    );
+    assert_eq!(code, "invalid_argument");
+    assert_eq!(
+        std::fs::read_dir(outside.path()).unwrap().count(),
+        0,
+        "the refused create left nothing at the link's target"
+    );
+}
+
+/// Issue #690: a recorded path whose parent has been swapped for a link to
+/// a sibling workspace resolves onto a checkout git does know, so the
+/// removal must refuse and that sibling's work must survive. The property
+/// is what this asserts, not which layer enforces it: on git 2.54 the
+/// `git worktree remove` ahead of the guards already refuses this shape
+/// ("does not point back to '.git/worktrees/...'"), and Drogon refuses it
+/// on its own account besides, so the test passes if either holds and
+/// fails only if a sibling's files actually go.
+#[test]
+fn worktree_remove_refuses_a_recorded_path_redirected_at_a_sibling_workspace() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let project_id = project["id"].as_str().unwrap().to_string();
+    // Two workspaces of the same repository, each one directory deep, so
+    // the parent of one can be pointed at the other.
+    let doomed = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project_id, "name": "a/feature", "branch": "a-feature"}),
+    );
+    let bystander = ok(
+        &engine,
+        "worktree.create",
+        "w2",
+        json!({"projectId": project_id, "name": "b/feature", "branch": "b-feature"}),
+    );
+    let doomed_path = Path::new(doomed["path"].as_str().unwrap()).to_path_buf();
+    let bystander_path = Path::new(bystander["path"].as_str().unwrap()).to_path_buf();
+    std::fs::write(bystander_path.join("work.txt"), "uncommitted\n").unwrap();
+
+    let doomed_parent = doomed_path.parent().unwrap().to_path_buf();
+    let bystander_parent = bystander_path.parent().unwrap().to_path_buf();
+    let moved_aside = doomed_parent.with_file_name("a.real");
+    std::fs::rename(&doomed_parent, &moved_aside).unwrap();
+    std::os::unix::fs::symlink(&bystander_parent, &doomed_parent).unwrap();
+
+    let code = err_code(
+        &engine,
+        "worktree.remove",
+        "r1",
+        json!({"id": doomed["id"], "force": true}),
+    );
+    assert_eq!(code, "invalid_argument");
+    assert!(
+        bystander_path.join("work.txt").exists(),
+        "the workspace the link pointed at keeps its uncommitted work"
+    );
+    assert!(
+        moved_aside.join("feature").exists(),
+        "and the checkout the row was really about is untouched"
+    );
+}
+
+/// Issue #690: the guards resolve the parent and deliberately leave the
+/// final component alone, because a symlinked workspace must be unlinked
+/// rather than traversed. `git worktree remove` has no such rule -- it
+/// resolves the whole path -- so a recorded path that is itself a link
+/// aimed git at the link's target, and when that target is a checkout git
+/// registers, git deleted it and exited 0 wherever it lived.
+#[test]
+fn worktree_force_remove_unlinks_a_symlinked_row_without_letting_git_follow_it() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let outside = tempfile::tempdir().unwrap();
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let worktree = ok(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project["id"], "name": "alias"}),
+    );
+    let recorded = Path::new(worktree["path"].as_str().unwrap()).to_path_buf();
+
+    // The checkout is moved out of the workspaces tree and git is told
+    // where it went, so git registers it at its new home. The name stays
+    // the same, which is what lets git resolve the link back to it.
+    let moved = outside.path().join("alias");
+    std::fs::rename(&recorded, &moved).unwrap();
+    git(
+        repo.path(),
+        &["worktree", "repair", moved.to_str().unwrap()],
+    );
+    std::fs::write(moved.join("secret.txt"), "not Drogon's\n").unwrap();
+    std::os::unix::fs::symlink(&moved, &recorded).unwrap();
+
+    let removed = ok(
+        &engine,
+        "worktree.remove",
+        "r1",
+        json!({"id": worktree["id"], "force": true}),
+    );
+    assert_eq!(
+        removed["removed"],
+        json!(true),
+        "the workspace still clears"
+    );
+    assert!(
+        std::fs::symlink_metadata(&recorded).is_err(),
+        "the link itself is unlinked"
+    );
+    assert!(
+        moved.join("secret.txt").exists(),
+        "and the checkout it pointed at, outside the workspaces tree, is untouched"
+    );
+}
+
+/// Issue #690: the project's segment is made one component at a time, so a
+/// symlinked `workspaces/` cannot have directories built at its target.
+/// `create_dir_all` would have made the whole chain there before any guard
+/// looked at the result.
+#[test]
+fn worktree_create_writes_nothing_outside_when_the_workspaces_tree_is_a_symlink() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data_dir.path()).unwrap();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let canonical_data = std::fs::canonicalize(data_dir.path()).unwrap();
+
+    let project = ok(
+        &engine,
+        "project.add",
+        "p1",
+        json!({"path": repo.path().to_string_lossy()}),
+    );
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), canonical_data.join("workspaces")).unwrap();
+
+    let code = err_code(
+        &engine,
+        "worktree.create",
+        "w1",
+        json!({"projectId": project["id"], "name": "first"}),
+    );
+    assert_eq!(code, "invalid_argument");
+    assert_eq!(
+        std::fs::read_dir(outside.path()).unwrap().count(),
+        0,
+        "not even the project's own directory is made at the link's target"
+    );
+}

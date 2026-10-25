@@ -18,6 +18,22 @@ pub(crate) fn register(
 ) -> Result<Value, drogon_protocol::RpcError> {
     let canonical = std::fs::canonicalize(path)
         .map_err(|_| error::invalid_argument("path does not exist or is not readable"))?;
+    register_resolved(conn, host_id, &canonical, name)
+}
+
+/// `register` for a caller that has already resolved the path and checked
+/// where it leads. Resolving the same string a second time here is not a
+/// harmless repetition: the two resolutions can disagree if the tree moves
+/// in between, and then the row records a path the caller never approved --
+/// the check-and-use gap behind issue #690. One resolution, one decision,
+/// one row.
+pub(crate) fn register_resolved(
+    conn: &Connection,
+    host_id: &str,
+    canonical: &Path,
+    name: Option<&str>,
+) -> Result<Value, drogon_protocol::RpcError> {
+    let canonical = canonical.to_path_buf();
     if !canonical.is_dir() {
         return Err(error::invalid_argument("path is not a directory"));
     }

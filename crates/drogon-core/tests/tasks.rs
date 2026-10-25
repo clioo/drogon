@@ -1415,3 +1415,37 @@ fn list_without_an_upstream_remote_keeps_origin_for_auto_and_rejects_the_pin() {
         "an explicit upstream pin must never fall back to origin silently"
     );
 }
+
+/// Issue #690: the PR-worktree directory name is slugified here, but the two
+/// segments above it are not this call's to trust. A symlinked project
+/// segment would put a whole checkout outside the data directory exactly as
+/// `worktree.create`'s did.
+#[cfg(unix)]
+#[test]
+fn pulls_start_refuses_a_workspaces_segment_that_is_a_symlink() {
+    let holder = PrFetchFixture::new(false);
+    let fx = &holder.fx;
+    let data_dir = fs::canonicalize(holder.fx._root.path().join("data")).unwrap();
+    let project_segment = Path::new(&fx.repo).file_name().unwrap().to_owned();
+    let outside = tempfile::tempdir().unwrap();
+    fs::create_dir_all(data_dir.join("workspaces")).unwrap();
+    std::os::unix::fs::symlink(
+        outside.path(),
+        data_dir.join("workspaces").join(&project_segment),
+    )
+    .unwrap();
+
+    assert_eq!(
+        err_code(
+            &fx.engine,
+            "tasks.start",
+            json!({"projectId": fx.project_id, "number": 12, "mode": "pulls"}),
+        ),
+        "invalid_argument"
+    );
+    assert_eq!(
+        fs::read_dir(outside.path()).unwrap().count(),
+        0,
+        "no checkout is written through the link"
+    );
+}

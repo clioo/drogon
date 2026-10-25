@@ -1245,8 +1245,10 @@ impl Engine {
         // names from becoming subdirectories.
         let project_segment = sanitize_worktree_root(project_name);
         let workspaces_root = self.data_dir.join("workspaces").join(project_segment);
-        std::fs::create_dir_all(&workspaces_root)
-            .map_err(|e| error::io_error(format!("cannot create workspaces directory: {e}")))?;
+        // Issue #690: made a component at a time, because `create_dir_all`
+        // follows a symlinked `workspaces/` or project segment and builds
+        // its directories at the link's target.
+        crate::worktree_rpc::create_workspaces_dir(&self.data_dir, &workspaces_root)?;
         let dir_base = format!("pr-{number}-{}", slugify(&head_branch));
         let mut attempt = 0u32;
         let (target_str, canonical_target_str) = loop {
@@ -1261,6 +1263,15 @@ impl Engine {
                 ));
             }
             let target = workspaces_root.join(&dir_name);
+            // Issue #690: the directory name is slugified here, but the two
+            // segments above it are not this call's to trust -- a symlinked
+            // `workspaces/` or project segment would put the checkout
+            // outside the data directory just the same.
+            crate::worktree_rpc::refuse_escape_from_workspaces(
+                &self.data_dir,
+                &target,
+                "to create a workspace at",
+            )?;
             if target.exists() {
                 attempt += 1;
                 continue;
@@ -1283,6 +1294,13 @@ impl Engine {
                     "worktree created but its path could not be resolved: {e}"
                 ))
             })?;
+            // Issue #690: the guard above ran before `git worktree add`, so
+            // where the checkout actually landed is what has to be inside
+            // the workspaces tree.
+            crate::worktree_rpc::refuse_registration_outside_workspaces(
+                &self.data_dir,
+                &canonical,
+            )?;
             let canonical_str = canonical
                 .to_str()
                 .ok_or_else(|| error::invalid_argument("resolved worktree path is not UTF-8"))?
@@ -1302,10 +1320,10 @@ impl Engine {
         // worktree row); that constructor is module-private to worktree_rpc,
         // so the sequence is repeated here rather than widened for one caller.
         let conn = self.db.lock().unwrap();
-        let workspace = crate::workspace::register(
+        let workspace = crate::workspace::register_resolved(
             &conn,
             &self.host_id,
-            &canonical_target_str,
+            Path::new(&canonical_target_str),
             Some(&head_branch),
         )?;
         let workspace_id = workspace["id"]
