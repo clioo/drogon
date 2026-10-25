@@ -22,7 +22,10 @@ use super::filesystem::{DirectoryState, EntryKind, MeetingFileSystem, inspect_di
 /// Write That Down caps a single transcript at 5 MiB; anything larger is
 /// reported as a named failure instead of being read.
 pub const MAX_TRANSCRIPT_BYTES: u64 = 5 * 1024 * 1024;
-/// Newest-first walk budget: enough for ~10 years of daily meetings.
+/// Newest-first walk budget, in date folders. It bounds one walk, not the
+/// corpus: a date window is applied before this budget (see
+/// [`walk_in_range`]), so an old range is still reachable. 1024 distinct days
+/// is under three years of daily use, which is why the window matters.
 pub const MAX_DATE_FOLDERS_SCANNED: usize = 1024;
 /// Hard cap on transcript files examined per list call.
 pub const MAX_TRANSCRIPTS_SCANNED: usize = 5_000;
@@ -422,6 +425,20 @@ pub struct Discovery {
     pub scan_truncated: bool,
 }
 
+/// An inclusive `YYYY-MM-DD` window on date-folder names. Absent sides are
+/// unbounded; the caller has already validated the format.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DateRange<'a> {
+    pub from: Option<&'a str>,
+    pub to: Option<&'a str>,
+}
+
+impl DateRange<'_> {
+    fn contains(&self, folder: &str) -> bool {
+        self.from.is_none_or(|from| folder >= from) && self.to.is_none_or(|to| folder <= to)
+    }
+}
+
 /// Newest-first metadata walk of the notes directory. Date folders are
 /// visited in descending name order (= descending date), so the newest
 /// meetings are always found even when the budget stops the walk. Unrelated
@@ -432,6 +449,30 @@ pub fn walk(
     root: &Path,
     max_folders: usize,
     max_files: usize,
+) -> Walk {
+    walk_in_range(
+        file_system,
+        root,
+        max_folders,
+        max_files,
+        DateRange::default(),
+    )
+}
+
+/// The same walk, restricted to a date window.
+///
+/// The window is applied to the folder list **before** the budget, which is
+/// the whole point: a newest-first walk with a fixed folder budget would spend
+/// it on the newest notes and stop before an old range, so "what did we agree
+/// in March" could never be answered no matter what `--from` said. With the
+/// range applied first, `scan_truncated` means "more folders inside the
+/// requested window than the budget allowed" — the honest answer.
+pub fn walk_in_range(
+    file_system: &dyn MeetingFileSystem,
+    root: &Path,
+    max_folders: usize,
+    max_files: usize,
+    range: DateRange<'_>,
 ) -> Walk {
     let directory_state = inspect_directory(file_system, root);
     if directory_state != DirectoryState::Readable {
@@ -456,6 +497,7 @@ pub fn walk(
         .filter(|entry| entry.kind == EntryKind::Directory)
         .map(|entry| entry.name)
         .filter(|name| is_date_folder_name(name))
+        .filter(|name| range.contains(name))
         .collect();
     date_folders.sort();
     date_folders.reverse();
