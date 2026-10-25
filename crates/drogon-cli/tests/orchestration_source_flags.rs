@@ -221,3 +221,66 @@ fn aliases_follow_the_existing_last_value_wins_contract() {
     };
     assert_eq!(kind, MessageKindArg::Status);
 }
+
+/// `--body` is the greedy tail, so a structured flag written after it used to
+/// land in the message text: a `worker_done` sent with
+/// `--body <report> --result '{"testsPassed":7}'` reported `ok` while sending
+/// no result metadata and appending `--result {...}` to the body. The CLI now
+/// refuses that shape by name instead of dropping it.
+#[test]
+fn a_structured_flag_after_body_is_refused_instead_of_becoming_text() {
+    for flag in [
+        "--result",
+        "--outcome",
+        "--payload",
+        "--thread-id",
+        "--to",
+        "--subject",
+        "--kind",
+    ] {
+        let cli = Cli::try_parse_from([
+            "drogon-cli",
+            "orchestration",
+            "send",
+            "--kind",
+            "worker_done",
+            "--subject",
+            "done",
+            "--outcome",
+            "succeeded",
+            "--body",
+            "report body",
+            flag,
+        ])
+        .expect("the shape parses: --body takes the rest");
+        let error = cli
+            .validate()
+            .expect_err("a swallowed structured flag must be refused");
+        let message = format!("{error}");
+        assert!(
+            message.contains(flag) && message.contains("must precede --body"),
+            "the refusal names the flag and the fix: {message}"
+        );
+    }
+}
+
+#[test]
+fn structured_flags_before_body_still_validate() {
+    let cli = Cli::try_parse_from([
+        "drogon-cli",
+        "orchestration",
+        "send",
+        "--kind",
+        "worker_done",
+        "--subject",
+        "done",
+        "--outcome",
+        "succeeded",
+        "--result",
+        "{\"testsPassed\":7}",
+        "--body",
+        "report body --result stays text here",
+    ])
+    .expect("the supported order parses");
+    cli.validate().expect("the supported order validates");
+}

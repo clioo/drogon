@@ -234,6 +234,20 @@ pub(crate) fn reserve(
             "spawn fields must not contain NUL",
         ));
     }
+    // The caller named this directory and the session must run there. A
+    // workspace can outlive its folder (deleted in Finder, an unmounted
+    // volume, a manual `git worktree remove`), and the PTY crate's own
+    // `CommandBuilder` silently falls back to `$HOME` when a cwd is invalid —
+    // which would run an agent in the owner's home directory under a card
+    // that still says "worktree X". Refuse here, before the pending row is
+    // written, so every launch path (`session.start`, `harness.start`,
+    // worker launches) fails the same honest way.
+    if !std::path::Path::new(cwd).is_dir() {
+        return Err(error::invalid_argument(format!(
+            "session working directory \"{cwd}\" does not exist or is not a directory, \
+             so no session was started there; the workspace may have been removed or unmounted"
+        )));
+    }
     let plan = PreparedSession {
         session_id: uuid::Uuid::new_v4().to_string(),
         incarnation: uuid::Uuid::new_v4().to_string(),

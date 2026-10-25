@@ -872,20 +872,13 @@ fn spawn_child_unix(
         .ok_or_else(|| error::invalid_argument("session command is empty"))?;
     let mut command = std::process::Command::new(program);
     command.args(&argv[1..]);
-    // Mirror the crate's `as_command`: an invalid cwd falls back to $HOME
-    // rather than failing the spawn.
-    let cwd = builder
-        .get_cwd()
-        .filter(|dir| std::path::Path::new(dir).is_dir());
-    match cwd {
-        Some(dir) => {
-            command.current_dir(dir);
-        }
-        None => {
-            if let Some(home) = std::env::var_os("HOME") {
-                command.current_dir(home);
-            }
-        }
+    // Never inherit the pty crate's `"$HOME when the cwd is invalid"`
+    // fallback. Admission already refuses a cwd that is not a directory, but
+    // a folder removed between that check and this spawn must fail the spawn
+    // (ENOENT) instead of silently running the session — an agent, a shell —
+    // in the owner's home directory under a workspace that is gone.
+    if let Some(dir) = builder.get_cwd() {
+        command.current_dir(dir);
     }
     command.env_clear();
     for (key, value) in builder.iter_full_env_as_str() {
@@ -2598,6 +2591,10 @@ mod session_close_tests;
 #[cfg(all(test, unix))]
 #[path = "session_signal_reset_tests.rs"]
 mod session_signal_reset_tests;
+
+#[cfg(all(test, unix))]
+#[path = "session_spawn_cwd_tests.rs"]
+mod session_spawn_cwd_tests;
 
 #[cfg(test)]
 mod agent_session_identity_tests {

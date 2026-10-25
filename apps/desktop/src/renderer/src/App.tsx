@@ -4099,14 +4099,22 @@ export function App() {
     setProjectAction(null);
     return null;
   };
-  const submitRemoveProject = async (project: {
-    id: string;
-  }): Promise<string | null> => {
+  const submitRemoveProject = async (
+    project: {
+      id: string;
+    },
+    force = false,
+  ): Promise<string | null> => {
     const bridge = windowProjectBridge(window.drogon);
     if (typeof bridge.projectRemove !== "function")
       return "Projects unavailable: service does not advertise project.v1";
     try {
-      const result = await bridge.projectRemove({ id: project.id });
+      // `force` stops the project's running terminals first; unforced, the
+      // daemon refuses a removal whose terminals are still live
+      // (`session_live`) instead of stranding them with no workspace.
+      const result = await bridge.projectRemove(
+        force ? { id: project.id, force: true } : { id: project.id },
+      );
       if (!result.ok) return result.error.message;
     } catch {
       return "Could not remove the project. Retry the connection.";
@@ -4977,10 +4985,13 @@ export function App() {
   };
   // Project settings section removal: on success the page closes back to
   // the route the settings page was opened from.
-  const removeProjectFromSettings = (projectId: string) => {
-    void submitRemoveProject({ id: projectId }).then((failure) => {
-      if (!failure) closeSettings();
-    });
+  const removeProjectFromSettings = async (
+    projectId: string,
+    force: boolean,
+  ): Promise<string | null> => {
+    const failure = await submitRemoveProject({ id: projectId }, force);
+    if (!failure) closeSettings();
+    return failure;
   };
   const closeSettings = () => setRoute(settingsReturnRoute);
   // The session-details panel lives in the right sidebar; its visible
